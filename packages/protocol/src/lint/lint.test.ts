@@ -109,6 +109,14 @@ describe('lint', () => {
   });
 
   describe('rule missing_input', () => {
+    it('accepts inputs that a declared dependency will produce (inside its allowed_paths), but not an unrelated sibling\'s', () => {
+      const producer = contract({ id: 't-core', scope: { allowed_paths: ['src/auth/**', 'tests/auth/core.test.ts'] } });
+      const stranger = contract({ id: 't-ui', scope: { allowed_paths: ['public/**'] } });
+      const consumer = contract({ id: 't-api', dependencies: ['t-core'], inputs: ['src/auth/magic-link.ts', 'public/login.html', 'README.md'] });
+      const results = missingInput.check(consumer, ctx({ siblings: [producer, stranger], fileExists: (p) => p === 'README.md' }));
+      expect(results.map((r) => r.field)).toEqual(['inputs/1']);
+    });
+
     it('flags inputs that ctx.fileExists rejects, naming the index', () => {
       const c = contract({ inputs: ['docs/exists.md', 'docs/missing.md'] });
       const results = missingInput.check(c, ctx({ fileExists: (p) => p === 'docs/exists.md' }));
@@ -232,5 +240,20 @@ describe('lint', () => {
       log.add('task_unblocked', {}, { task_id: BACKEND, actor: 'human' });
       expect(runtimeLint(replay(log.events), new Date(since + 60 * 60_000))).toEqual([]);
     });
+  });
+});
+
+describe('globMatches', () => {
+  it('handles ** (any depth), * (one segment) and literal paths', async () => {
+    const { globMatches } = await import('./util.js');
+    expect(globMatches('src/auth/**', 'src/auth/magic-link.ts')).toBe(true);
+    expect(globMatches('src/auth/**', 'src/auth/deep/x.ts')).toBe(true);
+    expect(globMatches('src/auth/**', 'src/app.ts')).toBe(false);
+    expect(globMatches('tests/*.test.ts', 'tests/app.test.ts')).toBe(true);
+    expect(globMatches('tests/*.test.ts', 'tests/auth/app.test.ts')).toBe(false);
+    expect(globMatches('README.md', 'README.md')).toBe(true);
+    expect(globMatches('README.md', 'README.mdx')).toBe(false);
+    expect(globMatches('**/*.ts', 'src/a/b.ts')).toBe(true);
+    expect(globMatches('**/*.ts', 'b.ts')).toBe(true);
   });
 });
