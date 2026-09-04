@@ -412,7 +412,7 @@ describe('integration', () => {
     await r.orchestrator.settled();
     expect(r.ofType('integration_started')[0].payload).toEqual({ branch: 'relay/integration', order: ['t-a', 't-b'] });
     expect(r.worktrees.calls.integrate).toEqual([['relay/t-a', 'relay/t-b']]);
-    expect(r.checks.calls.at(-1)).toEqual({ taskId: 't-integration', attempt: 1 });
+    expect(r.checks.calls.at(-1)).toMatchObject({ taskId: 't-integration', attempt: 1 });
     expect(r.types().at(-1)).toBe('mission_verified');
     expect(r.orchestrator.getMission(mission_id)!.status).toBe('verified');
   });
@@ -457,6 +457,41 @@ describe('subtask (agent networking)', () => {
     // the reducer-derived state carries the link too: the contract is the only place it lives
     expect(r.store.state().tasks['t-a-schema']!.contract.parent_task).toBe('t-a');
     expect(r.orchestrator.getMission(mission_id)!.task_ids).toEqual(['t-a', 't-a-schema']);
+  });
+
+  it('a verified subtask is merged into the parent worktree, the parent is told, and its files count as in-scope for the parent', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    await r.orchestrator.settled();
+    const childId = child().id;
+    r.orchestrator.respond(childId, { ...accept, contract_version: 1 });
+    r.orchestrator.submitEvidence(childId, { contract_version: 1, claimed: claimedAll, summary: 'child done' });
+    await r.orchestrator.settled();
+    expect(r.orchestrator.taskView(childId)!.task_state).toBe('completed');
+    expect(r.worktrees.calls.mergeBranch).toEqual([{ worktreePath: '/tmp/fake/t-a', branch: `relay/${childId}` }]);
+    const told = r.ofType('progress_reported').filter((e) => e.task_id === 't-a' && e.actor === 'relayd');
+    expect(told).toHaveLength(1);
+    expect(told[0]!.payload.message).toContain(childId);
+    // The check runner sees the child's paths as allowed for the parent.
+    r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'parent done' });
+    await r.orchestrator.settled();
+    const seen = r.checks.calls.filter((c) => c.taskId === 't-a').at(-1)!.allowedPaths;
+    for (const p of child().scope.allowed_paths) expect(seen).toContain(p);
+  });
+
+  it('a conflicting subtask merge blocks the parent with the conflicting files', async () => {
+    const r = createTestRelay({ worktrees: { conflict: { branch: `relay/${child().id}`, files: ['src/x.ts'] } } });
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    await r.orchestrator.settled();
+    r.orchestrator.respond(child().id, { ...accept, contract_version: 1 });
+    r.orchestrator.submitEvidence(child().id, { contract_version: 1, claimed: claimedAll, summary: 'child done' });
+    await r.orchestrator.settled();
+    expect(r.orchestrator.taskView('t-a')!.runtime).toBe('blocked');
+    expect(r.orchestrator.taskView('t-a')!.blocker?.reason).toContain('src/x.ts');
   });
 
   it('a subtask whose allowed_paths overlap the parent is rejected with overlapping_scope at error severity before task_proposed', async () => {

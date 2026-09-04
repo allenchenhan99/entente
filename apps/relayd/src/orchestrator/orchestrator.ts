@@ -613,6 +613,43 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   };
 
+  /**
+   * The view the check runner sees: a parent's `diff_scope` must accept the files its completed subtasks
+   * produced (their branches were merged into the parent's worktree), so their allowed_paths are appended.
+   */
+  const viewForChecks = (rec: TaskRecord): TaskView => {
+    const view = toView(rec);
+    const inherited = [...tasks.values()]
+      .filter((t) => current(t).parent_task === rec.id && t.taskState === 'completed')
+      .flatMap((t) => current(t).scope.allowed_paths);
+    if (inherited.length === 0) return view;
+    return { ...view, contract: { ...view.contract, scope: { allowed_paths: [...view.contract.scope.allowed_paths, ...inherited] } } };
+  };
+
+  /**
+   * Agent networking: a verified subtask's branch is merged into its parent's worktree so the parent can
+   * consume the output without knowing git. The parent is told through the timeline (progress_reported by
+   * relayd); a conflict becomes a blocker on the parent.
+   */
+  const landSubtaskInParent = async (child: TaskRecord): Promise<void> => {
+    const parentId = current(child).parent_task;
+    if (!parentId || !child.worktree) return;
+    const parent = tasks.get(parentId);
+    if (!parent?.worktree || parent.taskState === 'completed' || parent.taskState === 'canceled') return;
+    try {
+      const result = await deps.worktrees.mergeBranch(parent.worktree.path, child.worktree.branch);
+      if (result.merged) {
+        emitTask(parent, 'relayd', 'progress_reported', { message: `subtask ${child.id} verified; its branch ${child.worktree.branch} was merged into your worktree` });
+      } else {
+        parent.blocker = { reason: `subtask ${child.id} could not be merged into your worktree: conflicts in ${(result.conflict ?? []).join(', ')}`, waiting_on: 'human', since: clock() };
+        parent.runtimeState = 'blocked';
+        emitTask(parent, 'relayd', 'task_blocked', { reason: parent.blocker.reason, waiting_on: 'human' });
+      }
+    } catch (error) {
+      log(`failed to merge subtask ${child.id} into ${parentId}: ${String(error)}`);
+    }
+  };
+
   // ---------- verification pipeline ----------
   const applyDecision = async (rec: TaskRecord, record: EvidenceRecord, decision: RepairDecision): Promise<void> => {
     const attempt = record.attempt;
@@ -634,6 +671,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           }
         }
         emitTask(rec, 'relayd', 'task_completed', {});
+        await landSubtaskInParent(rec);
         await spawnDependants(rec.id, rec.missionId);
         await maybeIntegrate(rec.missionId);
         return;
@@ -676,7 +714,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const evidenceDir = path.join(deps.relayDir, 'evidence', rec.id);
     let record: EvidenceRecord;
     try {
-      record = await deps.checks.run(toView(rec), submission, rec.worktree!, evidenceDir);
+      record = await deps.checks.run(viewForChecks(rec), submission, rec.worktree!, evidenceDir);
     } catch (err) {
       const reason = `check runner failed: ${(err as Error)?.message ?? String(err)}`;
       rec.escalated = true;

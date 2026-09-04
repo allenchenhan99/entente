@@ -135,6 +135,22 @@ describe('git worktree manager', () => {
     await expect(manager.create(repo, task('t-conflicted-create'), ['relay/conflicting-dependency'])).rejects.toThrow(/merge/);
   });
 
+  it('mergeBranch lands another branch in a worktree and reports conflicts without leaving the merge open', async () => {
+    const repo = createRepo();
+    createBranch(repo, 'relay/t-child', { 'src/child.txt': 'child\n' });
+    createBranch(repo, 'relay/t-conflict', { 'README.md': 'conflicting\n' });
+    const manager = createWorktreeManager();
+    const parent = await manager.create(repo, task('t-parent'), []);
+    fs.appendFileSync(path.join(parent.path, 'README.md'), 'parent change\n');
+    await manager.commitAll(parent.path, 'parent work');
+    expect(await manager.mergeBranch(parent.path, 'relay/t-child')).toEqual({ merged: true });
+    expect(fs.existsSync(path.join(parent.path, 'src', 'child.txt'))).toBe(true);
+    const conflict = await manager.mergeBranch(parent.path, 'relay/t-conflict');
+    expect(conflict.merged).toBe(false);
+    expect(conflict.conflict).toEqual(['README.md']);
+    expect(git(repo, ['-C', parent.path, 'status', '--porcelain']).trim()).toBe('');
+  });
+
   it('commitAll freezes tracked and untracked changes into the task branch so integrate merges them', async () => {
     const repo = createRepo();
     const manager = createWorktreeManager();

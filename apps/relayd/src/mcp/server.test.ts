@@ -260,7 +260,10 @@ describe('mcp subtask (agent networking)', () => {
     const after = r.orchestrator.taskView('t-a')!;
     expect(after.runtime).toBe('working');
     expect(after.last_seen_at).toBe(before.last_seen_at);
-    expect(r.store.all().filter((e) => e.task_id === 't-a').length).toBe(parentEventsBefore);
+    // …except the one note relayd itself adds when it lands the subtask's branch in the parent's worktree.
+    const parentEventsAfter = r.store.all().filter((e) => e.task_id === 't-a');
+    expect(parentEventsAfter.length).toBe(parentEventsBefore + 1);
+    expect(parentEventsAfter.at(-1)).toMatchObject({ actor: 'relayd', type: 'progress_reported' });
     expect(r.types()).not.toContain('tasks_planned');
   });
 });

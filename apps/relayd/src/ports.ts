@@ -32,6 +32,11 @@ export interface WorktreeManager {
    * was verified. Agents do not always commit; integration must never merge less than what was checked.
    */
   commitAll(worktreePath: string, message: string): Promise<{ committed: boolean; sha?: string }>;
+  /**
+   * Merges `branch` into the worktree at `worktreePath` (agent networking: a verified subtask's branch lands in
+   * its parent's worktree). On conflict the merge is aborted and the conflicting files are returned.
+   */
+  mergeBranch(worktreePath: string, branch: string): Promise<{ merged: boolean; conflict?: string[] }>;
 }
 
 export interface CheckRunner {

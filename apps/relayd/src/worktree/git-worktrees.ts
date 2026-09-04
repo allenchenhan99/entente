@@ -125,6 +125,14 @@ export class GitWorktreeManager implements WorktreeManager {
     }
   }
 
+  async mergeBranch(worktreePath: string, branch: string): Promise<{ merged: boolean; conflict?: string[] }> {
+    const merge = await this.git(['-c', 'user.name=relayd', '-c', 'user.email=relayd@localhost', 'merge', '--no-edit', branch], worktreePath, [0, 1]);
+    if (merge.exitCode === 0) return { merged: true };
+    const unresolved = await this.git(['diff', '--name-only', '--diff-filter=U', '-z'], worktreePath);
+    await this.ignoreGitFailure(['merge', '--abort'], worktreePath);
+    return { merged: false, conflict: nulSeparated(unresolved.stdout).sort() };
+  }
+
   async commitAll(worktreePath: string, message: string): Promise<{ committed: boolean; sha?: string }> {
     await this.git(['add', '-A'], worktreePath);
     const status = await this.git(['status', '--porcelain'], worktreePath);
