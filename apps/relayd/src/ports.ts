@@ -70,7 +70,7 @@ export interface SpawnOptions {
 }
 
 export interface TerminalHost {
-  readonly kind: 'tmux' | 'herdr' | 'relay';
+  readonly kind: 'tmux' | 'herdr' | 'relay' | 'relayterm';
   spawn(opts: SpawnOptions): Promise<{ paneId: string }>;
   focus(paneId: string): Promise<void>;
   isAlive(paneId: string): Promise<boolean>;
