@@ -58,15 +58,26 @@ describe('graph with subtasks', () => {
   const childAccepted = log([mission, ...propose(parent), ...accept(parent), ...propose(sibling), ...propose(child), ...accept(child)]);
   const childVerified = log([mission, ...propose(parent), ...accept(parent), ...propose(sibling), ...propose(child), ...accept(child), ...verify(child)]);
 
-  it('draws the subtask contract edge from the parent agent, labelled (sub) once accepted', () => {
+  it('the delegation edge shows the await_task outcome from the parent: waiting, then merged', () => {
     const early = buildGraph(replay(proposedOnly));
-    expect(early.edges.find((e) => e.id === `contract:${CHILD}`)).toMatchObject({ kind: 'contract', from: PARENT, to: CHILD, task_id: CHILD, label: 'v1', status: 'pending', version: 1 });
+    expect(early.edges.find((e) => e.id === `contract:${CHILD}`)).toMatchObject({ kind: 'contract', from: PARENT, to: CHILD, task_id: CHILD, label: 'sub v1', status: 'pending', version: 1 });
     expect(early.edges.find((e) => e.id === `contract:${PARENT}`)).toMatchObject({ from: 'planner', to: PARENT, label: 'v1 ✓' });
     const g = buildGraph(replay(childAccepted));
-    expect(g.edges.find((e) => e.id === `contract:${CHILD}`)).toMatchObject({ from: PARENT, to: CHILD, label: 'v1 ✓ (sub)', status: 'done', attention: false });
+    expect(g.edges.find((e) => e.id === `contract:${CHILD}`)).toMatchObject({ from: PARENT, to: CHILD, label: 'sub ⏳ v1', status: 'working', attention: false });
     const done = buildGraph(replay(childVerified));
-    expect(done.edges.find((e) => e.id === `contract:${CHILD}`)).toMatchObject({ from: PARENT, label: 'v1 ✓ (sub)', status: 'verified' });
+    expect(done.edges.find((e) => e.id === `contract:${CHILD}`)).toMatchObject({ from: PARENT, label: 'sub ✓ merged', status: 'verified', attention: false });
     expect(done.edges.find((e) => e.id === `evidence:${CHILD}`)).toMatchObject({ from: CHILD, to: 'verifier', label: '✓' });
+  });
+
+  it('the delegation edge demands attention when the merge conflicted or the subtask failed / was canceled', () => {
+    const conflictLog = log([mission, ...propose(parent), ...accept(parent), ...propose(sibling), ...propose(child), ...accept(child), ...verify(child),
+      ['relayd', 'task_blocked', PARENT, { reason: `subtask ${CHILD} could not be merged into your worktree: conflicts in src/x.ts`, waiting_on: 'human' }]]);
+    const conflict = buildGraph(replay(conflictLog));
+    expect(conflict.edges.find((e) => e.id === `contract:${CHILD}`)).toMatchObject({ label: 'sub ✗ conflict', status: 'attention', attention: true });
+
+    const canceledLog = log([mission, ...propose(parent), ...accept(parent), ...propose(child), ...accept(child), ['human', 'task_canceled', CHILD, { reason: 'out of scope' }]]);
+    const canceled = buildGraph(replay(canceledLog));
+    expect(canceled.edges.find((e) => e.id === `contract:${CHILD}`)).toMatchObject({ label: 'sub ✗ canceled', status: 'failed', attention: true });
   });
 
   it('places the subtask in the agent column right after its parent, ahead of later siblings', () => {

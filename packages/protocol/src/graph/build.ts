@@ -83,7 +83,32 @@ function senderNode(task: TaskView, tasks: TaskView[]): string {
   return byRole ? byRole.id : PLANNER;
 }
 
-function contractEdge(task: TaskView, from: string): GraphEdge {
+/**
+ * What the delegating parent sees on its edge to a subtask — the `relay_await_task` outcome made visible:
+ * waiting (child still working), merged (child verified and landed in the parent's worktree), conflict
+ * (relayd could not merge; the parent is blocked), failed / canceled (the parent must decide what to do).
+ */
+function delegationLabel(child: TaskView, parent: TaskView | undefined): { label: string; status: VisualStatus; attention: boolean } | undefined {
+  const v = child.contract.version;
+  const conflict = parent?.blocker?.reason.includes(`subtask ${child.id} could not be merged`) ?? false;
+  switch (child.task_state) {
+    case 'completed':
+      return conflict ? { label: `sub ✗ conflict`, status: 'attention', attention: true } : { label: `sub ✓ merged`, status: 'verified', attention: false };
+    case 'failed':
+      return { label: 'sub ✗ failed', status: 'failed', attention: true };
+    case 'canceled':
+      return { label: 'sub ✗ canceled', status: 'failed', attention: true };
+    case 'accepted':
+    case 'executing':
+    case 'awaiting_verification':
+    case 'repairing':
+      return { label: `sub ⏳ v${v}`, status: 'working', attention: false };
+    default:
+      return undefined; // proposed / needs_clarification / lint-blocked: the generic contract labels apply, prefixed below
+  }
+}
+
+function contractEdge(task: TaskView, from: string, parent?: TaskView): GraphEdge {
   const v = task.contract.version;
   const isSubtask = task.contract.parent_task !== undefined && from === task.contract.parent_task;
   let label = `v${v}`;
@@ -121,8 +146,12 @@ function contractEdge(task: TaskView, from: string): GraphEdge {
       break;
   }
   if (task.task_state === 'canceled' || task.task_state === 'failed') status = 'failed';
-  // A delegation edge (parent agent → subtask) reads `v1 ✓ (sub)` once the child has accepted.
-  if (isSubtask && label === `v${v} ✓`) label = `${label} (sub)`;
+  if (isSubtask) {
+    // A delegation edge (parent agent → subtask) shows the await_task outcome from the parent's point of view.
+    const d = delegationLabel(task, parent);
+    if (d) ({ label, status, attention } = d);
+    else label = `sub ${label}`;
+  }
   return { id: `contract:${task.id}`, kind: 'contract', from, to: task.id, task_id: task.id, label, status, attention, version: v };
 }
 
@@ -354,7 +383,7 @@ export function buildGraph(state: State): Graph {
 
   const edges: GraphEdge[] = [];
   for (const task of tasks) {
-    edges.push(contractEdge(task, senderNode(task, tasks)));
+    edges.push(contractEdge(task, senderNode(task, tasks), task.contract.parent_task ? tasks.find((t) => t.id === task.contract.parent_task) : undefined));
     const ev = evidenceEdge(task);
     if (ev) edges.push(ev);
     edges.push(...dependencyEdges(task, nodesById));
