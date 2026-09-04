@@ -72,4 +72,13 @@ describe('timeline', () => {
     expect(formatTimelineEvent(events[0]!)).toBe('10:01  planner  contract_revised  t-backend-auth  → v2');
     expect(eventHint(events[0]!)).toBe('→ v2');
   });
+
+  it('windows events around an older selected timeline row', () => {
+    const { lastFrame } = render(<Timeline events={events} height={2} selectedIndex={0} />);
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('10:01');
+    expect(frame).toContain('10:02');
+    expect(frame).not.toContain('10:03');
+  });
 });

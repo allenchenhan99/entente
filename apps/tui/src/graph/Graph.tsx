@@ -49,9 +49,11 @@ export function renderGraph(graph: ObjectGraph, options: RenderGraphOptions): st
     const visual = statusVisual(node.status, options.tick);
     const badge = node.badge ? ` ${node.badge}` : '';
     const identity = node.label === node.id ? node.id : `${node.id} (${node.label})`;
+    const y = visibleRow(layout.nodeRows[node.id]!);
+    if (y <= 0) continue;
     canvas.text(
       layout.columns[node.column],
-      visibleRow(layout.nodeRows[node.id]!),
+      y,
       `${visual.glyph} ${identity}${badge}`,
       statusStyle(node.status, options.tick, selected),
     );
@@ -60,9 +62,11 @@ export function renderGraph(graph: ObjectGraph, options: RenderGraphOptions): st
   for (const edge of graph.edges) {
     const selected = isSelected(options.selected, 'edge', edge.id);
     const visual = statusVisual(edge.status, options.tick);
+    const y = visibleRow(layout.edgeRows[edge.id]!);
+    if (y <= 0) continue;
     canvas.text(
       0,
-      visibleRow(layout.edgeRows[edge.id]!),
+      y,
       `[${edge.id}] ${edge.from} ${visual.line} ${edge.label} ▶ ${edge.to}`,
       statusStyle(edge.status, options.tick, selected),
     );

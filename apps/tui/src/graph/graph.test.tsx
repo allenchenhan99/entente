@@ -74,5 +74,6 @@ describe('graph objects', () => {
 
     expect(stripAnsi(rendered)).toContain('edge-extra-5');
     expect(rendered).toContain('\u001b[1;7;');
+    expect(stripAnsi(rendered).split('\n')[0]).toContain('HUMAN / PLANNER');
   });
 });

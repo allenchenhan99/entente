@@ -49,7 +49,14 @@ export function Timeline({ events, height, selectedIndex }: TimelineProps) {
   const sorted = [...events]
     .sort((left, right) => left.seq - right.seq)
     .map((event, index) => ({ event, index }));
-  const visible = sorted.slice(-Math.max(0, height));
+  const windowSize = Math.max(0, height);
+  const selected = selectedIndex === undefined
+    ? sorted.length - 1
+    : Math.max(0, Math.min(sorted.length - 1, selectedIndex));
+  const start = selected < windowSize
+    ? 0
+    : Math.min(selected - windowSize + 1, Math.max(0, sorted.length - windowSize));
+  const visible = sorted.slice(start, start + windowSize);
   if (visible.length === 0) return <Text dimColor>&lt;no events&gt;</Text>;
   return (
     <Box flexDirection="column">
