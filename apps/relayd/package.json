@@ -1,0 +1,19 @@
+{
+  "name": "@relay/relayd",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": { "relayd": "./dist/index.js" },
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run --root ../.. apps/relayd"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@relay/protocol": "*",
+    "execa": "^10.0.0",
+    "hono": "^4.13.0",
+    "zod": "^4.5.0"
+  }
+}
