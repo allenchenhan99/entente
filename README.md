@@ -62,6 +62,14 @@ entente down --repo ~/entente-demo/app
 `--host tmux` for an external terminal host, `--port N` for another port, and `--dir <relayDir>` to move
 `relayd.log`, `relayd.pid`, and `session.token`. Pass `--no-spawn` to require an already-running daemon.
 
+Terminal hosts (`RELAY_HOST` for a hand-started `relayd`):
+
+| host | what runs the agent terminals |
+| --- | --- |
+| `relay` (default) | relayd itself (node-pty); `/panes*`, `/pty/:id`, `/metrics` served in-process |
+| `relayterm` | the Rust `termd` (`cargo build -p termd`, or `RELAY_TERMD=<binary>`); relayd spawns it and proxies the same routes to it |
+| `herdr` / `tmux` | an external terminal host; no pane routes |
+
 No agents, daemon, or API keys? Replay a recorded run directly:
 
 ```bash
