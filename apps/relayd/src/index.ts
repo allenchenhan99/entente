@@ -146,7 +146,7 @@ export async function main(env: Record<string, string | undefined> = process.env
     const known = [...(readWorkspace(dir)?.panes ?? []), ...panesFromEvents(store.all(), config.relayDir)];
     const host = ports.host as unknown as { next?: number };
     const next = nextRelayPaneNumber(known.map((p) => p.pane_id));
-    if (typeof host.next === 'number' && host.next < next) host.next = next;
+    if (typeof (host as { setNextPane?: (n: number) => void }).setNextPane === 'function') (host as { setNextPane: (n: number) => void }).setNextPane(next);
   }
 
   // Bind first so an ephemeral port (RELAY_PORT=0) is known before the orchestrator needs the MCP URL.

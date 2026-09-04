@@ -33,6 +33,8 @@ export interface RelayHostDeps {
   runId: string;
   clock?: () => string;
   timings?: Partial<PromptTimings>;
+  /** First pane number to hand out (daemon restart: one past the run's highest recorded `relay:<n>`). */
+  firstPane?: number;
 }
 
 export interface RelaySpawnOptions extends SpawnOptions {
@@ -63,15 +65,21 @@ export class RelayHost {
   readonly kind = 'relay' as const;
   focusedPane: string | undefined;
   private readonly panes = new Map<string, Pane>();
-  private next = 1;
+  private next: number;
   private readonly castDir: string;
   private readonly clock: () => string;
   private readonly timings: PromptTimings;
 
   constructor(deps: RelayHostDeps) {
+    this.next = deps.firstPane ?? 1;
     this.castDir = path.join(deps.relayDir, 'runs', deps.runId, 'casts');
     this.clock = deps.clock ?? (() => new Date().toISOString());
     this.timings = { ...DEFAULT_PROMPT_TIMINGS, ...deps.timings };
+  }
+
+  /** Daemon restart: continue numbering after the run's highest recorded pane so casts are never overwritten. */
+  setNextPane(n: number): void {
+    if (n > this.next) this.next = n;
   }
 
   get(paneId: string): Pane | undefined {
