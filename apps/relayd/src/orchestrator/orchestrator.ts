@@ -268,6 +268,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return t;
   };
   const current = (rec: TaskRecord): TaskContract => rec.versions[rec.versions.length - 1];
+  /** Responses and evidence must target the version the recipient actually read; one wording for both. */
+  const versionMismatch = (rec: TaskRecord, given: number): string | undefined =>
+    given === current(rec).version ? undefined : `contract_version v${given} is not the current contract of ${rec.id} (v${current(rec).version}); call relay_get_contract and respond to the current version`;
   const agentActor = (rec: TaskRecord) => `agent:${current(rec).recipient}` as const;
 
   const depsUnmet = (rec: TaskRecord): string[] =>
@@ -555,7 +558,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     touch(rec);
     const contract = current(rec);
     const errors: string[] = [];
-    if (input.contract_version !== contract.version) errors.push(`contract_version ${input.contract_version} is not the current version ${contract.version}`);
+    const stale = versionMismatch(rec, input.contract_version);
+    if (stale) errors.push(stale);
     if (rec.taskState === 'canceled') errors.push('task is canceled');
     if (rec.handoffState !== 'proposed') errors.push(`contract v${contract.version} already has a response (${rec.handoffState})`);
     if (input.decision === 'accepted' && !rec.worktree) errors.push('task has no worktree yet (not spawned)');
@@ -754,11 +758,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   const submitEvidence: Orchestrator['submitEvidence'] = (taskId, input) => {
     const rec = mustTask(taskId);
-    touch(rec);
+    // Guards come before `touch` so a refused submission changes nothing: no heartbeat, no unblock event.
+    const stale = versionMismatch(rec, input.contract_version);
+    if (stale) throw conflict(stale);
     if (rec.taskState === 'canceled' || rec.taskState === 'completed' || rec.taskState === 'failed') {
       throw conflict(`task ${taskId} is ${rec.taskState}`);
     }
     if (!rec.worktree) throw conflict(`task ${taskId} has no worktree (not spawned)`);
+    touch(rec);
     const attempt = rec.attempt + 1;
     rec.attempt = attempt;
     const submission: EvidenceSubmission = { task_id: taskId, contract_version: input.contract_version, attempt, claimed: input.claimed, summary: input.summary };

@@ -634,3 +634,31 @@ describe('accept guard', () => {
     expect(r.orchestrator.respond('t-a', { ...accept, decision: 'rejected', reason: 'out of scope' })).toEqual({ status: 'rejected' });
   });
 });
+
+describe('evidence version guard', () => {
+  it('evidence for v1 against a v2 contract is a 409 naming both versions, before any mutation; the current version proceeds', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    await r.orchestrator.reviseTask('t-a', { goal: 'Implement t-a, carefully' }, 'planner');
+    expect(r.orchestrator.respond('t-a', { ...accept, contract_version: 2 }).status).toBe('work_started');
+    const before = r.types();
+    expect(() => r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'stale' }))
+      .toThrow(expect.objectContaining({ status: 409, message: expect.stringMatching(/\bv1\b.*\bv2\b|\bv2\b.*\bv1\b/) }));
+    expect(r.types()).toEqual(before);
+    expect(r.types()).not.toContain('evidence_submitted');
+    expect(r.orchestrator.taskView('t-a')).toMatchObject({ attempt: 0, task_state: 'executing', handoff_state: 'accepted' });
+    expect(r.orchestrator.submitEvidence('t-a', { contract_version: 2, claimed: claimedAll, summary: 'fresh' })).toEqual({ attempt: 1, checks_started: true });
+    await r.orchestrator.settled();
+    expect(r.orchestrator.taskView('t-a')!.task_state).toBe('completed');
+  });
+
+  it('respond reports a stale contract_version with the same wording as submitEvidence', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    await r.orchestrator.reviseTask('t-a', { goal: 'Implement t-a, carefully' }, 'planner');
+    const out = r.orchestrator.respond('t-a', { ...accept, contract_version: 1 });
+    expect(out.status).toBe('invalid');
+    if (out.status !== 'invalid') throw new Error();
+    expect(out.errors[0]).toMatch(/contract_version v1 .*current contract .*v2/);
+  });
+});
