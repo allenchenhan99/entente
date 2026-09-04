@@ -13,6 +13,7 @@ export interface JsonlStoreOptions {
   dir: string;
   /** Returns an ISO-8601 timestamp. Defaults to `new Date().toISOString()`. */
   clock?: () => string;
+  log?: (message: string) => void;
 }
 
 export interface JsonlStore extends EventStore {
@@ -27,10 +28,26 @@ export function createJsonlStore(opts: JsonlStoreOptions): JsonlStore {
   const events: Event[] = [];
   if (!fs.existsSync(file)) fs.writeFileSync(file, '');
   else {
-    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-      if (!line.trim()) continue;
-      events.push(Event.parse(JSON.parse(line)));
-    }
+    const text = fs.readFileSync(file, 'utf8');
+    const lines = text.split('\n');
+    let consumed = 0;
+    lines.forEach((line, i) => {
+      if (!line.trim()) {
+        consumed += line.length + 1;
+        return;
+      }
+      try {
+        events.push(Event.parse(JSON.parse(line)));
+        consumed += line.length + 1;
+      } catch (err) {
+        // A partial LAST line is what a crash mid-append leaves behind: drop it so the run can be reopened
+        // (daemon restart). Anything unreadable before the tail is real corruption and must not be masked.
+        const isTail = lines.slice(i + 1).every((l) => !l.trim());
+        if (!isTail) throw new Error(`${file}:${i + 1}: unreadable event: ${(err as Error).message}`);
+        opts.log?.(`${file}: dropping partial trailing line (${line.length} bytes) left by an interrupted append`);
+        fs.truncateSync(file, Buffer.byteLength(text.slice(0, consumed), 'utf8'));
+      }
+    });
   }
   let lastSeq = events.length ? events[events.length - 1].seq : 0;
 

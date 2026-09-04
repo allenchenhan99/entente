@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentRuntime, LaunchSpec } from '../../ports.js';
 import { bootstrapPrompt } from '../prompts.js';
+import { RESUME_PROMPT } from '../../persist/restore.js';
 
 export const CLAUDE_ALLOWED_TOOLS = [
   'mcp__relay__*',
@@ -123,7 +124,8 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     await this.writeJsonAtomic(this.claudeJson, root);
   }
 
-  async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
+  /** Writes `<configDir>/mcp.json` (bearer token for relayd) and pre-trusts the worktree; returns the mcp.json path. */
+  private async writeConfig(spec: LaunchSpec, configDir: string): Promise<string> {
     await this.requireBypassAccepted();
     await fs.mkdir(configDir, { recursive: true });
     await this.trustFolder(spec.cwd);
@@ -134,10 +136,11 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       },
     };
     await fs.writeFile(mcpPath, JSON.stringify(mcpConfig, null, 2) + '\n', { mode: 0o600 });
+    return mcpPath;
+  }
 
-    const argv = [
-      this.executable,
-      '--session-id', spec.sessionId,
+  private commonArgv(mcpPath: string): string[] {
+    return [
       '--mcp-config', mcpPath,
       // Unattended agents cannot answer permission dialogs (any `ls`/`cat`/`mkdir` outside the allowlist, or a
       // read through the node_modules symlink, would block forever). Isolation comes from the git worktree and
@@ -145,6 +148,22 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       '--dangerously-skip-permissions',
       '--allowedTools', CLAUDE_ALLOWED_TOOLS.join(','),
     ];
+  }
+
+  async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
+    const mcpPath = await this.writeConfig(spec, configDir);
+    const argv = [this.executable, '--session-id', spec.sessionId, ...this.commonArgv(mcpPath)];
     return { argv, env: {}, prompt: bootstrapPrompt(spec) };
+  }
+
+  /**
+   * Daemon restart: same config files (the token was re-issued, so mcp.json must be rewritten) and
+   * `claude --resume <sessionId>` — the id we chose with `--session-id` at first launch. No positional
+   * prompt: the host delivers the resume prompt once the composer is ready.
+   */
+  async resume(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
+    const mcpPath = await this.writeConfig(spec, configDir);
+    const argv = [this.executable, '--resume', spec.sessionId, ...this.commonArgv(mcpPath)];
+    return { argv, env: {}, prompt: RESUME_PROMPT };
   }
 }

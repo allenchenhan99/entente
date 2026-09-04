@@ -9,10 +9,10 @@ import path from 'node:path';
 import type { z } from 'zod';
 import {
   TaskContract, Mission, ProposeTaskOutput, RespondOutput, AwaitContractOutput, AwaitVerdictOutput,
-  SubmitEvidenceOutput, GetContractOutput, AwaitTaskOutput, AWAIT_TIMEOUT_MAX_S, hasLintErrors,
+  SubmitEvidenceOutput, GetContractOutput, AwaitTaskOutput, AWAIT_TIMEOUT_MAX_S, hasLintErrors, replay,
 } from '@relay/protocol';
 import type {
-  TaskContractInput, ContractResponse, Clarification, EvidenceSubmission, EvidenceRecord, RepairContract,
+  Event, TaskContractInput, ContractResponse, Clarification, EvidenceSubmission, EvidenceRecord, RepairContract,
   Question, LintResult, RuntimeKind, TaskView, TaskState, HandoffState, RuntimeState, MissionStatus,
   CreateMissionBody, ReviewBody, EventInput, EventType,
   RespondInput, SubmitEvidenceInput, ReportProgressInput, ReportBlockerInput,
@@ -126,6 +126,20 @@ export interface Orchestrator {
   submitEvidence(taskId: string, input: SubmitEvidenceInputT): SubmitEvidenceOutput;
   awaitVerdict(taskId: string, attempt: number, timeoutS: number, signal?: AbortSignal): Promise<AwaitVerdictOutput>;
 
+  /**
+   * Daemon restart: rebuilds missions/tasks from a run's event log (`replay` + a detail walk for what the
+   * derived state does not carry: worktree base, submissions, verdicts, pending human review, repair
+   * acknowledgement). Tokens are never persisted, so every task and planner gets a fresh one. Emits nothing.
+   * Requires an empty orchestrator.
+   */
+  rehydrate(events: Event[]): { missions: number; tasks: number };
+  /**
+   * Daemon restart: reopens the agent of `taskId` (or `planner:<mission>`) in a fresh pane that resumes its
+   * recorded session via `runtime.resume`. Emits `agent_exited` (reason `daemon restart`) for the old pane and
+   * `agent_spawned` for the new one; a failed resume is recorded as `task_blocked` and rethrown.
+   */
+  respawn(taskId: string, opts?: { prompt?: string }): Promise<{ pane_id: string }>;
+
   issueToken(subject: string): string;
   resolveToken(token: string): TokenSubject | undefined;
   tokenFor(taskId: string): string | undefined;
@@ -140,6 +154,8 @@ interface MissionRecord {
   taskIds: string[];
   plannerToken: string;
   plannerPaneId?: string;
+  /** Last planner launch, kept for `respawn('planner:<mission>')`. */
+  plannerAgent?: { runtime: RuntimeKind; sessionId: string; cwd: string; paneId: string };
   integrationStarted: boolean;
   openQuestions: Question[];
   clarifications: Clarification[];
@@ -186,6 +202,12 @@ const hex = (bytes: number) => randomBytes(bytes).toString('hex');
 export const INTEGRATION_BRANCH = 'relay/integration';
 /** Synthetic criterion for the mission-level integration check (`CriterionId` requires `AC-<n>`). */
 export const INTEGRATION_CRITERION = 'AC-0';
+/** Workspace/respawn id of a mission's planner pane (`respawn('planner:<mission>')`). */
+export const plannerTaskId = (missionId: string): string => `planner:${missionId}`;
+export const isPlannerTaskId = (id: string): boolean => id.startsWith('planner:');
+/** Per-agent config directory (`mcp.json`, `CODEX_HOME`); planners use `agents/planner-<mission>`. */
+export const agentConfigDir = (relayDir: string, taskId: string): string =>
+  path.join(relayDir, 'agents', isPlannerTaskId(taskId) ? `planner-${taskId.slice('planner:'.length)}` : taskId);
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const clock = deps.clock ?? (() => new Date().toISOString());
@@ -334,7 +356,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       rec.sessionId = sessionId;
       const runtime = deps.runtimes[contract.runtime];
       if (!runtime) throw new Error(`no runtime registered for ${contract.runtime}`);
-      const configDir = path.join(deps.relayDir, 'agents', taskId);
+      const configDir = agentConfigDir(deps.relayDir, taskId);
       const launch = await runtime.prepare(
         { taskId, token, mcpUrl: deps.mcpUrl, sessionId, cwd: worktree.path, role: 'recipient', contractSummary: contract.goal },
         configDir,
@@ -846,20 +868,175 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const rt = deps.runtimes[runtime];
     if (!rt) throw new RelayError(400, `no runtime registered for ${runtime}`);
     const sessionId = randomUUID();
-    const configDir = path.join(deps.relayDir, 'agents', `planner-${missionId}`);
-    const summary = [
-      m.mission.title,
-      m.mission.success_definition ? `Success definition: ${m.mission.success_definition}` : '',
-      `Repository: ${deps.repoRoot}`,
-    ].filter(Boolean).join('\n');
+    const configDir = agentConfigDir(deps.relayDir, plannerTaskId(missionId));
     const launch = await rt.prepare(
-      { taskId: `planner-${missionId}`, token: m.plannerToken, mcpUrl: deps.mcpUrl, sessionId, cwd: deps.repoRoot, role: 'planner', contractSummary: summary },
+      { taskId: `planner-${missionId}`, token: m.plannerToken, mcpUrl: deps.mcpUrl, sessionId, cwd: deps.repoRoot, role: 'planner', contractSummary: plannerSummary(m) },
       configDir,
     );
     const { paneId } = await deps.host.spawn({ name: 'planner', cwd: deps.repoRoot, argv: launch.argv, env: launch.env, prompt: launch.prompt });
     m.plannerPaneId = paneId;
+    m.plannerAgent = { runtime, sessionId, cwd: deps.repoRoot, paneId };
     emit({ mission_id: missionId, actor: 'relayd', type: 'agent_spawned', payload: { runtime, pane_id: paneId, session_id: sessionId, cwd: deps.repoRoot } });
     return { pane_id: paneId };
+  };
+
+  const plannerSummary = (m: MissionRecord): string => [
+    m.mission.title,
+    m.mission.success_definition ? `Success definition: ${m.mission.success_definition}` : '',
+    `Repository: ${deps.repoRoot}`,
+  ].filter(Boolean).join('\n');
+
+  // ---------- daemon restart ----------
+  const TERMINAL: ReadonlySet<TaskState> = new Set(['completed', 'canceled', 'failed']);
+
+  const rehydrate: Orchestrator['rehydrate'] = (events) => {
+    if (missions.size > 0 || tasks.size > 0) throw conflict('rehydrate requires an empty orchestrator');
+    const state = replay(events);
+    for (const [id, mv] of Object.entries(state.missions)) {
+      const status: MissionStatus = mv.status === 'planning' && mv.task_ids.length > 0 ? 'executing' : mv.status;
+      missions.set(id, {
+        mission: mv.mission, status, taskIds: [...mv.task_ids], plannerToken: issueToken(`mission:${id}`),
+        integrationStarted: mv.integration !== undefined || status === 'integrating' || status === 'verified' || status === 'failed',
+        openQuestions: [...(mv.open_questions ?? [])], clarifications: [...(mv.clarifications ?? [])],
+      });
+    }
+    for (const [id, v] of Object.entries(state.tasks)) {
+      const replies = [...(v.replies ?? [])];
+      tasks.set(id, {
+        id, missionId: v.mission_id, versions: [...v.versions], lint: [...v.lint], response: v.response, openQuestions: [...v.open_questions],
+        taskState: v.task_state, handoffState: v.handoff_state, runtimeState: v.runtime,
+        spawned: v.agent !== undefined, spawning: false, token: issueToken(id),
+        paneId: v.agent?.pane_id, sessionId: v.agent?.session_id, blocker: v.blocker,
+        replies,
+        // Replies sent while the current blocker is open were possibly never read (the agent may have been
+        // mid-await_reply); re-delivering one is cheaper than losing it. Everything older counts as read.
+        repliesRead: v.blocker ? replies.filter((r) => r.at < v.blocker!.since).length : replies.length,
+        attempt: v.attempt, attempts: v.attempts.map((a) => ({ ...a, checks: { ...a.checks }, self_report_mismatch: [...a.self_report_mismatch] })),
+        submissions: [], verdicts: new Map(), repairs: [...v.repairs], activeRepair: v.active_repair, repairAckPending: false, escalated: v.escalated,
+        proposedAt: v.proposed_at, acceptedAt: v.accepted_at, startedAt: v.started_at, lastSeenAt: v.last_seen_at, completedAt: v.completed_at,
+      });
+    }
+    // Detail walk: what the derived state does not carry.
+    for (const ev of events) {
+      if (ev.type === 'agent_spawned' && ev.task_id === undefined) {
+        const m = missions.get(ev.mission_id);
+        if (m) {
+          m.plannerPaneId = ev.payload.pane_id;
+          m.plannerAgent = { runtime: ev.payload.runtime, sessionId: ev.payload.session_id, cwd: ev.payload.cwd, paneId: ev.payload.pane_id };
+        }
+        continue;
+      }
+      if (ev.type === 'agent_exited' && ev.task_id === undefined) {
+        const m = missions.get(ev.mission_id);
+        if (m?.plannerPaneId === ev.payload.pane_id) m.plannerPaneId = undefined;
+        continue;
+      }
+      const rec = ev.task_id !== undefined ? tasks.get(ev.task_id) : undefined;
+      if (!rec) continue;
+      switch (ev.type) {
+        case 'worktree_created':
+          rec.worktree = { path: ev.payload.path, branch: ev.payload.branch, base: ev.payload.base };
+          break;
+        case 'evidence_submitted':
+          rec.submissions.push(ev.payload.submission);
+          rec.repairAckPending = false;
+          rec.pendingRecord = undefined;
+          break;
+        case 'evidence_recorded': {
+          const record = rec.attempts.find((a) => a.attempt === ev.payload.record.attempt);
+          if (record && Object.values(record.checks).some((c) => c.status === 'pending_human')) rec.pendingRecord = record;
+          break;
+        }
+        case 'human_review_recorded': {
+          const record = rec.attempts.find((a) => a.attempt === ev.payload.attempt);
+          if (!record) break;
+          record.checks[ev.payload.criterion_id] = { status: ev.payload.status, observed: ev.payload.observed_failure };
+          const submission = rec.submissions.find((sub) => sub.attempt === record.attempt);
+          if (ev.payload.status === 'failed' && submission?.claimed[ev.payload.criterion_id]?.status === 'passed' && !record.self_report_mismatch.includes(ev.payload.criterion_id)) {
+            record.self_report_mismatch.push(ev.payload.criterion_id);
+          }
+          break;
+        }
+        case 'task_verified':
+          rec.verdicts.set(ev.payload.attempt, { status: 'verified' });
+          rec.pendingRecord = undefined;
+          break;
+        case 'repair_requested':
+          rec.verdicts.set(ev.payload.repair.attempt - 1, { status: 'repair', repair: ev.payload.repair });
+          rec.repairAckPending = true;
+          rec.pendingRecord = undefined;
+          break;
+        case 'repair_accepted':
+          rec.repairAckPending = false;
+          break;
+        case 'task_escalated':
+          rec.verdicts.set(rec.submissions.at(-1)?.attempt ?? rec.attempt, { status: 'escalated', reason: ev.payload.reason });
+          rec.pendingRecord = undefined;
+          break;
+        case 'task_failed_budget':
+          rec.verdicts.set(ev.payload.attempts, { status: 'failed_budget', reason: ev.payload.reason });
+          rec.pendingRecord = undefined;
+          break;
+        case 'task_canceled':
+          rec.pendingRecord = undefined;
+          break;
+        default:
+          break;
+      }
+    }
+    return { missions: missions.size, tasks: tasks.size };
+  };
+
+  const respawnPlanner = async (missionId: string, prompt: string | undefined): Promise<{ pane_id: string }> => {
+    const m = mustMission(missionId);
+    const agent = m.plannerAgent;
+    if (!agent) throw conflict(`mission ${missionId} has no planner session to resume`);
+    const rt = deps.runtimes[agent.runtime];
+    if (!rt?.resume) throw new Error(`runtime ${agent.runtime} cannot resume sessions`);
+    emit({ mission_id: missionId, actor: 'relayd', type: 'agent_exited', payload: { pane_id: agent.paneId, exit_reason: 'daemon restart' } });
+    m.plannerPaneId = undefined;
+    const launch = await rt.resume(
+      { taskId: `planner-${missionId}`, token: m.plannerToken, mcpUrl: deps.mcpUrl, sessionId: agent.sessionId, cwd: agent.cwd, role: 'planner', contractSummary: plannerSummary(m) },
+      agentConfigDir(deps.relayDir, plannerTaskId(missionId)),
+    );
+    const { paneId } = await deps.host.spawn({ name: 'planner', cwd: agent.cwd, argv: launch.argv, env: launch.env, prompt: prompt ?? launch.prompt });
+    m.plannerPaneId = paneId;
+    agent.paneId = paneId;
+    emit({ mission_id: missionId, actor: 'relayd', type: 'agent_spawned', payload: { runtime: agent.runtime, pane_id: paneId, session_id: agent.sessionId, cwd: agent.cwd } });
+    return { pane_id: paneId };
+  };
+
+  const respawn: Orchestrator['respawn'] = async (taskId, opts = {}) => {
+    if (isPlannerTaskId(taskId)) return respawnPlanner(taskId.slice('planner:'.length), opts.prompt);
+    const rec = mustTask(taskId);
+    if (TERMINAL.has(rec.taskState)) throw conflict(`task ${taskId} is ${rec.taskState}; nothing to resume`);
+    if (!rec.sessionId || !rec.paneId || !rec.worktree) throw conflict(`task ${taskId} has no agent session to resume`);
+    const contract = current(rec);
+    const runtime = deps.runtimes[contract.runtime];
+    if (!runtime?.resume) throw new Error(`runtime ${contract.runtime} cannot resume sessions`);
+    // The old pane died with the previous daemon; say so before trying to bring the agent back.
+    emitTask(rec, 'relayd', 'agent_exited', { pane_id: rec.paneId, exit_reason: 'daemon restart' });
+    rec.runtimeState = 'exited';
+    try {
+      const token = rec.token ?? issueToken(taskId);
+      rec.token = token;
+      const launch = await runtime.resume(
+        { taskId, token, mcpUrl: deps.mcpUrl, sessionId: rec.sessionId, cwd: rec.worktree.path, role: 'recipient', contractSummary: contract.goal },
+        agentConfigDir(deps.relayDir, taskId),
+      );
+      const { paneId } = await deps.host.spawn({ name: contract.recipient, cwd: rec.worktree.path, argv: launch.argv, env: launch.env, prompt: opts.prompt ?? launch.prompt });
+      rec.paneId = paneId;
+      rec.spawned = true;
+      rec.runtimeState = 'idle';
+      emitTask(rec, 'relayd', 'agent_spawned', { runtime: contract.runtime, pane_id: paneId, session_id: rec.sessionId, cwd: rec.worktree.path });
+      return { pane_id: paneId };
+    } catch (error) {
+      const reason = `resume failed: ${error instanceof Error ? error.message : String(error)}`;
+      rec.blocker = { reason, since: clock() };
+      rec.runtimeState = 'blocked';
+      emitTask(rec, 'relayd', 'task_blocked', { reason });
+      throw error;
+    }
   };
 
   const askHuman: Orchestrator['askHuman'] = (missionId, questions) => {
@@ -919,6 +1096,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     },
     proposeTask, proposeSubtask, awaitTask, reviseTask, clarify, review, cancel,
     getContract, respond, awaitContract, reportProgress, reportBlocker, reply, awaitReply, submitEvidence, awaitVerdict,
+    rehydrate, respawn,
     issueToken,
     resolveToken: (token) => tokens.get(token),
     tokenFor: (taskId) => tasks.get(taskId)?.token,
