@@ -224,3 +224,26 @@ describe('GET /story', () => {
     expect(lines).toHaveLength(38);
   });
 });
+
+describe('graph auth', () => {
+  const bearer = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
+  const endpoints = ['/graph', `${routes.graphObject('node', 't-backend-auth')}/describe`, `${routes.graphObject('edge', 'contract:t-backend-auth')}/story`, `${routes.graphObject('node', 'planner')}/actions`, '/story'];
+
+  it('RELAY_AUTH=required: 401 without the session token, 200 with it (same as /state)', async () => {
+    const { app, auth } = setup('events-live-1.jsonl', { auth: 'required' });
+    for (const url of endpoints) {
+      const missing = await app.request(url);
+      expect(missing.status, url).toBe(401);
+      expect(await missing.json()).toEqual({ error: expect.stringContaining('missing session token') });
+      expect((await app.request(url, bearer('f'.repeat(32)))).status, url).toBe(401);
+      expect((await app.request(url, bearer(auth!.token))).status, url).toBe(200);
+    }
+    expect((await app.request('/state')).status).toBe(401);
+  });
+
+  it('RELAY_AUTH=optional: the graph endpoints are open, like /state', async () => {
+    const { app } = setup('events-live-1.jsonl', { auth: 'optional' });
+    for (const url of endpoints) expect((await app.request(url)).status, url).toBe(200);
+    expect((await app.request('/state')).status).toBe(200);
+  });
+});

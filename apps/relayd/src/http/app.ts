@@ -57,7 +57,7 @@ export function createApp(opts: AppOptions): Hono {
   const app = new Hono();
   if (opts.auth) app.use('*', sessionGuard(opts.auth));
   mountRuns(app, { store });
-  mountGraph(app, { store });
+  mountGraph(app, { store, auth: opts.auth });
 
   app.onError((err, c) => {
     if (err instanceof RelayError) return c.json({ error: err.message }, err.status as 400);
