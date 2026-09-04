@@ -1,6 +1,6 @@
 # cli-explain evidence
 
-Branch: `wp/cli-explain`  
+Branch: `wp/cli-explain`
 Base: `b0c4d2e`
 
 The conservative implementation keeps the existing `relay replay` command unchanged, injects the frozen `GraphApi` through `CliIo`, and shares one source loader across `inbox`, `explain`, and `story`. Live mode always reads `GET /state` and `GET /events/log?since=0`; explainability replay mode validates the JSONL as protocol events and derives state with `replay` from `@relay/protocol` without fetching.
