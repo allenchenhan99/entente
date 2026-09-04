@@ -41,6 +41,89 @@ function fakeGraphApi(overrides: Partial<GraphApi> = {}): GraphApi {
   };
 }
 
+const paneInfo = (overrides: Record<string, unknown> = {}) => ({
+  pane_id: 'relay:7',
+  task_id: 't-backend',
+  role: 'backend',
+  runtime: 'codex',
+  cwd: '/work/backend',
+  pid: 4242,
+  alive: true,
+  cols: 120,
+  rows: 40,
+  cast_path: '/run/casts/relay-7.cast',
+  started_at: '2026-09-04T08:00:00.000Z',
+  exited_at: '2026-09-04T09:00:00.000Z',
+  exit_code: 0,
+  ...overrides,
+});
+
+describe('relay pane list', () => {
+  it('renders a table with two validated panes and marks the focused pane', async () => {
+    const panes = [
+      paneInfo({ focused: true }),
+      paneInfo({
+        pane_id: 'relay:8',
+        task_id: undefined,
+        role: 'planner',
+        runtime: 'claude-code',
+        cwd: '/work',
+        pid: 4343,
+        alive: false,
+        cols: 80,
+        rows: 24,
+        cast_path: undefined,
+        exited_at: undefined,
+        exit_code: undefined,
+      }),
+    ];
+    const { fetch, requests } = fakeFetch(() => panes);
+    const io = capture();
+
+    expect(await run(['pane', 'list', '--port', '7500'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests).toEqual([{ url: 'http://127.0.0.1:7500/panes', method: 'GET', body: undefined }]);
+    expect(io.out).toEqual([
+      '  pane_id  role     task_id    alive  cols×rows  cwd',
+      '* relay:7  backend  t-backend  true   120×40     /work/backend',
+      '  relay:8  planner  -          false  80×24      /work',
+    ]);
+  });
+
+  it('fails clearly when a pane does not match PaneInfo', async () => {
+    const { fetch } = fakeFetch(() => [paneInfo({ cols: 0 })]);
+    const io = capture();
+
+    expect(await run(['pane', 'list'], { ...io, fetch, env: {} })).toBe(1);
+    expect(io.err.join('\n')).toContain('response does not match PaneInfo[]');
+    expect(io.err.join('\n')).toContain('cols');
+  });
+});
+
+describe('relay pane get', () => {
+  it('prints every PaneInfo field as key/value lines', async () => {
+    const { fetch, requests } = fakeFetch(() => paneInfo());
+    const io = capture();
+
+    expect(await run(['pane', 'get', 'relay:7'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toMatchObject({ url: 'http://127.0.0.1:7420/panes/relay:7', method: 'GET' });
+    expect(io.out).toEqual([
+      'pane_id: relay:7',
+      'task_id: t-backend',
+      'role: backend',
+      'runtime: codex',
+      'cwd: /work/backend',
+      'pid: 4242',
+      'alive: true',
+      'cols: 120',
+      'rows: 40',
+      'cast_path: /run/casts/relay-7.cast',
+      'started_at: 2026-09-04T08:00:00.000Z',
+      'exited_at: 2026-09-04T09:00:00.000Z',
+      'exit_code: 0',
+    ]);
+  });
+});
+
 describe('relay inbox', () => {
   it('prints one block per item with the exact command to act', async () => {
     const graph: Graph = {

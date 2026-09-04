@@ -22,6 +22,7 @@ import {
   DEFAULT_PORT,
   Event as EventSchema,
   LoadPlanBody,
+  PaneInfo,
   actionsFor,
   buildGraph,
   describe,
@@ -29,6 +30,7 @@ import {
   replay as replayEvents,
   routes,
   storyFor,
+  ptyRoutes,
 } from '@relay/protocol';
 import type {
   CancelBody,
@@ -39,6 +41,7 @@ import type {
   GraphApi,
   GraphObjectRef,
   InboxItem,
+  PaneInfo as PaneInfoType,
   ReviewBody,
   State,
 } from '@relay/protocol';
@@ -65,6 +68,8 @@ export const USAGE = `usage:
   relay inbox [--replay file.jsonl] [--port N]
   relay explain <object> [--replay file.jsonl] [--port N]
   relay story [--replay file.jsonl] [--task <task-id>] [--port N]
+  relay pane list [--port N]
+  relay pane get <id> [--port N]
 
 Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).`;
 
@@ -93,6 +98,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
       case 'inbox': return await inbox(rest, full);
       case 'explain': return await explain(rest, full);
       case 'story': return await story(rest, full);
+      case 'pane': return await pane(rest, full);
       case '-h': case '--help': case 'help':
         full.stdout(USAGE);
         return 0;
@@ -110,6 +116,53 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
 }
 
 // ---------------------------------------------------------------- commands
+
+async function pane(args: string[], io: CliIo): Promise<number> {
+  const [verb, ...rest] = args;
+  switch (verb) {
+    case 'list': return paneList(rest, io);
+    case 'get': return paneGet(rest, io);
+    default: throw new UsageError(verb ? `unknown pane command: ${verb}` : 'relay pane needs a command');
+  }
+}
+
+async function paneList(args: string[], io: CliIo): Promise<number> {
+  const { values } = parseKnown(args, { port: { type: 'string' } });
+  const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.panes);
+  if (!Array.isArray(raw)) throw new CommandError('GET /panes response does not match PaneInfo[]: expected an array');
+  const panes = raw.map((item, index) => ({
+    ...validateResponse(PaneInfo, item, `PaneInfo[] at index ${index}`),
+    focused: isFocusedPane(item, index),
+  }));
+  const headings = ['pane_id', 'role', 'task_id', 'alive', 'cols×rows', 'cwd'];
+  const rows = panes.map((item) => [
+    item.pane_id,
+    item.role,
+    item.task_id ?? '-',
+    String(item.alive),
+    `${item.cols}×${item.rows}`,
+    item.cwd,
+  ]);
+  const widths = headings.map((heading, index) => Math.max(heading.length, ...rows.map((row) => row[index]!.length)));
+  const renderRow = (row: string[]) => row.map((cell, index) => cell.padEnd(widths[index]!)).join('  ').trimEnd();
+  io.stdout(`  ${renderRow(headings)}`);
+  panes.forEach((item, index) => io.stdout(`${item.focused ? '* ' : '  '}${renderRow(rows[index]!)}`));
+  return 0;
+}
+
+async function paneGet(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane get needs a pane id');
+  const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.pane(paneId));
+  const info = validateResponse(PaneInfo, raw, 'PaneInfo');
+  const fields: ReadonlyArray<keyof PaneInfoType> = [
+    'pane_id', 'task_id', 'role', 'runtime', 'cwd', 'pid', 'alive', 'cols', 'rows',
+    'cast_path', 'started_at', 'exited_at', 'exit_code',
+  ];
+  for (const field of fields) io.stdout(`${field}: ${info[field] ?? '-'}`);
+  return 0;
+}
 
 async function up(args: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parseKnown(args, {
@@ -433,6 +486,27 @@ function hasGraphRefSyntax(ref: string): boolean {
     || ref === 'verifier'
     || /^t-/.test(ref)
     || /^(contract|evidence):t-/.test(ref);
+}
+
+type ResponseSchema<T> = {
+  safeParse(value: unknown):
+    | { success: true; data: T }
+    | { success: false; error: { toString(): string } };
+};
+
+function validateResponse<T>(schema: ResponseSchema<T>, value: unknown, label: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new CommandError(`response does not match ${label}: ${parsed.error.toString()}`);
+  return parsed.data;
+}
+
+function isFocusedPane(value: unknown, index: number): boolean {
+  if (typeof value !== 'object' || value === null || !('focused' in value)) return false;
+  const focused = (value as { focused?: unknown }).focused;
+  if (typeof focused !== 'boolean') {
+    throw new CommandError(`response does not match PaneInfo[] at index ${index}: focused must be a boolean`);
+  }
+  return focused;
 }
 
 class Client {
