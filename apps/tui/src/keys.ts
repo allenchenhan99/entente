@@ -1,6 +1,6 @@
 import type { Graph, GraphObjectRef, ObjectAction, State } from '@relay/protocol';
 import { useInput } from 'ink';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   postCancel,
@@ -57,6 +57,12 @@ export function useAppKeys(options: AppKeyOptions): AppKeyState {
   const [error, setError] = useState<string>();
   const inputRef = useRef('');
   const actionRef = useRef<ObjectAction | undefined>(undefined);
+
+  useEffect(() => {
+    if (!options.initialOverlayOpen) return;
+    setOverlayTab('Story');
+    setOverlayOpen(true);
+  }, [options.initialOverlayOpen]);
 
   const resetInput = () => {
     inputRef.current = '';

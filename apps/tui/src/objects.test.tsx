@@ -1,5 +1,6 @@
-import { ClarifyBody, ReplyBody } from '@relay/protocol';
+import { ClarifyBody, ReplyBody, initialState } from '@relay/protocol';
 import { render } from 'ink-testing-library';
+import React, { useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { midClarificationState } from './__fixtures__/states.js';
@@ -125,6 +126,43 @@ describe('object story', () => {
     expect(frame).toContain(title);
     expect(frame).toContain(`id: ${ref.id}`);
     expect(frame.indexOf(`id: ${ref.id}`)).toBeLessThan(frame.indexOf(`Story begins for ${ref.id}.`));
+  });
+
+  it('opens --select Story after a replay graph becomes available', async () => {
+    const api = objectGraphApi();
+    const deferredApi = {
+      ...api,
+      buildGraph: (state: typeof midClarificationState) => state.last_seq === 0
+        ? { nodes: [], edges: [], inbox: [] }
+        : api.buildGraph(state),
+    };
+    function DeferredReplay() {
+      const [state, setState] = useState(initialState());
+      useEffect(() => setState(midClarificationState), []);
+      return (
+        <DependenciesProvider graphApi={deferredApi} execute={vi.fn()}>
+          <App
+            state={state}
+            events={[]}
+            mode="replay"
+            url="http://relay.test"
+            focusCmd="none"
+            width={100}
+            height={41}
+            initialSelectedRef={{ kind: 'node', id: 'planner' }}
+            inspectSelected
+          />
+        </DependenciesProvider>
+      );
+    }
+
+    const view = render(<DeferredReplay />);
+    const deadline = Date.now() + 1_000;
+    while (!view.lastFrame()?.includes('planner  [Story]') && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    expect(view.lastFrame()).toContain('planner  [Story]');
+    expect(view.lastFrame()).toContain('Mission planner');
   });
 });
 
