@@ -733,6 +733,43 @@ RelayGraph 是 **coding-agent teams 的 semantic coordination and verification l
 | 2026-09-04 | AC 必須綁 `check`，否則 lint error | 讓 done 有機器意義 |
 | 2026-09-04 | Repair 走同一 agent session | 保留 context，省 token |
 | 2026-09-04 | Demo repo 為自備 Node + vitest app | evidence 來源清楚 |
+| 2026-09-04 | Phase 2 自建 agent-based terminal（Relay Terminal），tmux/Herdr 降為外部 host | 版面要由物件圖驅動並可客製；產品要有自己的畫面 |
+| 2026-09-04 | Planner 對 mission 級歧義先問人；人可回覆 agent 的 blocker | 執行前決策應由人做；blocker 需有回覆通道 |
+
+---
+
+## 23. Phase 2：Relay Terminal（自建 agent-based terminal）
+
+MVP 證明了協定與驗證層；Phase 2 把「畫面」也收進產品：一個由 RelayGraph 物件圖驅動的終端機，tmux 與 Herdr 降為相容的外部 host。
+
+### 23.1 為什麼要自建
+
+tmux、cmux、Herdr 都是「先有終端機、再猜 agent 在幹嘛」；RelayGraph 是「先知道 agent 在幹嘛（契約、狀態、問題、證據都由 agent 透過 MCP 自己宣告）」。由這份知識驅動的 host 可以做到它們做不到的事：pane 依圖擺放、契約畫在 pane 之間、人的動作放在需要它的 pane 旁邊、錄製與回放在同一個視窗、版面是資料可客製。這也是「Agent Networking」在畫面上的樣子。
+
+### 23.2 架構
+
+- relayd 新增第三種 `TerminalHost`：`relay`（node-pty），每個 pane 一條 WebSocket（`/pty/:pane`），錄成 asciinema v2 cast。
+- `apps/web`：React 加 xterm.js，由 relayd 在 `/app` 提供；版面由 `LayoutPreset`（資料）決定；inspector、inbox、timeline 全部用第 12 節以外新增的 **graph object model**（`packages/protocol/src/graph/`）渲染。
+- TUI 保留為純終端機客戶端；Herdr、tmux host 保留。
+
+凍結介面：`packages/protocol/src/pty.ts`（PaneInfo、PtyClientMessage、PtyServerMessage、LayoutPreset、ptyRoutes）、`packages/protocol/src/graph/types.ts`、`apps/relayd/src/ports.ts`。
+
+### 23.3 工作包
+
+| 工作包 | 負責 | 內容 | 估時 |
+|---|---|---|---|
+| WP-T1 `pty-host` | Engine | node-pty host、WebSocket、scrollback、cast 錄製、`/panes` API | 約 4 小時 |
+| WP-T2 `web-terminal` | UI | `apps/web`：圖驅動 pane 格、xterm.js、inspector、inbox、timeline、replay | 約 1.5 天 |
+| 整合 | 兩人 | demo 全程在 Relay Terminal 內完成並錄製回放 | 半天 |
+| WP-T3（選配） | UI | Tauri 桌面包裝，relayd 作 sidecar | 約 3 小時 |
+
+完整契約（allowed_paths、AC 與 check）在 `docs/relay-terminal-plan.md`。
+
+### 23.4 完成定義
+
+- PRD §14 的 demo 全程在 Relay Terminal 內完成，不需 tmux、Herdr 或另開 CLI。
+- 錄製的 run 能在同一視窗回放，pane 輸出與事件對齊。
+- 第二個版面 preset（例如 review 模式）不改程式碼即可載入。
 
 ---
 

@@ -113,6 +113,26 @@ budget: { max_repairs: 2, stagnation_limit: 2 }
 A contract without a `check` on every criterion, without `allowed_paths`, or without a budget is a lint
 **error** and the agent is never spawned. See PRD §11 for all rules.
 
+## Explain what happened
+
+Every agent, contract and human decision is an object with a story:
+
+```bash
+npx tsx apps/cli/src/index.ts inbox   --replay fixtures/events-live-4.jsonl   # what needs a human right now
+npx tsx apps/cli/src/index.ts explain planner --replay fixtures/events-live-4.jsonl
+npx tsx apps/cli/src/index.ts explain contract:t-auth-routes --replay fixtures/events-live-4.jsonl
+npx tsx apps/cli/src/index.ts story   --replay fixtures/events-live-4.jsonl --task t-login-page
+```
+
+The same object model (`packages/protocol/src/graph/`) drives the TUI's inspector and inbox.
+
+## Roadmap · Phase 2: Relay Terminal
+
+The next step is our own agent-based terminal: relayd hosts the PTYs, and a browser app arranges panes by the
+graph, draws contracts between them, and puts answer / review / reply next to the pane that needs it.
+Interfaces are frozen in `packages/protocol/src/pty.ts`; the two work packages (PTY host, web app) are
+specified as Task Contracts in [`docs/relay-terminal-plan.md`](docs/relay-terminal-plan.md) — pick one up there.
+
 ## Repository layout and contributing
 
 - `packages/protocol/src/{contract,events,state,api,mcp}.ts` are the integration contract; changes there need a
