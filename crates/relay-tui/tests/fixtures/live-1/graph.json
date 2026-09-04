@@ -1,0 +1,84 @@
+{
+  "nodes": [
+    {
+      "id": "human",
+      "kind": "human",
+      "label": "human",
+      "column": 0,
+      "status": "pending"
+    },
+    {
+      "id": "planner",
+      "kind": "planner",
+      "label": "planner",
+      "column": 0,
+      "status": "done"
+    },
+    {
+      "id": "t-backend-auth",
+      "kind": "agent",
+      "label": "backend",
+      "task_id": "t-backend-auth",
+      "runtime": "exited",
+      "task_state": "completed",
+      "handoff_state": "verified",
+      "column": 1,
+      "status": "verified",
+      "badge": "a2"
+    },
+    {
+      "id": "t-frontend-login",
+      "kind": "agent",
+      "label": "frontend",
+      "task_id": "t-frontend-login",
+      "runtime": "exited",
+      "task_state": "canceled",
+      "handoff_state": "proposed",
+      "column": 1,
+      "status": "failed"
+    },
+    {
+      "id": "verifier",
+      "kind": "verifier",
+      "label": "verifier",
+      "column": 2,
+      "status": "pending"
+    }
+  ],
+  "edges": [
+    {
+      "id": "contract:t-backend-auth",
+      "kind": "contract",
+      "from": "human",
+      "to": "t-backend-auth",
+      "task_id": "t-backend-auth",
+      "label": "v1 ✓",
+      "status": "verified",
+      "attention": false,
+      "version": 1
+    },
+    {
+      "id": "contract:t-frontend-login",
+      "kind": "contract",
+      "from": "human",
+      "to": "t-frontend-login",
+      "task_id": "t-frontend-login",
+      "label": "v1",
+      "status": "failed",
+      "attention": false,
+      "version": 1
+    },
+    {
+      "id": "evidence:t-backend-auth",
+      "kind": "evidence",
+      "from": "t-backend-auth",
+      "to": "verifier",
+      "task_id": "t-backend-auth",
+      "label": "✓",
+      "status": "verified",
+      "attention": false
+    }
+  ],
+  "inbox": [],
+  "seq": 43
+}

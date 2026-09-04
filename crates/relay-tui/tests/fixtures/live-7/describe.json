@@ -1,0 +1,88 @@
+{
+  "node:human": {
+    "title": "you",
+    "lines": [
+      "0 open inbox items"
+    ]
+  },
+  "node:planner": {
+    "title": "planner",
+    "lines": [
+      "mission m-8e8b53: Add secure login to this application. (verified)",
+      "2 tasks planned"
+    ]
+  },
+  "node:t-backend-auth": {
+    "title": "backend · t-backend-auth",
+    "lines": [
+      "role: backend (claude-code, pane relay:3)",
+      "runtime: exited · task: completed · handoff: verified",
+      "worktree: /Users/allenchenhan99/entente-demo/app/.relay/wt/t-backend-auth (relay/t-backend-auth)",
+      "attempt: 2 · repairs: 1",
+      "subtasks: t-token-store"
+    ]
+  },
+  "node:t-token-store": {
+    "title": "token-dev · t-token-store",
+    "lines": [
+      "role: token-dev (codex, pane relay:2)",
+      "runtime: exited · task: completed · handoff: verified",
+      "worktree: /Users/allenchenhan99/entente-demo/app/.relay/wt/t-token-store (relay/t-token-store)",
+      "attempt: 1",
+      "parent: t-backend-auth"
+    ]
+  },
+  "node:verifier": {
+    "title": "verifier",
+    "lines": [
+      "8 criteria, 8 machine-checked, 1 mismatch",
+      "1 repair, 2 tasks verified"
+    ]
+  },
+  "edge:contract:t-backend-auth": {
+    "title": "t-backend-auth v1 (verified)",
+    "lines": [
+      "Implement passwordless email magic-link login endpoints (POST /auth/request, POST /auth/verify, POST /auth/logout, GET /me) reusing the existing UserRepo, SessionStore and EmailSender",
+      "scope: src/auth/routes.ts, src/auth/session-cookie.ts, src/app.ts, tests/auth/routes.test.ts",
+      "non-goals: OAuth, passwords, account recovery, frontend",
+      "AC-1 ✓ command: npx vitest run tests/auth/routes.test.ts",
+      "AC-2 ✓ command: npx vitest run",
+      "AC-3 ✓ diff_scope",
+      "versions: v1"
+    ]
+  },
+  "edge:contract:t-token-store": {
+    "title": "t-token-store v1 (verified)",
+    "lines": [
+      "Implement a single-use, expiring magic-link token store in src/auth/token-store.ts that stores only SHA-256 hashes of tokens, with Vitest coverage in tests/auth/token-store.test.ts",
+      "scope: src/auth/token-store.ts, tests/auth/token-store.test.ts",
+      "non-goals: HTTP routes, cookies, sessions, email sending, user lookup, persistence beyond process memory, Editing any file outside src/auth/token-store.ts and tests/auth/token-store.test.ts",
+      "AC-1 ✓ command: npx vitest run tests/auth/token-store.test.ts",
+      "AC-2 ✓ command: npx tsc --noEmit",
+      "AC-3 ✓ command: grep -q \"sha256\" src/auth/token-store.ts && grep -q \"export const MAGIC_LINK_TTL_MS\" src/auth/token-store.ts && grep -q \"export const hashToken\" src/auth/token-store.ts && grep -q \"export class TokenStore\" src/auth/token-store.ts && grep -q \"consume(\" src/auth/token-store.ts && grep -q \"create(\" src/auth/token-store.ts",
+      "AC-4 ✓ command: npx vitest run",
+      "AC-5 ✓ diff_scope",
+      "versions: v1"
+    ]
+  },
+  "edge:evidence:t-backend-auth": {
+    "title": "t-backend-auth evidence #2 (verified)",
+    "lines": [
+      "attempt 1: 2 passed, 1 failed (self-report mismatch on AC-3)",
+      "attempt 2: 3 passed",
+      "repair r1: AC-3 — AC-3: files outside allowed_paths: src/auth/token-store.ts, tests/auth/token-store.test.ts"
+    ]
+  },
+  "edge:evidence:t-token-store": {
+    "title": "t-token-store evidence #1 (verified)",
+    "lines": [
+      "attempt 1: 5 passed"
+    ]
+  },
+  "edge:reply:t-backend-auth": {
+    "title": "you → backend (1 reply)",
+    "lines": [
+      "20:59 you: You were right: that was a relayd bug. It is fixed and relayd was restarted (your session was resumed). The subtask's files now count as in-scope for your diff. Call relay_get_contract, then resubmit…"
+    ]
+  }
+}

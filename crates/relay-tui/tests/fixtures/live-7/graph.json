@@ -1,0 +1,105 @@
+{
+  "nodes": [
+    {
+      "id": "human",
+      "kind": "human",
+      "label": "human",
+      "column": 0,
+      "status": "pending"
+    },
+    {
+      "id": "planner",
+      "kind": "planner",
+      "label": "planner",
+      "column": 0,
+      "status": "verified"
+    },
+    {
+      "id": "t-backend-auth",
+      "kind": "agent",
+      "label": "backend",
+      "task_id": "t-backend-auth",
+      "runtime": "exited",
+      "task_state": "completed",
+      "handoff_state": "verified",
+      "column": 1,
+      "status": "verified",
+      "badge": "a2"
+    },
+    {
+      "id": "t-token-store",
+      "kind": "agent",
+      "label": "token-dev",
+      "task_id": "t-token-store",
+      "runtime": "exited",
+      "task_state": "completed",
+      "handoff_state": "verified",
+      "column": 1,
+      "status": "verified",
+      "badge": "a1"
+    },
+    {
+      "id": "verifier",
+      "kind": "verifier",
+      "label": "verifier",
+      "column": 2,
+      "status": "verified"
+    }
+  ],
+  "edges": [
+    {
+      "id": "contract:t-backend-auth",
+      "kind": "contract",
+      "from": "human",
+      "to": "t-backend-auth",
+      "task_id": "t-backend-auth",
+      "label": "v1 ✓",
+      "status": "verified",
+      "attention": false,
+      "version": 1
+    },
+    {
+      "id": "contract:t-token-store",
+      "kind": "contract",
+      "from": "t-backend-auth",
+      "to": "t-token-store",
+      "task_id": "t-token-store",
+      "label": "sub ✓ merged",
+      "status": "verified",
+      "attention": false,
+      "version": 1
+    },
+    {
+      "id": "evidence:t-backend-auth",
+      "kind": "evidence",
+      "from": "t-backend-auth",
+      "to": "verifier",
+      "task_id": "t-backend-auth",
+      "label": "✓",
+      "status": "verified",
+      "attention": false
+    },
+    {
+      "id": "evidence:t-token-store",
+      "kind": "evidence",
+      "from": "t-token-store",
+      "to": "verifier",
+      "task_id": "t-token-store",
+      "label": "✓",
+      "status": "verified",
+      "attention": false
+    },
+    {
+      "id": "reply:t-backend-auth",
+      "kind": "reply",
+      "from": "human",
+      "to": "t-backend-auth",
+      "task_id": "t-backend-auth",
+      "label": "↩ 1",
+      "status": "done",
+      "attention": false
+    }
+  ],
+  "inbox": [],
+  "seq": 56
+}

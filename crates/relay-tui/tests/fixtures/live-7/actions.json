@@ -1,0 +1,112 @@
+{
+  "node:human": [
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {}
+    }
+  ],
+  "node:planner": [
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {}
+    }
+  ],
+  "node:t-backend-auth": [
+    {
+      "key": "Enter",
+      "kind": "focus",
+      "label": "focus backend's pane",
+      "target": {
+        "task_id": "t-backend-auth"
+      }
+    },
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {
+        "task_id": "t-backend-auth"
+      }
+    }
+  ],
+  "node:t-token-store": [
+    {
+      "key": "Enter",
+      "kind": "focus",
+      "label": "focus token-dev's pane",
+      "target": {
+        "task_id": "t-token-store"
+      }
+    },
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {
+        "task_id": "t-token-store"
+      }
+    }
+  ],
+  "node:verifier": [
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {}
+    }
+  ],
+  "edge:contract:t-backend-auth": [
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {
+        "task_id": "t-backend-auth"
+      }
+    }
+  ],
+  "edge:contract:t-token-store": [
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {
+        "task_id": "t-token-store"
+      }
+    }
+  ],
+  "edge:evidence:t-backend-auth": [
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {
+        "task_id": "t-backend-auth"
+      }
+    }
+  ],
+  "edge:evidence:t-token-store": [
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {
+        "task_id": "t-token-store"
+      }
+    }
+  ],
+  "edge:reply:t-backend-auth": [
+    {
+      "key": "i",
+      "kind": "inspect",
+      "label": "inspect",
+      "target": {
+        "task_id": "t-backend-auth"
+      }
+    }
+  ]
+}
