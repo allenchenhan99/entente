@@ -6,3 +6,4 @@ export * from './reducer.js';
 export * from './api.js';
 export * from './mcp.js';
 export * from './lint/index.js';
+export * from './graph/index.js';
