@@ -11,6 +11,7 @@ import type { RelayHost } from '../pty/host.js';
 import { PaneNotFoundError } from '../pty/host.js';
 import { UnknownKeyError } from '../pty/keys.js';
 import { createPtyWebSocketServer, type PtyUpgradeHandler } from '../pty/ws.js';
+import { sessionGuard, type SessionAuth } from '../auth/token.js';
 
 const issues = (list: z.core.$ZodIssue[]): string[] =>
   list.map((i) => `${i.path.length ? i.path.map(String).join('.') : '(body)'}: ${i.message}`);
@@ -29,7 +30,17 @@ async function parseBody<S extends z.ZodType>(c: Context, schema: S): Promise<{ 
 
 const notFound = (c: Context, paneId: string) => c.json({ error: `pane ${paneId} not found` }, 404);
 
-export function mountPty(app: Hono, host: RelayHost): { handleUpgrade: PtyUpgradeHandler } {
+export interface MountPtyOptions {
+  /** Session token required on every pane route and on the WebSocket upgrade (docs/security.md). */
+  auth?: SessionAuth;
+}
+
+export function mountPty(app: Hono, host: RelayHost, options: MountPtyOptions = {}): { handleUpgrade: PtyUpgradeHandler } {
+  if (options.auth) {
+    const guard = sessionGuard(options.auth);
+    app.use(ptyRoutes.panes, guard);
+    app.use(`${ptyRoutes.panes}/*`, guard);
+  }
   const id = (c: Context): string => c.req.param('id') ?? '';
   /** Runs `fn` for a known pane; 404 otherwise. */
   const withPane = async (c: Context, fn: (paneId: string) => Response | Promise<Response>): Promise<Response> => {
@@ -101,6 +112,6 @@ export function mountPty(app: Hono, host: RelayHost): { handleUpgrade: PtyUpgrad
 
   app.get(ptyRoutes.readiness(':id'), (c) => withPane(c, (paneId) => c.json(host.readiness(paneId)!)));
 
-  const { handleUpgrade } = createPtyWebSocketServer(host);
+  const { handleUpgrade } = createPtyWebSocketServer(host, { auth: options.auth });
   return { handleUpgrade };
 }

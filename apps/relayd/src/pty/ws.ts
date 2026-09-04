@@ -3,6 +3,10 @@
  * On connect: `hello` (PaneInfo) → `scrollback` (base64 of the raw ring) → live `output` frames → `exit`.
  * Accepts `input` (base64 bytes), `resize`, `ping` → `pong`. Any number of clients per pane; an unknown pane is
  * refused with HTTP 404 before the upgrade.
+ *
+ * Session token (docs/security.md): when `auth` is configured the client must present the daemon's session token
+ * as the WebSocket subprotocol `relay.<token>` (`Sec-WebSocket-Protocol`); the server echoes it back on accept.
+ * A missing or wrong token is refused with HTTP 401 before the upgrade, and before the pane lookup.
  */
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -11,6 +15,7 @@ import { PtyClientMessage, ptyRoutes } from '@relay/protocol';
 import type { PtyServerMessage } from '@relay/protocol';
 import type { RelayHost } from './host.js';
 import type { Pane } from './pane.js';
+import { upgradeToken, verifySessionToken, type SessionAuth } from '../auth/token.js';
 
 export type PtyUpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
@@ -69,9 +74,14 @@ function attach(ws: WebSocket, pane: Pane): void {
   });
 }
 
-export function createPtyWebSocketServer(host: RelayHost): { wss: WebSocketServer; handleUpgrade: PtyUpgradeHandler } {
+export interface PtyWebSocketOptions {
+  auth?: SessionAuth;
+}
+
+export function createPtyWebSocketServer(host: RelayHost, options: PtyWebSocketOptions = {}): { wss: WebSocketServer; handleUpgrade: PtyUpgradeHandler } {
   const wss = new WebSocketServer({ noServer: true });
   const handleUpgrade: PtyUpgradeHandler = (req, socket, head) => {
+    if (options.auth && !verifySessionToken(options.auth, upgradeToken(req))) return refuse(socket, 401, 'Unauthorized');
     const paneId = paneIdFromUrl(req.url);
     if (paneId === undefined) return refuse(socket, 404, 'Not Found');
     const pane = host.get(paneId);
