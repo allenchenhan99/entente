@@ -59,3 +59,7 @@ replays both files and pins the expected end state and metrics.
   `relay_ask_human` before decomposing; the human answered with `relay clarify m-…`; the planner then proposed a
   serial chain core → routes → login page (Codex), every contract passed lint first time, all 17 criteria were
   machine-checked, and the three branches were integrated and verified.
+- `events-live-5.jsonl` — every human action taken inside the object-oriented TUI (2026-09-04): answered a
+  clarification from the inbox (`a`), failed a `human_review` criterion (`f`) which opened repair r1, replied to the
+  agent's "cannot reproduce" blocker (`r`), passed the criterion on attempt 2 (`p`); Codex frontend verified first
+  try; both branches integrated, mission verified.
