@@ -104,6 +104,30 @@ describe('codex runtime', () => {
     expect(fs.existsSync(path.join(configDir, 'auth.json'))).toBe(true);
   });
 
+  it('grants the sandbox the roots the Codex shell host needs (CODEX_HOME, /tmp, runtime cache, git common dir) and disables browser/computer use', async () => {
+    const home = path.join(tmp, 'home3');
+    fs.mkdirSync(home, { recursive: true });
+    // Simulate a linked worktree: <cwd>/.git is a file pointing into the main repo's .git/worktrees/<id>.
+    const repo = path.join(tmp, 'repo');
+    fs.mkdirSync(path.join(repo, '.git', 'worktrees', 't-x'), { recursive: true });
+    const cwd = path.join(repo, '.relay', 'wt', 't-x');
+    fs.mkdirSync(cwd, { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', 't-x')}\n`);
+    const runtime = createRuntime('codex', { homeDir: home });
+    const configDir = path.join(tmp, 'codex-cfg3');
+
+    await runtime.prepare({ ...spec, cwd }, configDir);
+
+    const toml = fs.readFileSync(path.join(configDir, 'config.toml'), 'utf8');
+    expect(toml).toContain('[sandbox_workspace_write]\n');
+    const line = toml.split('\n').find((l) => l.startsWith('writable_roots = '))!;
+    expect(line).toBeDefined();
+    for (const root of [configDir, '/tmp', path.join(home, '.cache', 'codex-runtimes'), path.join(repo, '.git')]) {
+      expect(line).toContain(`"${root}"`);
+    }
+    expect(toml).toContain('[features]\nbrowser_use = false\ncomputer_use = false\n');
+  });
+
   it('escapes quotes and backslashes in the cwd trust key', async () => {
     const runtime = createRuntime('codex', { homeDir: tmp });
     const weird = { ...spec, cwd: 'C:\\repo\\wt "x"' };
