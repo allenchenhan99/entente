@@ -16,6 +16,8 @@ import { createJsonlStore } from './store/jsonl-store.js';
 import { createOrchestrator } from './orchestrator/orchestrator.js';
 import type { Orchestrator } from './orchestrator/orchestrator.js';
 import { createApp } from './http/app.js';
+import { mountPty } from './http/pty.js';
+import type { RelayHost } from './pty/host.js';
 import { usingFallbackLint } from './lint.js';
 import type { EventStore, WorktreeManager, CheckRunner, RepairPolicy, TerminalHost, AgentRuntime } from './ports.js';
 import { fakeWorktrees, fakeChecks, fakeRepair, fakeHost, fakeRuntime } from './fakes/index.js';
@@ -107,7 +109,9 @@ export async function resolvePorts(
   const checks = (await fromModule<CheckRunner>(verifyMod, FACTORIES.checks, [{ ...deps, worktrees }], log)) ?? fake('checks', () => fakeChecks({}, store));
   const repair = (await fromModule<RepairPolicy>(repairMod, FACTORIES.repair, [deps], log)) ?? fake('repair', fakeRepair);
   const useLaunch = config.host !== 'fake';
-  const host = (useLaunch ? await fromModule<TerminalHost>(launchMod, FACTORIES.host, [config.host, {}], log) : undefined) ?? fake('host', fakeHost);
+  // The relay host records casts under the run directory, so it alone needs config-derived deps.
+  const hostDeps = config.host === 'relay' ? { relayDir: config.relayDir, runId: config.runId } : {};
+  const host = (useLaunch ? await fromModule<TerminalHost>(launchMod, FACTORIES.host, [config.host, hostDeps], log) : undefined) ?? fake('host', fakeHost);
   const runtimes = {} as Record<RuntimeKind, AgentRuntime>;
   for (const kind of ['claude-code', 'codex'] as RuntimeKind[]) {
     const real = useLaunch ? await fromModule<AgentRuntime>(launchMod, FACTORIES.runtime, [kind, {}], log) : undefined;
@@ -146,6 +150,11 @@ export async function main(env: Record<string, string | undefined> = process.env
     log: (m) => console.error(`relayd: ${m}`),
   });
   const app = createApp({ orchestrator, store });
+  // RELAY_HOST=relay: relayd hosts the agent terminals itself (PRD §23): pane routes + WebSocket upgrade.
+  if (config.host === 'relay' && (ports.host.kind as string) === 'relay') {
+    const { handleUpgrade } = mountPty(app, ports.host as unknown as RelayHost);
+    server.on('upgrade', handleUpgrade);
+  }
   fetchImpl = (req) => app.fetch(req);
 
   log(`relayd ${RELAYD_VERSION} · repo ${config.repoRoot} · log ${path.join(runDir(config), 'events.jsonl')}`);

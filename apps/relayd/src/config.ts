@@ -4,7 +4,7 @@ import { DEFAULT_PORT } from '@relay/protocol';
 
 export const RELAYD_VERSION = '0.0.1';
 
-export type HostKind = 'tmux' | 'herdr' | 'fake';
+export type HostKind = 'tmux' | 'herdr' | 'relay' | 'fake';
 
 export interface RelaydConfig {
   port: number;
@@ -14,7 +14,7 @@ export interface RelaydConfig {
   runId: string;
 }
 
-const HOSTS: HostKind[] = ['tmux', 'herdr', 'fake'];
+const HOSTS: HostKind[] = ['tmux', 'herdr', 'relay', 'fake'];
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): RelaydConfig {
   const repoRoot = path.resolve(env.RELAY_REPO ?? process.cwd());
