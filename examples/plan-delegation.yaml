@@ -1,0 +1,41 @@
+# One backend contract that invites delegation: the token store is a separable module the backend agent may
+# hand to a second agent with relay_propose_subtask and wait for with relay_await_task (agent networking).
+tasks:
+  - id: t-backend-auth
+    recipient: backend
+    runtime: claude-code
+    goal: Implement passwordless email magic-link login endpoints (POST /auth/request, POST /auth/verify, POST /auth/logout, GET /me) reusing the existing UserRepo, SessionStore and EmailSender
+    inputs:
+      - README.md
+      - src/models/user.ts
+      - src/session/store.ts
+      - src/email/stub.ts
+      - src/app.ts
+    constraints:
+      - Magic-link tokens expire after 15 minutes and are single-use; store only SHA-256 hashes
+      - Session is an HttpOnly SameSite=Lax cookie named session backed by SessionStore, 24h TTL
+      - Unknown emails get the same 202 as known ones (no account enumeration)
+      - "DELEGATION EXPECTED: the token store (src/auth/token-store.ts with create/consume/expiry + tests/auth/token-store.test.ts) is a separable module. Delegate it as a subtask with relay_propose_subtask (recipient token-dev, runtime codex, allowed_paths src/auth/token-store.ts and tests/auth/token-store.test.ts, machine-checked criteria) and wait for it with relay_await_task before wiring the routes. Do not implement the token store yourself."
+    non_goals:
+      - OAuth, passwords, account recovery, frontend
+    scope:
+      allowed_paths:
+        - src/auth/routes.ts
+        - src/auth/session-cookie.ts
+        - src/app.ts
+        - tests/auth/routes.test.ts
+    acceptance_criteria:
+      - id: AC-1
+        condition: Requesting a link then verifying the token creates a session and GET /me returns the user
+        check: { kind: command, run: "npx vitest run tests/auth/routes.test.ts" }
+      - id: AC-2
+        condition: The whole test suite passes, including the delegated token store tests
+        check: { kind: command, run: "npx vitest run" }
+      - id: AC-3
+        condition: Changes stay within the allowed scope
+        check: { kind: diff_scope }
+    output:
+      type: code_change
+      evidence_required: [git_diff, changed_files, check_outputs]
+    dependencies: []
+    budget: { max_repairs: 2, stagnation_limit: 2 }

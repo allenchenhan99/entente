@@ -67,3 +67,9 @@ replays both files and pins the expected end state and metrics.
   agents lived in relayd-managed PTYs (`relay:1` Claude Code, `relay:2` Codex) with server-side screen models;
   prompts were delivered by readiness detection, clarifications answered, evidence verified, branches integrated,
   mission verified. Casts (asciinema v2) were recorded under `.relay/runs/<run>/casts/` (not committed: ~1 MB).
+- `events-live-7.jsonl` — agent networking on the relay host (2026-09-04): the backend (Claude Code, `relay:1`)
+  delegated the token store to a Codex subtask via `relay_propose_subtask` (`parent_task` set, delegation edge in
+  the graph), waited with `relay_await_task`, the subtask was verified and merged into the parent's worktree;
+  a real `diff_scope` failure exposed a relayd bug (subtask files counted against the parent), the agent explained
+  it in a blocker, relayd was fixed and **restarted with `RELAY_RESUME=latest`** (the Claude session was resumed
+  in `relay:3`), the human replied to the blocker, the agent resubmitted, and the mission was verified.
