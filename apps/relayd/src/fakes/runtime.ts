@@ -3,19 +3,23 @@ import type { RuntimeKind } from '@relay/protocol';
 import type { AgentRuntime, LaunchSpec } from '../ports.js';
 
 export interface FakeRuntime extends AgentRuntime {
-  calls: Array<{ spec: LaunchSpec; configDir: string }>;
+  calls: Array<{ spec: LaunchSpec; configDir: string; mode?: 'resume' }>;
+  resume(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt?: string }>;
 }
 
 export function fakeRuntime(kind: RuntimeKind): FakeRuntime {
+  const env = (spec: LaunchSpec) => ({ RELAY_TOKEN: spec.token, RELAY_MCP_URL: spec.mcpUrl, RELAY_SESSION_ID: spec.sessionId });
   const rt: FakeRuntime = {
     kind,
     calls: [],
     async prepare(spec, configDir) {
       rt.calls.push({ spec: { ...spec }, configDir });
-      return {
-        argv: ['fake-agent', kind, spec.taskId],
-        env: { RELAY_TOKEN: spec.token, RELAY_MCP_URL: spec.mcpUrl, RELAY_SESSION_ID: spec.sessionId },
-      };
+      return { argv: ['fake-agent', kind, spec.taskId], env: env(spec) };
+    },
+    /** Daemon restart: argv names the session so tests can assert the recorded id was reused. */
+    async resume(spec, configDir) {
+      rt.calls.push({ spec: { ...spec }, configDir, mode: 'resume' });
+      return { argv: ['fake-agent', 'resume', spec.sessionId], env: env(spec) };
     },
   };
   return rt;

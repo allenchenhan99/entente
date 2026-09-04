@@ -23,6 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentRuntime, LaunchSpec } from '../../ports.js';
 import { bootstrapPrompt } from '../prompts.js';
+import { RESUME_PROMPT } from '../../persist/restore.js';
 
 export interface CodexRuntimeDeps {
   /** Home directory holding `.codex/auth.json`; defaults to `env.HOME`, then `os.homedir()`. */
@@ -102,6 +103,35 @@ export async function gitCommonDir(cwd: string): Promise<string | undefined> {
   }
 }
 
+/**
+ * Codex session ids are Codex's own (assigned at start, not chosen by us). With the isolated CODEX_HOME
+ * every rollout the agent recorded lives under `<configDir>/sessions/YYYY/MM/DD/rollout-<stamp>-<uuid>.jsonl`;
+ * the newest file names the session to resume. Returns undefined when nothing was recorded.
+ */
+export async function findCodexSessionId(configDir: string): Promise<string | undefined> {
+  const root = path.join(configDir, 'sessions');
+  const files: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) await walk(full);
+      else if (e.isFile() && /^rollout-.*\.jsonl$/.test(e.name)) files.push(full);
+    }
+  };
+  await walk(root);
+  if (files.length === 0) return undefined;
+  // `rollout-<ISO stamp>-<uuid>.jsonl`: the stamp sorts chronologically, so the last basename is the newest.
+  const newest = files.map((f) => path.basename(f)).sort().at(-1)!;
+  const m = /^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(newest);
+  return m?.[1];
+}
+
 export class CodexRuntime implements AgentRuntime {
   readonly kind = 'codex' as const;
   private readonly homeDir: string;
@@ -113,16 +143,34 @@ export class CodexRuntime implements AgentRuntime {
     this.executable = deps.executable ?? 'codex';
   }
 
-  async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
+  private async writeConfig(spec: LaunchSpec, configDir: string): Promise<void> {
     await fs.mkdir(configDir, { recursive: true });
     const roots: CodexSandboxRoots = {
       configDir, homeDir: this.homeDir, gitCommonDir: await gitCommonDir(spec.cwd), nodeModulesDir: await linkedNodeModules(spec.cwd),
     };
     await fs.writeFile(path.join(configDir, 'config.toml'), codexConfigToml(spec, roots), { mode: 0o600 });
     await this.copyAuth(configDir);
+  }
 
-    const argv = [this.executable, '-C', spec.cwd, '-a', 'never', '-s', 'workspace-write'];
-    return { argv, env: { CODEX_HOME: configDir, RELAY_TOKEN: spec.token }, prompt: bootstrapPrompt(spec) };
+  private commonArgv(spec: LaunchSpec): string[] {
+    return [this.executable, '-C', spec.cwd, '-a', 'never', '-s', 'workspace-write'];
+  }
+
+  async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
+    await this.writeConfig(spec, configDir);
+    return { argv: this.commonArgv(spec), env: { CODEX_HOME: configDir, RELAY_TOKEN: spec.token }, prompt: bootstrapPrompt(spec) };
+  }
+
+  /**
+   * Daemon restart: same config (rewritten for the re-issued token) and `codex resume <id>` where `<id>` is
+   * the newest rollout under the isolated CODEX_HOME; `codex resume --last` when none was recorded (the
+   * isolated home only ever held this agent's sessions, so `--last` is still the right one).
+   */
+  async resume(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
+    await this.writeConfig(spec, configDir);
+    const sessionId = await findCodexSessionId(configDir);
+    const argv = [...this.commonArgv(spec), 'resume', ...(sessionId ? [sessionId] : ['--last'])];
+    return { argv, env: { CODEX_HOME: configDir, RELAY_TOKEN: spec.token }, prompt: RESUME_PROMPT };
   }
 
   /** Keeps the isolated CODEX_HOME logged in by copying the user's `~/.codex/auth.json` when present. */
