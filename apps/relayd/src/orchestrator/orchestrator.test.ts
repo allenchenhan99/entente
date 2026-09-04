@@ -72,9 +72,14 @@ describe('spawn gating', () => {
   it('a task depending on another is spawned only after the dependency completes', async () => {
     const r = createTestRelay();
     const { mission_id } = r.orchestrator.createMission(mission);
-    await r.orchestrator.proposeTask(mission_id, sampleContract('t-b', { dependencies: ['t-a'] }), 'planner');
+    const early = await r.orchestrator.proposeTask(mission_id, sampleContract('t-b', { dependencies: ['t-a'] }), 'planner');
+    // t-a is not known yet, so t-b's dependency is a lint error until t-a is proposed
+    expect(early).toMatchObject({ status: 'lint_error', errors: [expect.stringContaining('unknown_dependency')] });
     expect(r.host.calls.spawn).toHaveLength(0);
     await r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner');
+    // proposing t-a re-lints its sibling t-b, which is now clean but still waits on the dependency
+    const lints = r.ofType('lint_reported');
+    expect(lints.map((e) => [e.task_id, e.payload.contract_version, e.payload.results.length])).toEqual([['t-b', 1, 1], ['t-a', 1, 0], ['t-b', 1, 0]]);
     expect(r.host.calls.spawn).toHaveLength(1);
     expect(r.host.calls.spawn[0].name).toBe('a');
     // drive t-a to completion through the fake checks

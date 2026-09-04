@@ -236,17 +236,30 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   };
 
   // ---------- lint + spawn ----------
-  const runLint = (rec: TaskRecord): LintResult[] => {
-    const contract = current(rec);
+  const computeLint = (rec: TaskRecord): LintResult[] => {
     const siblings = [...tasks.values()].filter((t) => t.missionId === rec.missionId && t.id !== rec.id).map(current);
-    const results = lintContract(contract, {
+    return lintContract(current(rec), {
       siblings,
       repoRoot: deps.repoRoot,
       fileExists: (rel) => fs.existsSync(path.resolve(deps.repoRoot, rel)),
     });
+  };
+  const runLint = (rec: TaskRecord): LintResult[] => {
+    const results = computeLint(rec);
     rec.lint = results;
-    emitTask(rec, 'relayd', 'lint_reported', { contract_version: contract.version, results });
+    emitTask(rec, 'relayd', 'lint_reported', { contract_version: current(rec).version, results });
     return results;
+  };
+  /** Sibling-dependent rules (unknown_dependency, overlapping_scope) can change when a sibling is (re)proposed. */
+  const relintSiblings = async (rec: TaskRecord): Promise<void> => {
+    for (const t of tasks.values()) {
+      if (t.missionId !== rec.missionId || t.id === rec.id || t.taskState === 'canceled') continue;
+      const results = computeLint(t);
+      if (JSON.stringify(results) === JSON.stringify(t.lint)) continue;
+      t.lint = results;
+      emitTask(t, 'relayd', 'lint_reported', { contract_version: current(t).version, results });
+      await track(maybeSpawn(t.id)).catch(() => {});
+    }
   };
 
   const maybeSpawn = async (taskId: string): Promise<void> => {
@@ -316,8 +329,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const results = runLint(rec);
     const errors = results.filter((r) => r.severity === 'error').map((r) => `${r.rule}: ${r.message}`);
     const warnings = results.filter((r) => r.severity !== 'error').map((r) => `${r.rule}: ${r.message}`);
+    if (errors.length === 0) await track(maybeSpawn(rec.id)).catch(() => {});
+    await relintSiblings(rec);
     if (errors.length > 0) return { status: 'lint_error', task_id: rec.id, errors, warnings };
-    await track(maybeSpawn(rec.id)).catch(() => {});
     return { status: 'proposed', task_id: rec.id, version, warnings };
   };
 
@@ -329,6 +343,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     emitTask(rec, actor, 'contract_revised', { contract: next, previous_version: previous });
     runLint(rec);
     await track(maybeSpawn(rec.id)).catch(() => {});
+    await relintSiblings(rec);
     return next.version;
   };
 
