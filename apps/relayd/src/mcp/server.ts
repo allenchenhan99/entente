@@ -13,6 +13,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   RECIPIENT_TOOLS, PLANNER_TOOLS, routes,
   RespondInput, AwaitContractInput, ReportProgressInput, ReportBlockerInput, SubmitEvidenceInput, AwaitVerdictInput, AwaitReplyInput,
+  ProposeSubtaskInput, AwaitTaskInput,
   ProposeTaskInput, ReviseTaskInput, AnswerClarificationInput, AskHumanInput, AwaitAnswersInput,
 } from '@relay/protocol';
 import type { Orchestrator, TokenSubject } from '../orchestrator/orchestrator.js';
@@ -79,6 +80,17 @@ export function buildMcpServer(orchestrator: Orchestrator, subject: TokenSubject
     description: 'After relay_report_blocker: wait (up to timeout_s) for the human\'s reply. Returns pending on timeout (call again) or none when there is no outstanding blocker.',
     inputSchema: AwaitReplyInput,
   }, (args, extra) => asRecipient(async (taskId) => ok(await orchestrator.awaitReply(taskId, args.timeout_s, extra.signal))));
+
+  // Agent networking (implemented by the agent-net work package; registered here so the tool list is complete).
+  server.registerTool(RECIPIENT_TOOLS.propose_subtask, {
+    description: 'Delegate a separable unit of your task as a new contract you are the sender of. Linted like any contract; the subtask records you as parent_task.',
+    inputSchema: ProposeSubtaskInput,
+  }, () => asRecipient(() => fail('relay_propose_subtask is not available yet')));
+
+  server.registerTool(RECIPIENT_TOOLS.await_task, {
+    description: 'Wait (up to timeout_s) until another task reaches completed / failed / canceled; returns pending on timeout.',
+    inputSchema: AwaitTaskInput,
+  }, () => asRecipient(() => fail('relay_await_task is not available yet')));
 
   server.registerTool(RECIPIENT_TOOLS.submit_evidence, {
     description: 'Submit your claimed status per criterion and a summary. relayd collects the diff and runs every check itself.',

@@ -468,6 +468,9 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "parent_task": {
+                "type": "string"
               }
             },
             "required": [
@@ -763,6 +766,9 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "parent_task": {
+                  "type": "string"
                 }
               },
               "required": [

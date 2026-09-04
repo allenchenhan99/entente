@@ -84,4 +84,9 @@ export interface AgentRuntime {
   readonly kind: RuntimeKind;
   /** Writes any per-agent config files under configDir and returns the argv/env to spawn plus the bootstrap prompt. */
   prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt?: string }>;
+  /**
+   * Resume an earlier session of this agent (daemon restart): same config, argv that reopens `spec.sessionId`
+   * (`claude --resume <id>`, `codex resume <id>`), and a short prompt telling the agent to continue via relay_get_contract.
+   */
+  resume?(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt?: string }>;
 }

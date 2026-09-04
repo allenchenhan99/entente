@@ -14,6 +14,10 @@ export const RECIPIENT_TOOLS = {
   submit_evidence: 'relay_submit_evidence',
   await_verdict: 'relay_await_verdict',
   await_reply: 'relay_await_reply',
+  /** Agent networking: a recipient delegates part of its work as a new contract it is the sender of. */
+  propose_subtask: 'relay_propose_subtask',
+  /** Wait until another task (typically a subtask) reaches a terminal state. */
+  await_task: 'relay_await_task',
 } as const;
 
 export const PLANNER_TOOLS = {
@@ -72,6 +76,15 @@ export const AwaitReplyOutput = z.discriminatedUnion('status', [
   z.object({ status: z.literal('replied'), message: z.string(), replied_by: z.string(), at: z.string() }),
   z.object({ status: z.literal('pending') }),
   z.object({ status: z.literal('none') }),
+]);
+
+export const ProposeSubtaskInput = z.object({ contract: TaskContractInput });
+export const AwaitTaskInput = z.object({ task_id: z.string(), timeout_s: z.number().int().min(1).max(AWAIT_TIMEOUT_MAX_S).default(30) });
+export const AwaitTaskOutput = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('completed'), task_id: z.string(), branch: z.string().optional() }),
+  z.object({ status: z.literal('failed'), task_id: z.string(), reason: z.string() }),
+  z.object({ status: z.literal('canceled'), task_id: z.string() }),
+  z.object({ status: z.literal('pending'), task_id: z.string(), task_state: z.string(), handoff_state: z.string() }),
 ]);
 
 export const ProposeTaskInput = z.object({ contract: TaskContractInput });

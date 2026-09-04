@@ -66,6 +66,8 @@ export const TaskContract = z.object({
   dependencies: z.array(z.string()).default([]),
   budget: Budget.optional(),
   clarifications: z.array(Clarification).default([]),
+  /** Set when a recipient agent proposed this task as a subtask (agent networking): the parent's task id. */
+  parent_task: z.string().optional(),
 });
 export type TaskContract = z.infer<typeof TaskContract>;
 

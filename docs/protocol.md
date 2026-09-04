@@ -83,6 +83,8 @@ Generated from `packages/protocol/src` by `scripts/gen-protocol-docs.mjs`. JSON 
 | `relay_submit_evidence` | `{ contract_version, claimed, summary }` → `{ attempt, checks_started }` |
 | `relay_await_verdict` | `{ attempt, timeout_s ≤ 60 }` → `verified | repair | pending | failed_budget | escalated` |
 | `relay_await_reply` |  |
+| `relay_propose_subtask` |  |
+| `relay_await_task` |  |
 
 ### Planner
 

@@ -271,6 +271,9 @@
         ],
         "additionalProperties": false
       }
+    },
+    "parent_task": {
+      "type": "string"
     }
   },
   "required": [
