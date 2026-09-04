@@ -46,6 +46,16 @@ export function resolveResumeEnv(env: Record<string, string | undefined>): Recor
   return { ...env, RELAY_RUN_ID: runId };
 }
 
+/** First free `relay:<n>` number after the given pane ids (1 when none is a relay pane). */
+export function nextRelayPaneNumber(paneIds: string[]): number {
+  let max = 0;
+  for (const id of paneIds) {
+    const m = /^relay:(\d+)$/.exec(id);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max + 1;
+}
+
 /** True when the run directory holds a log with at least one event, i.e. there is something to resume. */
 export function hasRecordedEvents(runDir: string): boolean {
   const file = path.join(runDir, 'events.jsonl');

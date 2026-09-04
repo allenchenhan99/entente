@@ -87,3 +87,35 @@ describe('jsonl store', () => {
     expect(store.all()).toHaveLength(1);
   });
 });
+
+describe('jsonl store on an existing run log (daemon restart)', () => {
+  it('continues seq numbering after the last recorded event and never reuses a seq', () => {
+    const dir = tmp();
+    const first = createJsonlStore({ dir });
+    first.append(mission());
+    first.append(progress('before restart'));
+    first.append(progress('crash here'));
+    expect(first.all().map((e) => e.seq)).toEqual([1, 2, 3]);
+
+    // A new process opens the same directory: the tail seq is recovered from the file, not from memory.
+    const resumed = createJsonlStore({ dir });
+    expect(resumed.state().last_seq).toBe(3);
+    const next = resumed.append(progress('after restart'));
+    expect(next.seq).toBe(4);
+    const seqs = fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l).seq as number);
+    expect(seqs).toEqual([1, 2, 3, 4]);
+    expect(new Set(seqs).size).toBe(seqs.length);
+    // A trailing partial line (crash mid-append) must not poison the reopen: it is dropped, numbering goes on.
+    fs.appendFileSync(path.join(dir, 'events.jsonl'), '{"seq":5,"ts":"x"');
+    const logged: string[] = [];
+    const again = createJsonlStore({ dir, log: (m) => logged.push(m) });
+    expect(again.all().map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+    expect(logged[0]).toMatch(/partial trailing line/);
+    expect(again.append(progress('recovered')).seq).toBe(5);
+    const lines = fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8').trim().split('\n');
+    expect(lines.map((l) => JSON.parse(l).seq)).toEqual([1, 2, 3, 4, 5]);
+    // Corruption before the tail is not masked.
+    fs.writeFileSync(path.join(dir, 'events.jsonl'), lines[0] + '\n{"broken"\n' + lines[1] + '\n');
+    expect(() => createJsonlStore({ dir })).toThrow(/unreadable event/);
+  });
+});

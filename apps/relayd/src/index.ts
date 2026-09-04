@@ -21,6 +21,8 @@ import type { RelayHost } from './pty/host.js';
 import { usingFallbackLint } from './lint.js';
 import type { EventStore, WorktreeManager, CheckRunner, RepairPolicy, TerminalHost, AgentRuntime } from './ports.js';
 import { fakeWorktrees, fakeChecks, fakeRepair, fakeHost, fakeRuntime } from './fakes/index.js';
+import { createWorkspaceTracker, readWorkspace, panesFromEvents } from './persist/workspace.js';
+import { resolveResumeEnv, hasRecordedEvents, restoreRun, nextRelayPaneNumber } from './persist/restore.js';
 
 type Module = Record<string, unknown>;
 export type Importer = (spec: string) => Promise<Module | undefined>;
@@ -131,10 +133,21 @@ export interface RunningRelayd {
 }
 
 export async function main(env: Record<string, string | undefined> = process.env, log: (msg: string) => void = console.log): Promise<RunningRelayd> {
-  const config = loadConfig(env);
+  // RELAY_RUN_ID=<existing run> or RELAY_RESUME=latest: reopen that run's log and bring its agents back.
+  const config = loadConfig(resolveResumeEnv(env));
   fs.mkdirSync(config.relayDir, { recursive: true });
-  const store = createJsonlStore({ dir: runDir(config) });
+  const dir = runDir(config);
+  const resuming = hasRecordedEvents(dir);
+  const store = createJsonlStore({ dir, log: (m) => console.error(`relayd: ${m}`) });
   const ports = await resolvePorts(config, store, log);
+  if (resuming && ports.host.kind === 'relay') {
+    // The relay host numbers panes from 1 and casts are opened with `flags: 'w'`; without this the respawned
+    // `relay:1` would overwrite the previous run's recording (see HANDOFF_NOTES.md for the proper host option).
+    const known = [...(readWorkspace(dir)?.panes ?? []), ...panesFromEvents(store.all(), config.relayDir)];
+    const host = ports.host as unknown as { next?: number };
+    const next = nextRelayPaneNumber(known.map((p) => p.pane_id));
+    if (typeof host.next === 'number' && host.next < next) host.next = next;
+  }
 
   // Bind first so an ephemeral port (RELAY_PORT=0) is known before the orchestrator needs the MCP URL.
   let fetchImpl: ((req: Request) => Response | Promise<Response>) | undefined;
@@ -157,10 +170,24 @@ export async function main(env: Record<string, string | undefined> = process.env
   }
   fetchImpl = (req) => app.fetch(req);
 
-  log(`relayd ${RELAYD_VERSION} · repo ${config.repoRoot} · log ${path.join(runDir(config), 'events.jsonl')}`);
+  log(`relayd ${RELAYD_VERSION} · repo ${config.repoRoot} · log ${path.join(dir, 'events.jsonl')}`);
   log(`relayd listening on ${url}`);
 
-  const close = () => new Promise<void>((resolve) => server.close(() => resolve()));
+  // Pane inventory for the next restart; subscribed before restore so respawned panes are recorded.
+  const tracker = createWorkspaceTracker({
+    store, runDir: dir, runId: config.runId, repo: config.repoRoot, relayDir: config.relayDir, host: ports.host,
+    log: (m) => console.error(`relayd: ${m}`),
+  });
+  if (resuming) {
+    const r = await restoreRun({ store, orchestrator, runDir: dir, relayDir: config.relayDir, hostKind: config.host, log: (m) => log(`relayd: ${m}`) });
+    const failed = r.failed.length ? `, ${r.failed.length} failed` : '';
+    log(`relayd resumed run ${config.runId} (${r.tasks} tasks, ${r.respawned.length} panes respawned${failed})`);
+  }
+
+  const close = () => {
+    tracker.stop();
+    return new Promise<void>((resolve) => server.close(() => resolve()));
+  };
   return { server, port, url, orchestrator, close };
 }
 
