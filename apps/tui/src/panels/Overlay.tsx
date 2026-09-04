@@ -117,11 +117,16 @@ export function storyWindow(description: { title: string; lines: string[] }, sto
   const facts = [description.title, ...description.lines];
   const factRows = Math.min(facts.length, Math.max(1, Math.floor(available / 2)));
   const head = facts.slice(0, factRows);
-  const remaining = available - head.length - 1; // one blank separator row
-  if (remaining <= 0) return head.slice(0, available);
-  const tail = story.slice(-remaining);
-  const hidden = story.length - tail.length;
-  const body = hidden > 0 ? [`… ${hidden} earlier`, ...tail.slice(hidden > 0 ? 1 : 0)] : tail;
+  const room = available - head.length - 1; // one blank separator row
+  if (room <= 0) return head.slice(0, available);
+  let body: string[];
+  if (story.length <= room) body = story;
+  else if (room === 1) body = story.slice(-1);
+  else {
+    // The marker takes its own row; the newest `room - 1` lines follow it.
+    const shown = story.slice(-(room - 1));
+    body = [`… ${story.length - shown.length} earlier`, ...shown];
+  }
   return [...head, '', ...body].slice(0, available);
 }
 

@@ -94,6 +94,13 @@ describe('storyWindow', () => {
     expect(rows).not.toContain('10:00 event 1');
   });
 
+  it('always shows at least one story line even in a tiny window', async () => {
+    const { storyWindow } = await import('./Overlay.js');
+    const story = ['10:00 a', '10:01 b', '10:02 c'];
+    expect(storyWindow({ title: 't', lines: [] }, story, 3)).toEqual(['t', '', '10:02 c']);
+    expect(storyWindow({ title: 't', lines: [] }, story, 4)).toEqual(['t', '', '… 2 earlier', '10:02 c']);
+  });
+
   it('shows everything when it fits', async () => {
     const { storyWindow } = await import('./Overlay.js');
     const rows = storyWindow({ title: 'planner', lines: ['3 tasks planned'] }, ['10:00 a', '10:01 b'], 12);
