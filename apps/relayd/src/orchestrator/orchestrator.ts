@@ -170,6 +170,12 @@ const hex = (bytes: number) => randomBytes(bytes).toString('hex');
 export const INTEGRATION_BRANCH = 'relay/integration';
 /** Synthetic criterion for the mission-level integration check (`CriterionId` requires `AC-<n>`). */
 export const INTEGRATION_CRITERION = 'AC-0';
+/** Workspace/respawn id of a mission's planner pane (`respawn('planner:<mission>')`). */
+export const plannerTaskId = (missionId: string): string => `planner:${missionId}`;
+export const isPlannerTaskId = (id: string): boolean => id.startsWith('planner:');
+/** Per-agent config directory (`mcp.json`, `CODEX_HOME`); planners use `agents/planner-<mission>`. */
+export const agentConfigDir = (relayDir: string, taskId: string): string =>
+  path.join(relayDir, 'agents', isPlannerTaskId(taskId) ? `planner-${taskId.slice('planner:'.length)}` : taskId);
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const clock = deps.clock ?? (() => new Date().toISOString());
@@ -318,7 +324,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       rec.sessionId = sessionId;
       const runtime = deps.runtimes[contract.runtime];
       if (!runtime) throw new Error(`no runtime registered for ${contract.runtime}`);
-      const configDir = path.join(deps.relayDir, 'agents', taskId);
+      const configDir = agentConfigDir(deps.relayDir, taskId);
       const launch = await runtime.prepare(
         { taskId, token, mcpUrl: deps.mcpUrl, sessionId, cwd: worktree.path, role: 'recipient', contractSummary: contract.goal },
         configDir,
@@ -757,7 +763,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const rt = deps.runtimes[runtime];
     if (!rt) throw new RelayError(400, `no runtime registered for ${runtime}`);
     const sessionId = randomUUID();
-    const configDir = path.join(deps.relayDir, 'agents', `planner-${missionId}`);
+    const configDir = agentConfigDir(deps.relayDir, plannerTaskId(missionId));
     const summary = [
       m.mission.title,
       m.mission.success_definition ? `Success definition: ${m.mission.success_definition}` : '',
