@@ -1,7 +1,7 @@
 /**
  * HTTP surface of the relay terminal host (PRD §23, `ptyRoutes` in @relay/protocol pty.ts): pane listing,
- * screen snapshots, input, wait-output long-poll, readiness, kill, focus, cast download, plus the WebSocket
- * upgrade handler for `/pty/:id`. `layouts` and `app` belong to the web app package.
+ * screen snapshots, input, wait-output long-poll, readiness, kill, focus, cast download, host metrics, plus the
+ * WebSocket upgrade handler for `/pty/:id`. `layouts` and `app` belong to the web app package.
  */
 import fs from 'node:fs';
 import type { Hono, Context } from 'hono';
@@ -11,7 +11,7 @@ import type { RelayHost } from '../pty/host.js';
 import { PaneNotFoundError } from '../pty/host.js';
 import { UnknownKeyError } from '../pty/keys.js';
 import { createPtyWebSocketServer, type PtyUpgradeHandler } from '../pty/ws.js';
-import { sessionGuard, type SessionAuth } from '../auth/token.js';
+import { sessionGuard, bearerToken, verifySessionToken, MISSING_TOKEN, INVALID_TOKEN, type SessionAuth } from '../auth/token.js';
 
 const issues = (list: z.core.$ZodIssue[]): string[] =>
   list.map((i) => `${i.path.length ? i.path.map(String).join('.') : '(body)'}: ${i.message}`);
@@ -40,6 +40,15 @@ export function mountPty(app: Hono, host: RelayHost, options: MountPtyOptions = 
     const guard = sessionGuard(options.auth);
     app.use(ptyRoutes.panes, guard);
     app.use(`${ptyRoutes.panes}/*`, guard);
+    // `sessionGuard` only fires on its always-guarded prefixes (`/panes`, `/pty`, `/runs`); `/metrics` carries the
+    // same data as `/panes`, so it needs the same token regardless of mode (see HANDOFF_NOTES.md for the upstream diff).
+    const auth = options.auth;
+    app.use(ptyRoutes.metrics, async (c, next) => {
+      const presented = bearerToken(c.req.header('authorization'));
+      if (presented === undefined) return c.json({ error: MISSING_TOKEN }, 401);
+      if (!verifySessionToken(auth, presented)) return c.json({ error: INVALID_TOKEN }, 401);
+      return next();
+    });
   }
   const id = (c: Context): string => c.req.param('id') ?? '';
   /** Runs `fn` for a known pane; 404 otherwise. */
@@ -111,6 +120,8 @@ export function mountPty(app: Hono, host: RelayHost, options: MountPtyOptions = 
   }));
 
   app.get(ptyRoutes.readiness(':id'), (c) => withPane(c, (paneId) => c.json(host.readiness(paneId)!)));
+
+  app.get(ptyRoutes.metrics, (c) => c.json(host.metrics()));
 
   const { handleUpgrade } = createPtyWebSocketServer(host, { auth: options.auth });
   return { handleUpgrade };
