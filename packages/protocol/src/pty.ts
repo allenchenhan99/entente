@@ -27,6 +27,8 @@ export const PaneInfo = z.object({
   started_at: z.string(),
   exited_at: z.string().optional(),
   exit_code: z.number().int().optional(),
+  /** Efficiency instrumentation (see PaneTimings); present on hosts that measure it. */
+  timings: z.lazy(() => PaneTimings).optional(),
 });
 export type PaneInfo = z.infer<typeof PaneInfo>;
 
@@ -117,6 +119,44 @@ export const PaneReadiness = z.object({
 });
 export type PaneReadiness = z.infer<typeof PaneReadiness>;
 
+/**
+ * Timings every terminal host must record per pane (milliseconds, measured on the host's clock). They are the
+ * product's efficiency instrumentation: the same numbers let us compare a RelayGraph-run agent against a bare
+ * `claude` / `codex` session. Undefined = not reached yet. Rust `termd` exposes the same object.
+ */
+export const PaneTimings = z.object({
+  /** spawn request → PTY process started. */
+  spawn_ms: z.number().nonnegative().optional(),
+  /** process start → first output byte. */
+  first_output_ms: z.number().nonnegative().optional(),
+  /** first output → readiness detector said "ready" (prompt visible & quiet). */
+  readiness_ms: z.number().nonnegative().optional(),
+  /** readiness → prompt bytes written (paste + Enter). */
+  prompt_write_ms: z.number().nonnegative().optional(),
+  /** prompt written → accepted (agent visibly busy / composer clear); includes Enter retries. */
+  prompt_accept_ms: z.number().nonnegative().optional(),
+  /** Number of extra Enter presses the host needed to get the prompt accepted. */
+  prompt_retries: z.number().int().nonnegative().optional(),
+  /** Rolling p50 / p95 of "PTY byte received → screen model updated" (render latency of the host's screen). */
+  render_p50_ms: z.number().nonnegative().optional(),
+  render_p95_ms: z.number().nonnegative().optional(),
+  /** Bytes and chunks of output seen so far (throughput). */
+  output_bytes: z.number().int().nonnegative().optional(),
+  output_chunks: z.number().int().nonnegative().optional(),
+});
+export type PaneTimings = z.infer<typeof PaneTimings>;
+
+/** `GET /metrics`: host-level counters plus every pane's timings; the basis for the "vs bare CLI" comparison. */
+export const HostMetrics = z.object({
+  host: z.enum(['relay', 'herdr', 'tmux', 'relayterm', 'fake']),
+  uptime_ms: z.number().nonnegative(),
+  panes_spawned: z.number().int().nonnegative(),
+  panes_alive: z.number().int().nonnegative(),
+  prompt_failures: z.number().int().nonnegative(),
+  panes: z.array(z.object({ pane_id: z.string(), role: z.string(), task_id: z.string().optional(), timings: PaneTimings })),
+});
+export type HostMetrics = z.infer<typeof HostMetrics>;
+
 export const ptyRoutes = {
   /** `GET` → PaneInfo[] · `POST /panes/:id/kill` · `POST /panes/:id/focus` (records the focused pane for other clients). */
   panes: '/panes',
@@ -133,6 +173,8 @@ export const ptyRoutes = {
   waitOutput: (paneId: string) => `/panes/${paneId}/wait-output`,
   /** `GET` → PaneReadiness. */
   readiness: (paneId: string) => `/panes/${paneId}/readiness`,
+  /** `GET` → HostMetrics (session token required). */
+  metrics: '/metrics',
   /** `GET` → LayoutPreset[] · `PUT /layouts/:name` → save. */
   layouts: '/layouts',
   /** The web app itself (static build of apps/web). */
