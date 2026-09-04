@@ -436,3 +436,110 @@ describe('integration', () => {
     expect(r.ofType('mission_failed')[0].payload.reason).toMatch(/integration check failed/);
   });
 });
+
+describe('subtask (agent networking)', () => {
+  const child = (over = {}) => sampleContract('t-a-schema', over);
+
+  it('proposeSubtask: task_proposed by agent:<parent role>, parent_task stored, lint runs, child spawns, no tasks_planned', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    const out = await r.orchestrator.proposeSubtask('t-a', child());
+    expect(out).toEqual({ status: 'proposed', task_id: 't-a-schema', version: 1, warnings: [] });
+    const proposed = r.ofType('task_proposed').at(-1)!;
+    expect(proposed.actor).toBe('agent:a');
+    expect(proposed.task_id).toBe('t-a-schema');
+    expect(proposed.payload.contract).toMatchObject({ id: 't-a-schema', mission_id, version: 1, sender: 'agent:a', parent_task: 't-a' });
+    expect(r.ofType('lint_reported').map((e) => e.task_id)).toContain('t-a-schema');
+    expect(r.host.calls.spawn.map((s) => s.name)).toEqual(['a', 'a-schema']);
+    expect(r.types()).not.toContain('tasks_planned');
+    expect(r.orchestrator.taskView('t-a-schema')!.contract.parent_task).toBe('t-a');
+    // the reducer-derived state carries the link too: the contract is the only place it lives
+    expect(r.store.state().tasks['t-a-schema']!.contract.parent_task).toBe('t-a');
+    expect(r.orchestrator.getMission(mission_id)!.task_ids).toEqual(['t-a', 't-a-schema']);
+  });
+
+  it('a subtask whose allowed_paths overlap the parent is rejected with overlapping_scope at error severity before task_proposed', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    const out = await r.orchestrator.proposeSubtask('t-a', child({ scope: { allowed_paths: ['src/t-a/schema/**'] } }));
+    expect(out).toEqual({ status: 'lint_error', task_id: 't-a-schema', errors: [expect.stringMatching(/^overlapping_scope: .*src\/t-a\/schema\/\*\*.*t-a/)], warnings: [] });
+    expect(r.ofType('task_proposed').map((e) => e.task_id)).toEqual(['t-a']);
+    expect(r.orchestrator.taskView('t-a-schema')).toBeUndefined();
+    expect(r.host.calls.spawn).toHaveLength(1);
+  });
+
+  it('a subtask declaring its parent as a dependency is a 400 cycle', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await expect(r.orchestrator.proposeSubtask('t-a', child({ dependencies: ['t-a'] }))).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/cycle/) });
+    expect(r.ofType('task_proposed').map((e) => e.task_id)).toEqual(['t-a']);
+  });
+
+  it('proposeSubtask rejects an unknown or finished parent', async () => {
+    const r = createTestRelay();
+    await expect(r.orchestrator.proposeSubtask('t-zzz', child())).rejects.toMatchObject({ status: 404 });
+    await spawnedTask(r);
+    await r.orchestrator.cancel('t-a', 'nope');
+    await expect(r.orchestrator.proposeSubtask('t-a', child())).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+describe('awaitTask', () => {
+  async function parentAndChild(r: ReturnType<typeof createTestRelay>, over = {}) {
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    const out = await r.orchestrator.proposeSubtask('t-a', sampleContract('t-a-schema', over));
+    expect(out.status).toBe('proposed');
+  }
+
+  it('is pending with both states while the child executes, then resolves completed with the child branch', async () => {
+    const r = createTestRelay();
+    await parentAndChild(r);
+    expect(await r.orchestrator.awaitTask('t-a-schema', 1)).toEqual({ status: 'pending', task_id: 't-a-schema', task_state: 'proposed', handoff_state: 'proposed' });
+    r.orchestrator.respond('t-a-schema', accept);
+    expect(await r.orchestrator.awaitTask('t-a-schema', 1)).toEqual({ status: 'pending', task_id: 't-a-schema', task_state: 'executing', handoff_state: 'accepted' });
+    const poll = r.orchestrator.awaitTask('t-a-schema', 5);
+    r.orchestrator.submitEvidence('t-a-schema', { contract_version: 1, claimed: claimedAll, summary: 'schema done' });
+    expect(await poll).toEqual({ status: 'completed', task_id: 't-a-schema', branch: 'relay/t-a-schema' });
+    await r.orchestrator.settled();
+    // a completed task answers immediately afterwards too
+    expect(await r.orchestrator.awaitTask('t-a-schema', 1)).toEqual({ status: 'completed', task_id: 't-a-schema', branch: 'relay/t-a-schema' });
+  });
+
+  it('a canceled child resolves canceled', async () => {
+    const r = createTestRelay();
+    await parentAndChild(r);
+    const poll = r.orchestrator.awaitTask('t-a-schema', 5);
+    await r.orchestrator.cancel('t-a-schema', 'not needed');
+    expect(await poll).toEqual({ status: 'canceled', task_id: 't-a-schema' });
+  });
+
+  it('a child that exhausts its repair budget resolves failed with the budget reason', async () => {
+    const r = createTestRelay({ script: { 'AC-2': 'failed' } });
+    await parentAndChild(r, { budget: { max_repairs: 0, stagnation_limit: 2 } });
+    r.orchestrator.respond('t-a-schema', accept);
+    const poll = r.orchestrator.awaitTask('t-a-schema', 5);
+    r.orchestrator.submitEvidence('t-a-schema', { contract_version: 1, claimed: claimedAll, summary: 's' });
+    expect(await poll).toEqual({ status: 'failed', task_id: 't-a-schema', reason: expect.stringMatching(/repair budget exhausted/) });
+  });
+
+  it('any task may be awaited, but awaiting yourself is a 400 and unknown tasks are 404', async () => {
+    const r = createTestRelay();
+    await parentAndChild(r);
+    expect((await r.orchestrator.awaitTask('t-a', 1, undefined, 't-a-schema')).status).toBe('pending');
+    await expect(r.orchestrator.awaitTask('t-a', 1, undefined, 't-a')).rejects.toMatchObject({ status: 400 });
+    await expect(r.orchestrator.awaitTask('t-nope', 1)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('stops early when the caller aborts', async () => {
+    const r = createTestRelay();
+    await parentAndChild(r);
+    const ac = new AbortController();
+    const poll = r.orchestrator.awaitTask('t-a-schema', 30, ac.signal);
+    setTimeout(() => ac.abort(), 10);
+    expect(await poll).toMatchObject({ status: 'pending' });
+  });
+});

@@ -81,16 +81,17 @@ export function buildMcpServer(orchestrator: Orchestrator, subject: TokenSubject
     inputSchema: AwaitReplyInput,
   }, (args, extra) => asRecipient(async (taskId) => ok(await orchestrator.awaitReply(taskId, args.timeout_s, extra.signal))));
 
-  // Agent networking (implemented by the agent-net work package; registered here so the tool list is complete).
+  // Agent networking: the caller (a recipient) is the parent of the subtask it proposes.
   server.registerTool(RECIPIENT_TOOLS.propose_subtask, {
-    description: 'Delegate a separable unit of your task as a new contract you are the sender of. Linted like any contract; the subtask records you as parent_task.',
+    description: 'Delegate a separable unit of your task as a new contract you are the sender of (same mission, parent_task = you). Linted like any contract; its allowed_paths must be disjoint from yours and it may not depend on you. Lint errors are returned so you can fix and re-propose with the same id.',
     inputSchema: ProposeSubtaskInput,
-  }, () => asRecipient(() => fail('relay_propose_subtask is not available yet')));
+  }, (args) => asRecipient(async (taskId) => ok(await orchestrator.proposeSubtask(taskId, args.contract))));
 
+  // Not a heartbeat: waiting on another task must not mark the caller as working (the orchestrator does not `touch`).
   server.registerTool(RECIPIENT_TOOLS.await_task, {
-    description: 'Wait (up to timeout_s) until another task reaches completed / failed / canceled; returns pending on timeout.',
+    description: 'Wait (up to timeout_s) until another task (typically your subtask) reaches completed / failed / canceled; returns pending with its states on timeout (call again). You cannot await yourself.',
     inputSchema: AwaitTaskInput,
-  }, () => asRecipient(() => fail('relay_await_task is not available yet')));
+  }, (args, extra) => asRecipient(async (taskId) => ok(await orchestrator.awaitTask(args.task_id, args.timeout_s, extra.signal, taskId))));
 
   server.registerTool(RECIPIENT_TOOLS.submit_evidence, {
     description: 'Submit your claimed status per criterion and a summary. relayd collects the diff and runs every check itself.',
