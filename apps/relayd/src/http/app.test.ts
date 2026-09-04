@@ -149,7 +149,7 @@ describe('http', () => {
 
     // review needs pending evidence
     expect((await app.request('/tasks/t-a/review', json({ criterion_id: 'AC-2', status: 'failed' }))).status).toBe(409);
-    orchestrator.respond('t-a', { contract_version: 2, decision: 'accepted', interpretation: ['x'], assumptions: [], risks: [], verification_plan: {}, questions: [] });
+    orchestrator.respond('t-a', { contract_version: 2, decision: 'accepted', interpretation: ['x'], assumptions: [], risks: [], verification_plan: { 'AC-1': 'run it', 'AC-2': 'review' }, questions: [] });
     orchestrator.submitEvidence('t-a', { contract_version: 2, claimed: { 'AC-1': { status: 'passed' }, 'AC-2': { status: 'passed' } }, summary: 's' });
     await orchestrator.settled();
     expect((await app.request('/tasks/t-a/review', json({ criterion_id: 'AC-2', status: 'maybe' }))).status).toBe(400);
