@@ -106,11 +106,15 @@ export function Overlay({ task, tab, inputMode, inputValue, error, height }: Ove
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" height={height} overflow="hidden" paddingX={1}>
-      <Text bold color="cyan">{task.id}  {tabHeader(tab)}</Text>
-      <Text>{content}</Text>
-      {mismatches.length > 0 && <Text color="red" bold>SELF-REPORT MISMATCH: {mismatches.join(', ')}</Text>}
-      {prompt && <Text color="yellow" bold>{prompt}</Text>}
-      {error && <Text color="red">{error}</Text>}
+      <Box height={1} flexShrink={0}>
+        <Text bold color="cyan">{task.id}  {tabHeader(tab)}</Text>
+      </Box>
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
+        <Text>{content}</Text>
+        {mismatches.length > 0 && <Text color="red" bold>SELF-REPORT MISMATCH: {mismatches.join(', ')}</Text>}
+        {prompt && <Text color="yellow" bold>{prompt}</Text>}
+        {error && <Text color="red">{error}</Text>}
+      </Box>
     </Box>
   );
 }
