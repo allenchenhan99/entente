@@ -38,7 +38,7 @@ export function renderGraph(graph: ObjectGraph, options: RenderGraphOptions): st
     const selected = isSelected(options.selected, 'node', node.id);
     const visual = statusVisual(node.status, options.tick);
     const badge = node.badge ? ` ${node.badge}` : '';
-    const identity = node.label === node.id ? node.id : `${node.label} (${node.id})`;
+    const identity = node.label === node.id ? node.id : `${node.id} (${node.label})`;
     canvas.text(
       layout.columns[node.column],
       layout.nodeRows[node.id]!,
@@ -53,7 +53,7 @@ export function renderGraph(graph: ObjectGraph, options: RenderGraphOptions): st
     canvas.text(
       0,
       layout.edgeRows[edge.id]!,
-      `${edge.from} ${visual.line} ${edge.label} ▶ ${edge.to} [${edge.id}]`,
+      `[${edge.id}] ${edge.from} ${visual.line} ${edge.label} ▶ ${edge.to}`,
       statusStyle(edge.status, options.tick, selected),
     );
   }

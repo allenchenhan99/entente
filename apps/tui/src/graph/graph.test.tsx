@@ -12,8 +12,8 @@ describe('graph objects', () => {
   it('renders nodes and exact edge labels in protocol order', () => {
     const frame = plainGraph();
 
-    expect(frame).toContain('backend (t-backend-auth)');
-    expect(frame).toContain('frontend (t-frontend-login)');
+    expect(frame).toContain('t-backend-auth (backend)');
+    expect(frame).toContain('t-frontend-login (frontend)');
     expect(frame).toContain('v2 ✓');
     expect(frame).toContain('? 2');
     expect(frame).toContain('AC-2 ✗');
@@ -27,7 +27,7 @@ describe('graph objects', () => {
     expect(boldFrame).toContain('\u001b[1;33m');
     expect(normalFrame).toContain('\u001b[33m');
     expect(boldFrame).toContain('\u001b[1;31m');
-    expect(stripAnsi(boldFrame)).toContain('◐ backend');
+    expect(stripAnsi(boldFrame)).toContain('◐ t-backend-auth (backend)');
   });
 
   it.each([
