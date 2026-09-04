@@ -1,0 +1,21 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npx vitest run
+      - name: demo app
+        run: cd demo-repo && npm ci && npx vitest run && npx tsc --noEmit
+      - name: protocol docs are up to date
+        run: node scripts/gen-protocol-docs.mjs && git diff --exit-code -- docs/protocol.md docs/schema
