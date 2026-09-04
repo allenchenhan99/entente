@@ -57,4 +57,22 @@ describe('graph objects', () => {
     const frame = renderGraph({ nodes: [], edges: [], inbox: [] }, { width: 40, height: 3, tick: 0 }).map(stripAnsi).join('\n');
     expect(frame).toContain('<empty graph>');
   });
+
+  it('windows graph rows so a late selected edge stays highlighted', () => {
+    const extraEdges = Array.from({ length: 6 }, (_, index) => ({
+      ...objectGraph.edges[0]!,
+      id: `edge-extra-${index}`,
+      label: `extra ${index}`,
+    }));
+    const graph = { ...objectGraph, edges: [...objectGraph.edges, ...extraEdges] };
+    const rendered = renderGraph(graph, {
+      width: 80,
+      height: 5,
+      tick: 0,
+      selected: { kind: 'edge', id: 'edge-extra-5' },
+    }).join('\n');
+
+    expect(stripAnsi(rendered)).toContain('edge-extra-5');
+    expect(rendered).toContain('\u001b[1;7;');
+  });
 });

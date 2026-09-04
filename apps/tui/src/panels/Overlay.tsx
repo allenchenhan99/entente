@@ -138,10 +138,10 @@ export function Overlay(props: OverlayProps) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" height={height} overflow="hidden" paddingX={1}>
       <Box height={1} flexShrink={0}>
-        <Text bold color="cyan">{objectRef.id}  {tabHeader(activeTab, task)}</Text>
+        <Text bold color="cyan" wrap="truncate">{objectRef.id}  {tabHeader(activeTab, task)}</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        <Text>{content}</Text>
+        <Text wrap="truncate">{content}</Text>
         {mismatches.length > 0 && <Text color="red" bold>SELF-REPORT MISMATCH: {mismatches.join(', ')}</Text>}
         {prompt && <Text color="yellow" bold>{prompt}</Text>}
         {error && <Text color="red">{error}</Text>}

@@ -1,6 +1,6 @@
 import type { Event, Graph as ObjectGraph, GraphObjectRef, ObjectAction, State } from '@relay/protocol';
 import { Box, Text, useStdout } from 'ink';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { FocusCommand } from './commands.js';
 import { useDependencies } from './context.js';
@@ -160,6 +160,9 @@ export function App(props: AppProps) {
   const dependencies = useDependencies();
   const graph = useMemo(() => dependencies.graphApi.buildGraph(props.state), [dependencies.graphApi, props.state]);
   const requestedRef = initialRef(graph, props.initialSelectedRef);
+  const pendingInitialRef = useRef<GraphObjectRef | undefined>(
+    refExists(graph, props.initialSelectedRef) ? undefined : props.initialSelectedRef,
+  );
   const [region, setRegion] = useState<FocusRegion>(() => regionForRef(graph, requestedRef));
   const [selectedRef, setSelectedRef] = useState<GraphObjectRef | undefined>(requestedRef);
   const [timelineIndex, setTimelineIndex] = useState(Math.max(0, props.events.length - 1));
@@ -172,6 +175,13 @@ export function App(props: AppProps) {
     : [];
 
   useEffect(() => {
+    const pending = pendingInitialRef.current;
+    if (pending && refExists(graph, pending)) {
+      pendingInitialRef.current = undefined;
+      setSelectedRef(pending);
+      setRegion(regionForRef(graph, pending));
+      return;
+    }
     if (refExists(graph, selectedRef)) return;
     setSelectedRef(initialRef(graph, props.initialSelectedRef));
   }, [graph, props.initialSelectedRef, selectedRef]);
@@ -249,7 +259,7 @@ export function App(props: AppProps) {
       <Panel title="TIMELINE" active={region === 'timeline'} height={sizes.timeline}>
         <Timeline events={props.events} height={Math.max(0, sizes.timeline - 1)} selectedIndex={timelineIndex} />
       </Panel>
-      <Text inverse>
+      <Text inverse wrap="truncate">
         {modeFooter(props)}  {countFooter}{actionFooter ? `  ${actionFooter}` : ''}  ? help{props.dataError ? `  ERROR ${props.dataError}` : ''}
       </Text>
     </Box>

@@ -22,9 +22,13 @@ export function inboxIcon(kind: InboxKind): string {
 export function Inbox({ items, height, selected }: InboxProps) {
   if (items.length === 0) return <Text dimColor>&lt;inbox empty&gt;</Text>;
   const maxItems = Math.max(0, Math.floor(height / 2));
+  const selectedIndex = selected?.kind === 'inbox' ? items.findIndex((item) => item.id === selected.id) : -1;
+  const start = selectedIndex < maxItems
+    ? 0
+    : Math.min(selectedIndex - maxItems + 1, Math.max(0, items.length - maxItems));
   return (
     <Box flexDirection="column" height={height} overflow="hidden">
-      {items.slice(0, maxItems).map((item) => {
+      {items.slice(start, start + maxItems).map((item) => {
         const active = selected?.kind === 'inbox' && selected.id === item.id;
         return (
           <Box key={item.id} flexDirection="column">

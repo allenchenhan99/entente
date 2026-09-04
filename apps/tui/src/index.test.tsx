@@ -50,7 +50,10 @@ describe('headless CLI', () => {
   it('rejects malformed --select references', () => {
     expect(() => parseCliArgs(['--select', 'task:backend'], {})).toThrow('--select');
     expect(() => parseCliArgs(['--select', 'node:'], {})).toThrow('--select');
-    expect(() => parseCliArgs(['--select', 'node:backend:extra'], {})).toThrow('--select');
+    expect(parseCliArgs(['--select', 'node:backend:extra'], {}).selected).toEqual({
+      kind: 'node',
+      id: 'backend:extra',
+    });
   });
 
   it('renders deterministic repair replay frames as plain text with at least 20 lines', () => {

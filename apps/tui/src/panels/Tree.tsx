@@ -1,4 +1,4 @@
-import type { Graph, GraphNode, GraphObjectRef, State, TaskView } from '@relay/protocol';
+import type { Graph, GraphNode, GraphObjectRef, RuntimeState, State, TaskView } from '@relay/protocol';
 import { Box, Text } from 'ink';
 import React from 'react';
 
@@ -34,6 +34,18 @@ function statusColor(node: GraphNode): 'yellow' | 'green' | 'red' | 'cyan' | 'gr
   return 'gray';
 }
 
+function runtimeGlyph(runtime: RuntimeState | undefined): string {
+  switch (runtime) {
+    case 'working': return '●';
+    case 'idle': return '○';
+    case 'blocked': return '◐';
+    case 'done': return '✓';
+    case 'exited': return '✗';
+    case 'unspawned': return '·';
+    default: return '?';
+  }
+}
+
 export function Tree({ state, graph, height, selected }: TreeProps) {
   const missionView = Object.values(state.missions)[0];
   if (!missionView) return <Text dimColor>No mission</Text>;
@@ -42,6 +54,10 @@ export function Tree({ state, graph, height, selected }: TreeProps) {
   const errors = lint.filter((item) => item.severity === 'error').length;
   const warnings = lint.filter((item) => item.severity === 'warning').length;
   const maxAgents = Math.max(0, Math.floor((height - 2) / 2));
+  const selectedIndex = selected?.kind === 'node' ? agents.findIndex((node) => node.id === selected.id) : -1;
+  const start = selectedIndex < maxAgents
+    ? 0
+    : Math.min(selectedIndex - maxAgents + 1, Math.max(0, agents.length - maxAgents));
 
   return (
     <Box flexDirection="column" height={height} overflow="hidden">
@@ -52,13 +68,13 @@ export function Tree({ state, graph, height, selected }: TreeProps) {
           : null}
       </Text>
       <Text dimColor wrap="truncate">lint: {errors} errors · {warnings} warnings</Text>
-      {agents.length === 0 ? <Text dimColor>&lt;no agents&gt;</Text> : agents.slice(0, maxAgents).map((node) => {
+      {agents.length === 0 ? <Text dimColor>&lt;no agents&gt;</Text> : agents.slice(start, start + maxAgents).map((node) => {
         const task = node.task_id ? state.tasks[node.task_id] : undefined;
         const active = selected?.kind === 'node' && selected.id === node.id;
         return (
           <Box key={node.id} flexDirection="column">
             <Text color={statusColor(node)} bold={active} inverse={active} wrap="truncate">
-              {active ? '›' : '▸'} {node.id}  {node.label}  {node.runtime ?? '-'}  {node.task_state ?? '-'}
+              {active ? '›' : '▸'} {node.id}  {node.label}  {runtimeGlyph(node.runtime)} {node.runtime ?? '-'}  {node.task_state ?? '-'}  {node.handoff_state ?? '-'}  v{task?.contract.version ?? '-'}
             </Text>
             <Text color={statusColor(node)} dimColor wrap="truncate">    {taskDetail(node, task)}</Text>
           </Box>

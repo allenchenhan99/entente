@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { midClarificationState } from './__fixtures__/states.js';
-import { objectGraphApi } from './__fixtures__/graph.js';
+import { objectGraph, objectGraphApi } from './__fixtures__/graph.js';
 import { App } from './App.js';
 import { DependenciesProvider, type FetchLike } from './context.js';
 
@@ -128,17 +128,23 @@ describe('object story', () => {
     expect(frame.indexOf(`id: ${ref.id}`)).toBeLessThan(frame.indexOf(`Story begins for ${ref.id}.`));
   });
 
-  it('opens --select Story after a replay graph becomes available', async () => {
+  it('keeps --select pending while fallback objects appear before the requested replay object', async () => {
     const api = objectGraphApi();
     const deferredApi = {
       ...api,
       buildGraph: (state: typeof midClarificationState) => state.last_seq === 0
         ? { nodes: [], edges: [], inbox: [] }
-        : api.buildGraph(state),
+        : state.last_seq === 1
+          ? { nodes: [objectGraph.nodes[0]!], edges: [], inbox: [] }
+          : api.buildGraph(state),
     };
     function DeferredReplay() {
       const [state, setState] = useState(initialState());
-      useEffect(() => setState(midClarificationState), []);
+      useEffect(() => {
+        setState({ ...midClarificationState, last_seq: 1 });
+        const timer = setTimeout(() => setState(midClarificationState), 10);
+        return () => clearTimeout(timer);
+      }, []);
       return (
         <DependenciesProvider graphApi={deferredApi} execute={vi.fn()}>
           <App
@@ -149,7 +155,7 @@ describe('object story', () => {
             focusCmd="none"
             width={100}
             height={41}
-            initialSelectedRef={{ kind: 'node', id: 'planner' }}
+            initialSelectedRef={{ kind: 'node', id: 't-backend-auth' }}
             inspectSelected
           />
         </DependenciesProvider>
@@ -158,11 +164,11 @@ describe('object story', () => {
 
     const view = render(<DeferredReplay />);
     const deadline = Date.now() + 1_000;
-    while (!view.lastFrame()?.includes('planner  [Story]') && Date.now() < deadline) {
+    while (!view.lastFrame()?.includes('t-backend-auth  [Story]') && Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
-    expect(view.lastFrame()).toContain('planner  [Story]');
-    expect(view.lastFrame()).toContain('Mission planner');
+    expect(view.lastFrame()).toContain('t-backend-auth  [Story]');
+    expect(view.lastFrame()).toContain('Backend agent');
   });
 });
 
@@ -182,5 +188,14 @@ describe('object inbox', () => {
 
     expect(view.lastFrame()).toContain('Backend contract');
     expect(view.lastFrame()).toContain('[Story]');
+  });
+
+  it('uses i to inspect the inbox object itself', async () => {
+    const view = renderObjects({ initialSelectedRef: { kind: 'inbox', id: 'inbox-backend-question' } });
+    view.stdin.write('i');
+    await flush();
+
+    expect(view.lastFrame()).toContain('inbox-backend-question  [Story]');
+    expect(view.lastFrame()).toContain('Backend question');
   });
 });

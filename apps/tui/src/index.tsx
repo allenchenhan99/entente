@@ -46,7 +46,7 @@ function positiveNumber(value: string, option: string): number {
 }
 
 function graphObjectRef(value: string): GraphObjectRef {
-  const match = /^(node|edge|inbox):([^:]+)$/.exec(value);
+  const match = /^(node|edge|inbox):(.+)$/.exec(value);
   if (!match) throw new Error('--select must be node:<id>, edge:<id>, or inbox:<id>');
   return { kind: match[1] as GraphObjectRef['kind'], id: match[2]! };
 }

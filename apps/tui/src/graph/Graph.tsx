@@ -29,6 +29,16 @@ export function renderGraph(graph: ObjectGraph, options: RenderGraphOptions): st
   }
 
   const layout = layoutGraph(graph, options.width);
+  const selectedRow = options.selected?.kind === 'node'
+    ? layout.nodeRows[options.selected.id]
+    : options.selected?.kind === 'edge'
+      ? layout.edgeRows[options.selected.id]
+      : undefined;
+  const contentHeight = Math.max(0, options.height - 1);
+  const rowOffset = selectedRow !== undefined && selectedRow > contentHeight
+    ? selectedRow - contentHeight
+    : 0;
+  const visibleRow = (logicalRow: number) => logicalRow - rowOffset;
   const headings = ['HUMAN / PLANNER', 'AGENTS', 'VERIFIER', 'DONE'] as const;
   for (const column of [0, 1, 2, 3] as const) {
     canvas.text(layout.columns[column], 0, headings[column], { color: 'gray', bold: true });
@@ -41,7 +51,7 @@ export function renderGraph(graph: ObjectGraph, options: RenderGraphOptions): st
     const identity = node.label === node.id ? node.id : `${node.id} (${node.label})`;
     canvas.text(
       layout.columns[node.column],
-      layout.nodeRows[node.id]!,
+      visibleRow(layout.nodeRows[node.id]!),
       `${visual.glyph} ${identity}${badge}`,
       statusStyle(node.status, options.tick, selected),
     );
@@ -52,7 +62,7 @@ export function renderGraph(graph: ObjectGraph, options: RenderGraphOptions): st
     const visual = statusVisual(edge.status, options.tick);
     canvas.text(
       0,
-      layout.edgeRows[edge.id]!,
+      visibleRow(layout.edgeRows[edge.id]!),
       `[${edge.id}] ${edge.from} ${visual.line} ${edge.label} ▶ ${edge.to}`,
       statusStyle(edge.status, options.tick, selected),
     );

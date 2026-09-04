@@ -182,7 +182,7 @@ export function useAppKeys(options: AppKeyOptions): AppKeyState {
       beginInput(action, 'cancel-confirm', 'Contract');
       return;
     }
-    if (key.return || input === 'i') {
+    if (key.return) {
       if (!options.selectedRef) return;
       if (options.selectedRef.kind === 'inbox') {
         const item = options.graph.inbox.find((candidate) => candidate.id === options.selectedRef!.id);
@@ -191,6 +191,10 @@ export function useAppKeys(options: AppKeyOptions): AppKeyState {
       } else {
         openStory();
       }
+      return;
+    }
+    if (input === 'i') {
+      openStory();
       return;
     }
     if (key.tab) {

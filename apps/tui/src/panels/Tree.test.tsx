@@ -14,8 +14,8 @@ describe('tree objects', () => {
 
     expect(frame).toContain('MISSION  Add secure login to this application  executing');
     expect(frame).toContain('lint: 0 errors · 0 warnings');
-    expect(frame).toContain('t-backend-auth  backend  blocked  executing');
-    expect(frame).toContain('t-frontend-login  frontend  working  executing');
+    expect(frame).toContain('t-backend-auth  backend  ◐ blocked  executing  accepted  v2');
+    expect(frame).toContain('t-frontend-login  frontend  ● working  executing  accepted  v1');
     expect(frame).not.toContain('planner  planner');
     expect(frame).not.toContain('verifier  verifier');
   });
@@ -49,5 +49,21 @@ describe('tree objects', () => {
     const graph = { ...objectGraph, nodes: objectGraph.nodes.filter((node) => node.kind !== 'agent') };
     const { lastFrame } = render(<Tree state={midClarificationState} graph={graph} height={8} />);
     expect(lastFrame()).toContain('<no agents>');
+  });
+
+  it('windows agent rows so an off-screen selected object stays visible', () => {
+    const extraAgents = Array.from({ length: 5 }, (_, index) => ({
+      id: `t-extra-${index}`,
+      kind: 'agent' as const,
+      label: `extra-${index}`,
+      column: 1 as const,
+      status: 'pending' as const,
+    }));
+    const graph = { ...objectGraph, nodes: [...objectGraph.nodes, ...extraAgents] };
+    const { lastFrame } = render(
+      <Tree state={midClarificationState} graph={graph} height={8} selected={{ kind: 'node', id: 't-extra-4' }} />,
+    );
+
+    expect(lastFrame()).toContain('› t-extra-4');
   });
 });
