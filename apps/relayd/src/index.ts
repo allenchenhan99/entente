@@ -17,8 +17,10 @@ import { createOrchestrator } from './orchestrator/orchestrator.js';
 import type { Orchestrator } from './orchestrator/orchestrator.js';
 import { createApp } from './http/app.js';
 import { mountPty } from './http/pty.js';
+import { mountPtyProxy } from './http/pty-proxy.js';
 import { createSessionAuth } from './auth/token.js';
 import type { RelayHost } from './pty/host.js';
+import type { RelaytermHost } from './launch/hosts/relayterm.js';
 import { usingFallbackLint } from './lint.js';
 import type { EventStore, WorktreeManager, CheckRunner, RepairPolicy, TerminalHost, AgentRuntime } from './ports.js';
 import { fakeWorktrees, fakeChecks, fakeRepair, fakeHost, fakeRuntime } from './fakes/index.js';
@@ -116,8 +118,8 @@ export async function resolvePorts(
   const checks = (await fromModule<CheckRunner>(verifyMod, FACTORIES.checks, [{ ...deps, worktrees }], log)) ?? fake('checks', () => fakeChecks({}, store));
   const repair = (await fromModule<RepairPolicy>(repairMod, FACTORIES.repair, [deps], log)) ?? fake('repair', fakeRepair);
   const useLaunch = config.host !== 'fake';
-  // The relay host records casts under the run directory, so it alone needs config-derived deps.
-  const hostDeps = config.host === 'relay' ? { relayDir: config.relayDir, runId: config.runId } : {};
+  // The relay and relayterm hosts record casts under the run directory, so they alone need config-derived deps.
+  const hostDeps = config.host === 'relay' || config.host === 'relayterm' ? { relayDir: config.relayDir, runId: config.runId } : {};
   const host = (useLaunch ? await fromModule<TerminalHost>(launchMod, FACTORIES.host, [config.host, hostDeps], log) : undefined) ?? fake('host', fakeHost);
   const runtimes = {} as Record<RuntimeKind, AgentRuntime>;
   for (const kind of ['claude-code', 'codex'] as RuntimeKind[]) {
@@ -147,7 +149,7 @@ export async function main(env: Record<string, string | undefined> = process.env
   const ports = await resolvePorts(config, store, log, defaultImporter, env);
   // Per-daemon session token (docs/security.md): printed once, written to <relayDir>/session.token (0600).
   const auth = createSessionAuth({ relayDir: config.relayDir, mode: config.authMode });
-  if (resuming && ports.host.kind === 'relay') {
+  if (resuming && (ports.host.kind === 'relay' || ports.host.kind === 'relayterm')) {
     // The relay host numbers panes from 1 and casts are opened with `flags: 'w'`; without this the respawned
     // `relay:1` would overwrite the previous run's recording (see HANDOFF_NOTES.md for the proper host option).
     const known = [...(readWorkspace(dir)?.panes ?? []), ...panesFromEvents(store.all(), config.relayDir)];
@@ -175,6 +177,16 @@ export async function main(env: Record<string, string | undefined> = process.env
     const { handleUpgrade } = mountPty(app, ports.host as unknown as RelayHost, { auth });
     server.on('upgrade', handleUpgrade);
   }
+  // RELAY_HOST=relayterm: the Rust termd owns the terminals; relayd starts it now (so `--first-pane` from the
+  // resume above is honoured) and proxies /panes*, /pty/* and /metrics to it (docs/relay-term-spec.md §10).
+  let termd: RelaytermHost | undefined;
+  if (config.host === 'relayterm' && ports.host.kind === 'relayterm') {
+    termd = ports.host as unknown as RelaytermHost;
+    const { baseUrl } = await termd.start();
+    log(`relayd: termd listening on ${baseUrl} (pid ${termd.pid})`);
+    const { handleUpgrade } = mountPtyProxy(app, { baseUrl, token: termd.token, auth });
+    server.on('upgrade', handleUpgrade);
+  }
   fetchImpl = (req) => app.fetch(req);
 
   log(`relayd ${RELAYD_VERSION} · repo ${config.repoRoot} · log ${path.join(dir, 'events.jsonl')}`);
@@ -192,9 +204,11 @@ export async function main(env: Record<string, string | undefined> = process.env
     log(`relayd resumed run ${config.runId} (${r.tasks} tasks, ${r.respawned.length} panes respawned${failed})`);
   }
 
-  const close = () => {
+  const close = async () => {
     tracker.stop();
-    return new Promise<void>((resolve) => server.close(() => resolve()));
+    // termd goes with the daemon (its panes get SIGHUP as the ptys close); casts are already on disk.
+    if (termd) await termd.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   };
   return { server, port, url, orchestrator, close };
 }

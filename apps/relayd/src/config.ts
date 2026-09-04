@@ -5,7 +5,7 @@ import { parseAuthMode, type AuthMode } from './auth/token.js';
 
 export const RELAYD_VERSION = '0.0.1';
 
-export type HostKind = 'tmux' | 'herdr' | 'relay' | 'fake';
+export type HostKind = 'tmux' | 'herdr' | 'relay' | 'relayterm' | 'fake';
 
 export interface RelaydConfig {
   port: number;
@@ -20,7 +20,7 @@ export interface RelaydConfig {
   authMode: AuthMode;
 }
 
-const HOSTS: HostKind[] = ['tmux', 'herdr', 'relay', 'fake'];
+const HOSTS: HostKind[] = ['tmux', 'herdr', 'relay', 'relayterm', 'fake'];
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): RelaydConfig {
   const repoRoot = path.resolve(env.RELAY_REPO ?? process.cwd());
