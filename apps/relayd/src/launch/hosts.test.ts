@@ -109,17 +109,26 @@ describe('herdr host', () => {
     expect(calls[calls.length - 1]!.argv).toEqual(['herdr', 'pane', 'close', 'w1:p7']);
   });
 
-  it('closes the pane and throws when the prompt cannot be delivered', async () => {
+  it('leaves the pane open and reports its output when the prompt cannot be delivered', async () => {
     const { exec, calls } = fakeExec((argv) => {
       if (argv[1] === 'pane' && argv[2] === 'split') return { stdout: splitJson };
       if (argv[1] === 'agent' && (argv[2] === 'prompt' || argv[2] === 'wait')) return { exitCode: 1, stderr: 'agent_prompt_stalled' };
+      if (argv[1] === 'pane' && argv[2] === 'read') return { stdout: 'error: unknown option --nope\n' };
       return { stdout: '{}' };
     });
     const host = createTerminalHost('herdr', { exec, env: { HERDR_PANE_ID: 'w1:p1' } });
+
+    // The pane is the only record of why an agent died during startup, so it must survive the failure
+    // and its tail must reach the error message.
     await expect(host.spawn(spawnOpts)).rejects.toThrow(/agent prompt failed/);
-    expect(calls.map((c) => c.argv.slice(0, 3))).toEqual([
+    await expect(host.spawn(spawnOpts)).rejects.toThrow(/pane w1:p7 left open for inspection/);
+    await expect(host.spawn(spawnOpts)).rejects.toThrow(/unknown option --nope/);
+
+    expect(calls.map((c) => c.argv.slice(0, 3))).not.toContainEqual(['herdr', 'pane', 'close']);
+    expect(calls.map((c) => c.argv.slice(0, 3)).slice(0, 7)).toEqual([
       ['herdr', 'pane', 'split'], ['herdr', 'agent', 'start'], ['herdr', 'agent', 'prompt'],
-      ['herdr', 'agent', 'send-keys'], ['herdr', 'agent', 'wait'], ['herdr', 'agent', 'prompt'], ['herdr', 'pane', 'close'],
+      ['herdr', 'agent', 'send-keys'], ['herdr', 'agent', 'wait'], ['herdr', 'agent', 'prompt'],
+      ['herdr', 'pane', 'read'],
     ]);
   });
 

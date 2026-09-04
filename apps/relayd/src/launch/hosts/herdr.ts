@@ -7,6 +7,7 @@
  * focus:   herdr agent focus <paneId>
  * isAlive: herdr agent get <paneId>   (exit 0 ⇒ alive)
  * kill:    herdr pane close <paneId>
+ * read:    herdr pane read <paneId> --source recent-unwrapped   (only to explain a failed spawn)
  *
  * The anchor pane is `RELAY_ANCHOR_PANE`, falling back to Herdr's injected `HERDR_PANE_ID`
  * (the pane relayd itself runs in). Agent names must match `[a-z][a-z0-9_-]{0,31}`.
@@ -38,6 +39,9 @@ export function herdrAgentKind(executable: string): HerdrAgentKind {
 
 /** How long to wait for the agent to start working after a prompt before applying a recovery step. */
 const PROMPT_WAIT_MS = 15_000;
+
+/** How much of a failed pane's output to attach to the spawn error. */
+const PANE_TAIL_LINES = 40;
 
 function isPaneBusy(result: { stdout: string; stderr: string }): boolean {
   return /agent_pane_busy/.test(result.stderr) || /agent_pane_busy/.test(result.stdout);
@@ -106,7 +110,12 @@ export class HerdrHost implements TerminalHost {
    * presses Enter atomically and (with --wait) reports whether the agent actually started working. Two
    * observed failure modes are handled: Codex keeps a large paste in its composer without submitting
    * (fixed by one more Enter), and Claude Code drops a paste that arrives while it is still initialising
-   * (fixed by sending the prompt again). Anything else closes the pane and throws.
+   * (fixed by sending the prompt again).
+   *
+   * Anything else throws — but the pane is deliberately LEFT OPEN. When the agent dies during startup the
+   * only record of why is what it printed in its own pane, and `agent prompt` then reports the useless
+   * `agent_not_found` (Herdr clears the name when its agent exits). Closing the pane here destroyed that
+   * evidence. The pane id is named in the error and its tail is attached.
    */
   private async deliverPrompt(name: string, paneId: string, prompt: string): Promise<void> {
     const promptArgv = ['herdr', 'agent', 'prompt', name, prompt, '--wait', '--until', 'working', '--timeout', String(PROMPT_WAIT_MS)];
@@ -120,8 +129,18 @@ export class HerdrHost implements TerminalHost {
     result = await this.exec(promptArgv);
     if (result.exitCode === 0) return;
 
-    await this.exec(['herdr', 'pane', 'close', paneId]).catch(() => undefined);
-    throw new Error(`herdr host: agent prompt failed: ${describeFailure(promptArgv, result)}`);
+    throw new Error(
+      `herdr host: agent prompt failed: ${describeFailure(promptArgv, result)}`
+      + `; pane ${paneId} left open for inspection${await this.paneTail(paneId)}`,
+    );
+  }
+
+  /** Best-effort tail of a pane, appended to spawn errors so a startup crash is diagnosable. */
+  private async paneTail(paneId: string): Promise<string> {
+    const read = await this.exec(['herdr', 'pane', 'read', paneId, '--source', 'recent-unwrapped', '--lines', String(PANE_TAIL_LINES)])
+      .catch(() => undefined);
+    const tail = read?.exitCode === 0 ? read.stdout.trim() : '';
+    return tail === '' ? '' : `, last output:\n${tail}`;
   }
 
   async focus(paneId: string): Promise<void> {
