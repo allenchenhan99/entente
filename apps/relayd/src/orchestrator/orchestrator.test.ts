@@ -137,8 +137,8 @@ describe('spawn gating', () => {
     expect(r.ofType('task_proposed')[1].payload.contract.version).toBe(2);
     expect(r.ofType('task_proposed')[1].actor).toBe('human');
     expect(r.host.calls.spawn).toHaveLength(1);
-    // re-proposing does not spawn twice
-    await r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'human');
+    // once spawned the id can no longer be re-proposed (revise instead), so nothing spawns twice
+    await expect(r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'human')).rejects.toMatchObject({ status: 409 });
     expect(r.host.calls.spawn).toHaveLength(1);
   });
 
@@ -660,5 +660,62 @@ describe('evidence version guard', () => {
     expect(out.status).toBe('invalid');
     if (out.status !== 'invalid') throw new Error();
     expect(out.errors[0]).toMatch(/contract_version v1 .*current contract .*v2/);
+  });
+});
+
+describe('re-propose guard', () => {
+  const agrees = (r: ReturnType<typeof createTestRelay>, id: string) => {
+    expect(r.orchestrator.taskView(id)!.task_state).toBe(r.store.state().tasks[id].task_state);
+  };
+
+  it('re-proposing a lint-blocked, unspawned id yields v2 and spawns; the reducer agrees on task_state', async () => {
+    const r = createTestRelay();
+    const { mission_id } = r.orchestrator.createMission(mission);
+    expect((await r.orchestrator.proposeTask(mission_id, sampleContract('t-a', { acceptance_criteria: [] }), 'planner')).status).toBe('lint_error');
+    const fixed = await r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner');
+    expect(fixed).toMatchObject({ status: 'proposed', version: 2 });
+    expect(r.host.calls.spawn).toHaveLength(1);
+    agrees(r, 't-a');
+  });
+
+  it('re-proposing a spawned (proposed), accepted or completed id is a 409 pointing at relay_revise_task', async () => {
+    const r = createTestRelay();
+    const { mission_id } = r.orchestrator.createMission(mission);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner');
+    await expect(r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner'))
+      .rejects.toMatchObject({ status: 409, message: expect.stringMatching(/task t-a is proposed; use relay_revise_task/) });
+    r.orchestrator.respond('t-a', accept);
+    await expect(r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner'))
+      .rejects.toMatchObject({ status: 409, message: expect.stringMatching(/task t-a is executing; use relay_revise_task/) });
+    r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+    expect(r.orchestrator.taskView('t-a')!.task_state).toBe('completed');
+    await expect(r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'human'))
+      .rejects.toMatchObject({ status: 409, message: expect.stringMatching(/task t-a is completed; use relay_revise_task/) });
+    // Nothing was appended for the refused proposals: still exactly one task_proposed, still version 1.
+    expect(r.ofType('task_proposed')).toHaveLength(1);
+    expect(r.orchestrator.taskView('t-a')!.contract.version).toBe(1);
+    expect(r.store.state().tasks['t-a'].contract.version).toBe(1);
+    agrees(r, 't-a');
+  });
+
+  it('a lint-clean id waiting on a dependency is not lint-blocked: re-proposing it is a 409 too', async () => {
+    const r = createTestRelay();
+    const { mission_id } = r.orchestrator.createMission(mission);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-b', { dependencies: ['t-a'] }), 'planner');
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner');
+    expect(r.orchestrator.taskView('t-b')!.runtime).toBe('unspawned');
+    await expect(r.orchestrator.proposeTask(mission_id, sampleContract('t-b', { dependencies: ['t-a'] }), 'planner')).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('proposeSubtask follows the same rule: lint-blocked child may be re-proposed, a spawned child may not', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    const child = sampleContract('t-a-schema', { scope: { allowed_paths: ['src/schema/**'] } });
+    expect((await r.orchestrator.proposeSubtask('t-a', { ...child, acceptance_criteria: [] })).status).toBe('lint_error');
+    expect(await r.orchestrator.proposeSubtask('t-a', child)).toMatchObject({ status: 'proposed', version: 2 });
+    await expect(r.orchestrator.proposeSubtask('t-a', child)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/relay_revise_task/) });
+    agrees(r, 't-a-schema');
   });
 });

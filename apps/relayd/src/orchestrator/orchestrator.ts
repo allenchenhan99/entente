@@ -413,6 +413,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const m = mustMission(missionId);
     const existing = tasks.get(input.id);
     if (existing && existing.missionId !== missionId) throw conflict(`task ${input.id} belongs to mission ${existing.missionId}`);
+    // "Fix and re-propose" exists for one situation only: the contract never got past lint, so no agent has seen
+    // it. Anything else already has a reader (or a history) and must go through reviseTask, which keeps the
+    // version chain, clarifications and the recipient's re-response intact.
+    if (existing && !(!existing.spawned && !existing.spawning && hasLintErrors(existing.lint))) {
+      throw conflict(`task ${input.id} is ${existing.taskState}; use relay_revise_task`);
+    }
     const version = existing ? current(existing).version + 1 : 1;
     const contract = TaskContract.parse({
       ...input, mission_id: missionId, version, sender, clarifications: existing ? current(existing).clarifications : [],
