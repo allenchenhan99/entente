@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "rule": {
+      "type": "string",
+      "enum": [
+        "missing_goal",
+        "no_acceptance_criteria",
+        "unverifiable_criterion",
+        "unbounded_scope",
+        "unbounded_retry",
+        "missing_input",
+        "unknown_dependency",
+        "dependency_cycle",
+        "overlapping_scope",
+        "no_non_goals",
+        "no_evidence_required",
+        "stale_handoff",
+        "long_block",
+        "interpretation_drift"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warning",
+        "info"
+      ]
+    },
+    "message": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "field": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "rule",
+    "severity",
+    "message",
+    "task_id"
+  ],
+  "additionalProperties": false
+}

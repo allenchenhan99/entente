@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "contract_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "claimed": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^AC-\\d+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "failed",
+              "skipped"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "default": "",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "contract_version",
+    "attempt",
+    "claimed",
+    "summary"
+  ],
+  "additionalProperties": false
+}

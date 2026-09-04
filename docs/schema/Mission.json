@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "repo": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "success_definition": {
+      "default": "",
+      "type": "string"
+    },
+    "integration_check": {
+      "default": "npx vitest run",
+      "type": "string"
+    },
+    "budget": {
+      "default": {
+        "max_repairs_per_task": 3
+      },
+      "type": "object",
+      "properties": {
+        "max_repairs_per_task": {
+          "default": 3,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "max_repairs_per_task"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "id",
+    "repo",
+    "title",
+    "success_definition",
+    "integration_check",
+    "budget"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "contract_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "needs_clarification",
+        "rejected"
+      ]
+    },
+    "interpretation": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "assumptions": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "verification_plan": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "questions": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^Q\\d+$"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "blocking"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "contract_version",
+    "decision",
+    "interpretation",
+    "assumptions",
+    "risks",
+    "verification_plan",
+    "questions"
+  ],
+  "additionalProperties": false
+}

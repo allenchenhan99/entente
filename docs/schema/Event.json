@@ -1,0 +1,2898 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "mission_created"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "success_definition": {
+              "default": "",
+              "type": "string"
+            },
+            "integration_check": {
+              "default": "npx vitest run",
+              "type": "string"
+            },
+            "budget": {
+              "default": {
+                "max_repairs_per_task": 3
+              },
+              "type": "object",
+              "properties": {
+                "max_repairs_per_task": {
+                  "default": 3,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "max_repairs_per_task"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "repo",
+            "title",
+            "success_definition",
+            "integration_check",
+            "budget"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "tasks_planned"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "task_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "task_ids"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "lint_reported"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "contract_version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "rule": {
+                    "type": "string",
+                    "enum": [
+                      "missing_goal",
+                      "no_acceptance_criteria",
+                      "unverifiable_criterion",
+                      "unbounded_scope",
+                      "unbounded_retry",
+                      "missing_input",
+                      "unknown_dependency",
+                      "dependency_cycle",
+                      "overlapping_scope",
+                      "no_non_goals",
+                      "no_evidence_required",
+                      "stale_handoff",
+                      "long_block",
+                      "interpretation_drift"
+                    ]
+                  },
+                  "severity": {
+                    "type": "string",
+                    "enum": [
+                      "error",
+                      "warning",
+                      "info"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "task_id": {
+                    "type": "string"
+                  },
+                  "field": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "rule",
+                  "severity",
+                  "message",
+                  "task_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "contract_version",
+            "results"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_proposed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^t-[a-z0-9-]+$"
+                },
+                "mission_id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "sender": {
+                  "type": "string"
+                },
+                "recipient": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                },
+                "runtime": {
+                  "type": "string",
+                  "enum": [
+                    "claude-code",
+                    "codex"
+                  ]
+                },
+                "goal": {
+                  "default": "",
+                  "type": "string"
+                },
+                "inputs": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "constraints": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "non_goals": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scope": {
+                  "default": {
+                    "allowed_paths": []
+                  },
+                  "type": "object",
+                  "properties": {
+                    "allowed_paths": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "allowed_paths"
+                  ],
+                  "additionalProperties": false
+                },
+                "acceptance_criteria": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^AC-\\d+$"
+                      },
+                      "condition": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "check": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "command"
+                              },
+                              "run": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "timeout_ms": {
+                                "default": 120000,
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "run",
+                              "timeout_ms"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "diff_scope"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "file_exists"
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "path"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "human_review"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "llm_judge"
+                              },
+                              "prompt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "condition"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "output": {
+                  "default": {
+                    "type": "code_change",
+                    "evidence_required": []
+                  },
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "default": "code_change",
+                      "type": "string",
+                      "enum": [
+                        "code_change"
+                      ]
+                    },
+                    "evidence_required": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "git_diff",
+                          "changed_files",
+                          "check_outputs"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "evidence_required"
+                  ],
+                  "additionalProperties": false
+                },
+                "dependencies": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "budget": {
+                  "type": "object",
+                  "properties": {
+                    "max_repairs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "stagnation_limit": {
+                      "default": 2,
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "max_repairs",
+                    "stagnation_limit"
+                  ],
+                  "additionalProperties": false
+                },
+                "clarifications": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "question_id": {
+                        "type": "string"
+                      },
+                      "answer": {
+                        "type": "string"
+                      },
+                      "answered_by": {
+                        "type": "string"
+                      },
+                      "at": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "question_id",
+                      "answer",
+                      "answered_by",
+                      "at"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "mission_id",
+                "version",
+                "sender",
+                "recipient",
+                "runtime",
+                "goal",
+                "inputs",
+                "constraints",
+                "non_goals",
+                "scope",
+                "acceptance_criteria",
+                "output",
+                "dependencies",
+                "clarifications"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "contract"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "clarification_requested"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "contract_version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "response": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string"
+                },
+                "contract_version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "decision": {
+                  "type": "string",
+                  "enum": [
+                    "accepted",
+                    "needs_clarification",
+                    "rejected"
+                  ]
+                },
+                "interpretation": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "assumptions": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "risks": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "verification_plan": {
+                  "default": {},
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "questions": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^Q\\d+$"
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blocking": {
+                        "default": true,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "text",
+                      "blocking"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "task_id",
+                "contract_version",
+                "decision",
+                "interpretation",
+                "assumptions",
+                "risks",
+                "verification_plan",
+                "questions"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "contract_version",
+            "response"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "clarification_answered"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "answers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "question_id": {
+                    "type": "string"
+                  },
+                  "answer": {
+                    "type": "string"
+                  },
+                  "answered_by": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "question_id",
+                  "answer",
+                  "answered_by",
+                  "at"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "answers"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "contract_revised"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^t-[a-z0-9-]+$"
+                },
+                "mission_id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "sender": {
+                  "type": "string"
+                },
+                "recipient": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                },
+                "runtime": {
+                  "type": "string",
+                  "enum": [
+                    "claude-code",
+                    "codex"
+                  ]
+                },
+                "goal": {
+                  "default": "",
+                  "type": "string"
+                },
+                "inputs": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "constraints": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "non_goals": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scope": {
+                  "default": {
+                    "allowed_paths": []
+                  },
+                  "type": "object",
+                  "properties": {
+                    "allowed_paths": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "allowed_paths"
+                  ],
+                  "additionalProperties": false
+                },
+                "acceptance_criteria": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^AC-\\d+$"
+                      },
+                      "condition": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "check": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "command"
+                              },
+                              "run": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "timeout_ms": {
+                                "default": 120000,
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "run",
+                              "timeout_ms"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "diff_scope"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "file_exists"
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "path"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "human_review"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "llm_judge"
+                              },
+                              "prompt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "condition"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "output": {
+                  "default": {
+                    "type": "code_change",
+                    "evidence_required": []
+                  },
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "default": "code_change",
+                      "type": "string",
+                      "enum": [
+                        "code_change"
+                      ]
+                    },
+                    "evidence_required": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "git_diff",
+                          "changed_files",
+                          "check_outputs"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "evidence_required"
+                  ],
+                  "additionalProperties": false
+                },
+                "dependencies": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "budget": {
+                  "type": "object",
+                  "properties": {
+                    "max_repairs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "stagnation_limit": {
+                      "default": 2,
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "max_repairs",
+                    "stagnation_limit"
+                  ],
+                  "additionalProperties": false
+                },
+                "clarifications": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "question_id": {
+                        "type": "string"
+                      },
+                      "answer": {
+                        "type": "string"
+                      },
+                      "answered_by": {
+                        "type": "string"
+                      },
+                      "at": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "question_id",
+                      "answer",
+                      "answered_by",
+                      "at"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "mission_id",
+                "version",
+                "sender",
+                "recipient",
+                "runtime",
+                "goal",
+                "inputs",
+                "constraints",
+                "non_goals",
+                "scope",
+                "acceptance_criteria",
+                "output",
+                "dependencies",
+                "clarifications"
+              ],
+              "additionalProperties": false
+            },
+            "previous_version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "contract",
+            "previous_version"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_accepted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "contract_version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "response": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string"
+                },
+                "contract_version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "decision": {
+                  "type": "string",
+                  "enum": [
+                    "accepted",
+                    "needs_clarification",
+                    "rejected"
+                  ]
+                },
+                "interpretation": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "assumptions": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "risks": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "verification_plan": {
+                  "default": {},
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "questions": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^Q\\d+$"
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blocking": {
+                        "default": true,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "text",
+                      "blocking"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "task_id",
+                "contract_version",
+                "decision",
+                "interpretation",
+                "assumptions",
+                "risks",
+                "verification_plan",
+                "questions"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "contract_version",
+            "response"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_rejected"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "contract_version": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "response": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string"
+                },
+                "contract_version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "decision": {
+                  "type": "string",
+                  "enum": [
+                    "accepted",
+                    "needs_clarification",
+                    "rejected"
+                  ]
+                },
+                "interpretation": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "assumptions": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "risks": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "verification_plan": {
+                  "default": {},
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "questions": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^Q\\d+$"
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blocking": {
+                        "default": true,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "text",
+                      "blocking"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "task_id",
+                "contract_version",
+                "decision",
+                "interpretation",
+                "assumptions",
+                "risks",
+                "verification_plan",
+                "questions"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "contract_version",
+            "response"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "worktree_created"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            },
+            "base": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "branch",
+            "base"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "agent_spawned"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "runtime": {
+              "type": "string",
+              "enum": [
+                "claude-code",
+                "codex"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "runtime",
+            "pane_id",
+            "session_id",
+            "cwd"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "agent_exited"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "pane_id": {
+              "type": "string"
+            },
+            "exit_reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "work_started"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "progress_reported"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_blocked"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "waiting_on": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_unblocked"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "evidence_submitted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "submission": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string"
+                },
+                "contract_version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "claimed": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "pattern": "^AC-\\d+$"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "passed",
+                          "failed",
+                          "skipped"
+                        ]
+                      },
+                      "note": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "summary": {
+                  "default": "",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "task_id",
+                "contract_version",
+                "attempt",
+                "claimed",
+                "summary"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "submission"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "checks_started"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "attempt": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "attempt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "check_passed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "attempt": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "criterion_id": {
+              "type": "string",
+              "pattern": "^AC-\\d+$"
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "pending_human",
+                    "error"
+                  ]
+                },
+                "output_path": {
+                  "type": "string"
+                },
+                "observed": {
+                  "type": "string"
+                },
+                "duration_ms": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "attempt",
+            "criterion_id",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "check_failed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "attempt": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "criterion_id": {
+              "type": "string",
+              "pattern": "^AC-\\d+$"
+            },
+            "result": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "pending_human",
+                    "error"
+                  ]
+                },
+                "output_path": {
+                  "type": "string"
+                },
+                "observed": {
+                  "type": "string"
+                },
+                "duration_ms": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "attempt",
+            "criterion_id",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "human_review_recorded"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "attempt": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "criterion_id": {
+              "type": "string",
+              "pattern": "^AC-\\d+$"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "passed",
+                "failed"
+              ]
+            },
+            "observed_failure": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempt",
+            "criterion_id",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "evidence_recorded"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "record": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string"
+                },
+                "contract_version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "git_diff_path": {
+                  "type": "string"
+                },
+                "changed_files": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "checks": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "pattern": "^AC-\\d+$"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "passed",
+                          "failed",
+                          "pending_human",
+                          "error"
+                        ]
+                      },
+                      "output_path": {
+                        "type": "string"
+                      },
+                      "observed": {
+                        "type": "string"
+                      },
+                      "duration_ms": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "self_report_mismatch": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^AC-\\d+$"
+                  }
+                }
+              },
+              "required": [
+                "task_id",
+                "contract_version",
+                "attempt",
+                "changed_files",
+                "checks",
+                "self_report_mismatch"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "repair_requested"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "repair": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "parent_task": {
+                  "type": "string"
+                },
+                "parent_version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 9007199254740991
+                },
+                "failed_criteria": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^AC-\\d+$"
+                  }
+                },
+                "observed_failure": {
+                  "type": "string"
+                },
+                "requested_correction": {
+                  "type": "string"
+                },
+                "unchanged_scope": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "remaining_repairs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "id",
+                "parent_task",
+                "parent_version",
+                "attempt",
+                "failed_criteria",
+                "observed_failure",
+                "requested_correction",
+                "unchanged_scope",
+                "remaining_repairs"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "repair"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "repair_accepted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "repair_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repair_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_verified"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "attempt": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "attempt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_completed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_failed_budget"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "attempts": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempts",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_escalated"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "failed_criteria": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^AC-\\d+$"
+              }
+            }
+          },
+          "required": [
+            "reason",
+            "failed_criteria"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_canceled"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "integration_started"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string"
+            },
+            "order": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "branch",
+            "order"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "integration_conflict"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "task_id",
+            "files"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "mission_verified"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "mission_failed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}
