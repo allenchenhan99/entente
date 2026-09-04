@@ -28,6 +28,8 @@ export interface PortDeps {
   store: EventStore;
   repoRoot: string;
   relayDir: string;
+  /** Resolved before the check runner, which needs it to collect diffs. */
+  worktrees?: WorktreeManager;
 }
 
 export interface Ports {
@@ -102,7 +104,7 @@ export async function resolvePorts(
   };
 
   const worktrees = (await fromModule<WorktreeManager>(worktreeMod, FACTORIES.worktrees, [deps], log)) ?? fake('worktrees', fakeWorktrees);
-  const checks = (await fromModule<CheckRunner>(verifyMod, FACTORIES.checks, [deps], log)) ?? fake('checks', () => fakeChecks({}, store));
+  const checks = (await fromModule<CheckRunner>(verifyMod, FACTORIES.checks, [{ ...deps, worktrees }], log)) ?? fake('checks', () => fakeChecks({}, store));
   const repair = (await fromModule<RepairPolicy>(repairMod, FACTORIES.repair, [deps], log)) ?? fake('repair', fakeRepair);
   const useLaunch = config.host !== 'fake';
   const host = (useLaunch ? await fromModule<TerminalHost>(launchMod, FACTORIES.host, [config.host, {}], log) : undefined) ?? fake('host', fakeHost);

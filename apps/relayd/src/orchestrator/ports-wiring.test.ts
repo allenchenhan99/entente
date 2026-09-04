@@ -13,19 +13,27 @@ const launchModule = {
   createTerminalHost: (kind: string, deps: unknown) => ({ kind, deps, spawn: async () => ({ paneId: 'p' }), focus: async () => {}, isAlive: async () => true, kill: async () => {} }),
   createRuntime: (kind: string, deps: unknown) => ({ kind, deps, prepare: async () => ({ argv: [], env: {} }) }),
 };
-const verifyModule = { createCheckRunner: (deps: { repoRoot: string }) => ({ repoRoot: deps.repoRoot, run: async () => { throw new Error('unused'); } }) };
+/** Mirrors wp/verify: `createCheckRunner({ store, worktrees, ... })`. */
+const verifyModule = { createCheckRunner: (deps: { repoRoot: string; worktrees: unknown; store: unknown }) => ({ deps, run: async () => { throw new Error('unused'); } }) };
+const worktreeModule = { createWorktreeManager: () => ({ real: true, create: async () => { throw new Error('unused'); }, remove: async () => {}, diff: async () => ({ patchPath: '', changedFiles: [] }), integrate: async () => ({ branch: 'relay/integration' }) }) };
 
 describe('ports wiring', () => {
   it('uses real factories where their modules exist and fakes elsewhere', async () => {
-    const importer = async (spec: string) => (spec.includes('launch') ? launchModule : spec.includes('verify') ? verifyModule : undefined);
+    const importer = async (spec: string) =>
+      spec.includes('launch') ? launchModule : spec.includes('verify') ? verifyModule : spec.includes('worktree') ? worktreeModule : undefined;
     const cfg = loadConfig({ RELAY_HOST: 'herdr', RELAY_REPO: '/r' });
-    const ports = await resolvePorts(cfg, store(), () => {}, importer);
+    const s = store();
+    const ports = await resolvePorts(cfg, s, () => {}, importer);
     expect(ports.host.kind).toBe('herdr');
     expect((ports.host as unknown as { deps: unknown }).deps).toEqual({});
     expect(ports.runtimes['claude-code'].kind).toBe('claude-code');
     expect(ports.runtimes.codex.kind).toBe('codex');
-    expect((ports.checks as unknown as { repoRoot: string }).repoRoot).toBe('/r');
-    expect(ports.fakes).toEqual(['worktrees', 'repair']);
+    const checkDeps = (ports.checks as unknown as { deps: { repoRoot: string; worktrees: unknown; store: unknown } }).deps;
+    expect(checkDeps.repoRoot).toBe('/r');
+    expect(checkDeps.store).toBe(s);
+    expect(checkDeps.worktrees).toBe(ports.worktrees);
+    expect((ports.worktrees as unknown as { real: boolean }).real).toBe(true);
+    expect(ports.fakes).toEqual(['repair']);
   });
 
   it('RELAY_HOST=fake forces the fake host and runtimes even when the launch module exists', async () => {
