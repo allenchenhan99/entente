@@ -3,6 +3,7 @@ import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 
 import { happyState, midRepairState } from './__fixtures__/states.js';
+import { objectGraphApi } from './__fixtures__/graph.js';
 import { App, panelHeights } from './App.js';
 import { DependenciesProvider } from './context.js';
 import { useAnimationTick } from './tick.js';
@@ -10,9 +11,9 @@ import { useAnimationTick } from './tick.js';
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe('application shell', () => {
-  it('allocates the available rows approximately 40/35/25 and expands timeline to full height', () => {
-    expect(panelHeights(41, false)).toEqual({ tree: 16, graph: 14, timeline: 10 });
-    expect(panelHeights(41, true)).toEqual({ tree: 0, graph: 0, timeline: 40 });
+  it('allocates rows across all four regions and expands timeline to full height', () => {
+    expect(panelHeights(41, false)).toEqual({ tree: 12, graph: 12, inbox: 7, timeline: 9 });
+    expect(panelHeights(41, true)).toEqual({ tree: 0, graph: 0, inbox: 0, timeline: 40 });
   });
 
   it('renders all stacked regions and the exact live metrics footer', () => {
@@ -33,20 +34,20 @@ describe('application shell', () => {
 
   it('navigates tasks and regions, opens a graph edge, and toggles full timeline', async () => {
     const view = render(
-      <DependenciesProvider execute={vi.fn()}>
+      <DependenciesProvider execute={vi.fn()} graphApi={objectGraphApi()}>
         <App state={happyState} events={[]} mode="live" url="http://relay.test" focusCmd="none" width={100} height={41} />
       </DependenciesProvider>,
     );
 
     view.stdin.write('j');
     await flush();
-    expect(view.lastFrame()).toContain('› frontend');
+    expect(view.lastFrame()).toContain('› t-frontend-login');
     view.stdin.write('\t');
     await flush();
     expect(view.lastFrame()).toContain('▶ HANDOFFS');
     view.stdin.write('\r');
     await flush();
-    expect(view.lastFrame()).toContain('t-frontend-login  [Contract]');
+    expect(view.lastFrame()).toContain('planner  [Story]');
     view.stdin.write('\u001b');
     await flush();
     view.stdin.write('t');

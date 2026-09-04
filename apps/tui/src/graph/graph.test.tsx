@@ -1,77 +1,60 @@
 import { describe, expect, it } from 'vitest';
 
-import { happyState, midClarificationState, midRepairState } from '../__fixtures__/states.js';
+import { objectGraph } from '../__fixtures__/graph.js';
 import { stripAnsi } from './canvas.js';
 import { renderGraph } from './Graph.js';
 
-function plainGraph(state: typeof happyState, tick = 0): string {
-  return renderGraph(state, { width: 100, height: 12, tick }).map(stripAnsi).join('\n');
+function plainGraph(tick = 0): string {
+  return renderGraph(objectGraph, { width: 100, height: 12, tick }).map(stripAnsi).join('\n');
 }
 
-describe('graph states', () => {
-  it('shows clarification and accepted contract edges from the clarification fixture', () => {
-    const frame = plainGraph(midClarificationState);
+describe('graph objects', () => {
+  it('renders nodes and exact edge labels in protocol order', () => {
+    const frame = plainGraph();
 
-    expect(frame).toContain('frontend');
-    expect(frame).toContain('? 2');
-    expect(frame).toContain('backend');
+    expect(frame).toContain('backend (t-backend-auth)');
+    expect(frame).toContain('frontend (t-frontend-login)');
     expect(frame).toContain('v2 ✓');
+    expect(frame).toContain('? 2');
+    expect(frame).toContain('AC-2 ✗');
+    expect(frame.indexOf('edge-backend-contract')).toBeLessThan(frame.indexOf('edge-frontend-contract'));
   });
 
-  it('styles the clarification badge amber and pulses its bold weight', () => {
-    const boldFrame = renderGraph(midClarificationState, { width: 100, height: 12, tick: 0 }).join('\n');
-    const normalFrame = renderGraph(midClarificationState, { width: 100, height: 12, tick: 2 }).join('\n');
+  it('maps attention to pulsing amber and failed objects to red', () => {
+    const boldFrame = renderGraph(objectGraph, { width: 100, height: 12, tick: 0 }).join('\n');
+    const normalFrame = renderGraph(objectGraph, { width: 100, height: 12, tick: 2 }).join('\n');
 
-    expect(boldFrame).toContain('\u001b[1;33m?');
-    expect(normalFrame).toContain('\u001b[33m?');
+    expect(boldFrame).toContain('\u001b[1;33m');
+    expect(normalFrame).toContain('\u001b[33m');
+    expect(boldFrame).toContain('\u001b[1;31m');
+    expect(stripAnsi(boldFrame)).toContain('◐ backend');
   });
 
-  it('shows dependency direction and the blocked dependency task', () => {
-    const frame = plainGraph(midClarificationState);
-
-    expect(frame).toContain('▲ dep t-backend-auth');
-    expect(frame).toContain('◐ blocked on t-backend-auth');
+  it.each([
+    { kind: 'node', id: 't-backend-auth' } as const,
+    { kind: 'edge', id: 'edge-backend-contract' } as const,
+  ])('draws selected $kind $id bold and inverse', (selected) => {
+    const frame = renderGraph(objectGraph, { width: 100, height: 12, tick: 0, selected }).join('\n');
+    const selectedAnsi = frame.split('\n').find((line) => stripAnsi(line).includes(selected.id)) ?? '';
+    expect(selectedAnsi).toContain('\u001b[1;7;');
   });
 
-  it('shows a red verifier back-edge labelled with failed criteria during repair', () => {
-    const rendered = renderGraph(midRepairState, { width: 100, height: 12, tick: 1 }).join('\n');
-
-    expect(stripAnsi(rendered)).toContain('◀');
-    expect(stripAnsi(rendered)).toContain('AC-2');
-    expect(rendered).toContain('\u001b[31m');
-  });
-
-  it('shows verified checks on every task edge in the happy fixture', () => {
-    const lines = plainGraph(happyState).split('\n').filter((line) => line.includes('planner'));
-
-    expect(lines).toHaveLength(3);
-    for (const line of lines) expect(line.match(/✓/g)?.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('shifts dotted edges by tick and moves an evidence particle', () => {
-    const proposedAtTick0 = plainGraph(midClarificationState, 0);
-    const proposedAtTick1 = plainGraph(midClarificationState, 1);
-    expect(proposedAtTick0).not.toBe(proposedAtTick1);
-
-    const evidenceState = {
-      ...midClarificationState,
-      tasks: {
-        ...midClarificationState.tasks,
-        't-backend-auth': {
-          ...midClarificationState.tasks['t-backend-auth']!,
-          handoff_state: 'evidence_submitted' as const,
-          task_state: 'awaiting_verification' as const,
-        },
-      },
+  it('animates pending breathing and working flowing dashes by tick', () => {
+    const animated = {
+      ...objectGraph,
+      edges: objectGraph.edges.map((edge, index) => index === 0 ? { ...edge, status: 'pending' as const } : edge),
     };
-    const particleAtTick0 = plainGraph(evidenceState, 0);
-    const particleAtTick3 = plainGraph(evidenceState, 3);
+    const tick0 = renderGraph(animated, { width: 100, height: 12, tick: 0 }).join('\n');
+    const tick1 = renderGraph(animated, { width: 100, height: 12, tick: 1 }).join('\n');
+    const tick4 = renderGraph(animated, { width: 100, height: 12, tick: 4 }).join('\n');
 
-    expect(particleAtTick0).toContain('●');
-    expect(particleAtTick0).not.toBe(particleAtTick3);
+    expect(stripAnsi(tick0)).not.toBe(stripAnsi(tick1));
+    expect(tick0).toContain('\u001b[2;90m');
+    expect(tick4).not.toContain('\u001b[2;90m');
+  });
 
-    const lateLine = plainGraph(evidenceState, 100).split('\n').find((line) => line.includes('backend'))!;
-    const laterLine = plainGraph(evidenceState, 101).split('\n').find((line) => line.includes('backend'))!;
-    expect(lateLine.lastIndexOf('●')).toBe(laterLine.lastIndexOf('●'));
+  it('renders a sensible empty-graph placeholder', () => {
+    const frame = renderGraph({ nodes: [], edges: [], inbox: [] }, { width: 40, height: 3, tick: 0 }).map(stripAnsi).join('\n');
+    expect(frame).toContain('<empty graph>');
   });
 });

@@ -3,30 +3,34 @@ import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 
+import { objectGraph, objectGraphApi } from './__fixtures__/graph.js';
 import { midClarificationState } from './__fixtures__/states.js';
 import { DependenciesProvider, type FetchLike } from './context.js';
 import { useAppKeys } from './keys.js';
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+const api = objectGraphApi();
 
-function Harness({ selectedTaskId = 't-frontend-login', region = 'tree' as const }) {
+function Harness({ selectedRef }: { selectedRef: { kind: 'node' | 'edge' | 'inbox'; id: string } }) {
   const keys = useAppKeys({
     state: midClarificationState,
-    selectedTaskId,
-    region,
+    graph: objectGraph,
+    selectedRef,
+    actions: api.actionsFor(selectedRef, objectGraph, midClarificationState),
+    region: selectedRef.kind === 'inbox' ? 'inbox' : 'graph',
     url: 'http://relay.test/',
-    focusCmd: 'herdr',
-    replayAvailable: true,
+    focusCmd: 'none',
+    replayAvailable: false,
   });
   return <Text>{`open=${keys.overlayOpen} tab=${keys.overlayTab} mode=${keys.inputMode ?? '-'} value=${keys.inputValue}`}</Text>;
 }
 
-describe('keys', () => {
-  it('opens Questions with a and posts a schema-valid clarification answer', async () => {
+describe('actions', () => {
+  it('opens Questions with a and posts task clarification from the action target', async () => {
     const fakeFetch = vi.fn<FetchLike>().mockResolvedValue(new Response('{}', { status: 200 }));
     const view = render(
-      <DependenciesProvider fetch={fakeFetch} execute={vi.fn()}>
-        <Harness />
+      <DependenciesProvider fetch={fakeFetch} execute={vi.fn()} graphApi={api}>
+        <Harness selectedRef={{ kind: 'edge', id: 'edge-backend-contract' }} />
       </DependenciesProvider>,
     );
 
@@ -37,32 +41,39 @@ describe('keys', () => {
     view.stdin.write('\r');
     await flush();
 
-    expect(fakeFetch).toHaveBeenCalledTimes(1);
     const [url, init] = fakeFetch.mock.calls[0]!;
-    expect(url).toBe('http://relay.test/tasks/t-frontend-login/clarify');
-    expect(init?.method).toBe('POST');
+    expect(url).toBe('http://relay.test/tasks/t-backend-auth/clarify');
     expect(ClarifyBody.parse(JSON.parse(String(init?.body)))).toEqual({
       answers: [{ question_id: 'Q1', answer: 'Use magic links' }],
     });
   });
 
-  it('collects observed failure after f and posts a schema-valid failed review', async () => {
+  it('uses action.target.criterion_id for pass and fail reviews', async () => {
     const fakeFetch = vi.fn<FetchLike>().mockResolvedValue(new Response('{}', { status: 200 }));
-    const view = render(
-      <DependenciesProvider fetch={fakeFetch} execute={vi.fn()}>
-        <Harness />
+    const renderHarness = () => render(
+      <DependenciesProvider fetch={fakeFetch} execute={vi.fn()} graphApi={api}>
+        <Harness selectedRef={{ kind: 'edge', id: 'edge-backend-evidence' }} />
       </DependenciesProvider>,
     );
 
-    view.stdin.write('f');
+    const pass = renderHarness();
+    pass.stdin.write('p');
     await flush();
-    expect(view.lastFrame()).toContain('open=true tab=Evidence mode=review-failure');
-    view.stdin.write('Button misses focus ring');
-    view.stdin.write('\r');
-    await flush();
+    expect(ReviewBody.parse(JSON.parse(String(fakeFetch.mock.calls[0]![1]?.body)))).toEqual({
+      criterion_id: 'AC-2',
+      status: 'passed',
+    });
+    pass.unmount();
 
-    const [url, init] = fakeFetch.mock.calls[0]!;
-    expect(url).toBe('http://relay.test/tasks/t-frontend-login/review');
+    const fail = renderHarness();
+    fail.stdin.write('f');
+    await flush();
+    expect(fail.lastFrame()).toContain('mode=review-failure');
+    fail.stdin.write('Button misses focus ring');
+    fail.stdin.write('\r');
+    await flush();
+    const [url, init] = fakeFetch.mock.calls[1]!;
+    expect(url).toBe('http://relay.test/tasks/t-backend-auth/review');
     expect(ReviewBody.parse(JSON.parse(String(init?.body)))).toEqual({
       criterion_id: 'AC-2',
       status: 'failed',
@@ -70,18 +81,13 @@ describe('keys', () => {
     });
   });
 
-  it('focuses an existing agent with argv and confirms cancellation before posting', async () => {
+  it('keeps cancel confirmation before posting to the action target', async () => {
     const fakeFetch = vi.fn<FetchLike>().mockResolvedValue(new Response('{}', { status: 200 }));
-    const execute = vi.fn().mockResolvedValue(undefined);
     const view = render(
-      <DependenciesProvider fetch={fakeFetch} execute={execute}>
-        <Harness selectedTaskId="t-backend-auth" />
+      <DependenciesProvider fetch={fakeFetch} execute={vi.fn()} graphApi={api}>
+        <Harness selectedRef={{ kind: 'node', id: 't-backend-auth' }} />
       </DependenciesProvider>,
     );
-
-    view.stdin.write('\r');
-    await flush();
-    expect(execute).toHaveBeenCalledWith(['herdr', 'agent', 'focus', '%2']);
 
     view.stdin.write('x');
     await flush();

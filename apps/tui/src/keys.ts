@@ -1,22 +1,32 @@
-import type { State, TaskView } from '@relay/protocol';
+import type { Graph, GraphObjectRef, ObjectAction, State } from '@relay/protocol';
 import { useInput } from 'ink';
 import { useRef, useState } from 'react';
 
-import { focusPane, postCancel, postClarification, postReview, type FocusCommand } from './commands.js';
+import {
+  postCancel,
+  postClarification,
+  postMissionClarification,
+  postReply,
+  postReview,
+  type FocusCommand,
+} from './commands.js';
 import { useDependencies } from './context.js';
 
-export type FocusRegion = 'tree' | 'graph' | 'timeline';
-export type OverlayTab = 'Contract' | 'Response' | 'Questions' | 'Evidence' | 'History';
-export type InputMode = 'answer' | 'review-failure' | 'cancel-confirm';
+export type FocusRegion = 'tree' | 'graph' | 'inbox' | 'timeline';
+export type OverlayTab = 'Story' | 'Contract' | 'Response' | 'Questions' | 'Evidence' | 'History';
+export type InputMode = 'answer' | 'reply' | 'review-failure' | 'cancel-confirm';
 
 export interface AppKeyOptions {
   state: State;
-  selectedTaskId?: string;
-  selectedCriterionId?: string;
+  graph: Graph;
+  selectedRef?: GraphObjectRef;
+  actions: ObjectAction[];
   region: FocusRegion;
   url: string;
   focusCmd: FocusCommand;
   replayAvailable: boolean;
+  initialOverlayOpen?: boolean;
+  onSelect?: (ref: GraphObjectRef) => void;
   onMove?: (delta: 1 | -1) => void;
   onCycleRegion?: () => void;
   onToggleTimeline?: () => void;
@@ -37,31 +47,26 @@ export interface AppKeyState {
   closeOverlay: () => void;
 }
 
-function humanReviewCriterion(task: TaskView | undefined, selectedCriterionId: string | undefined): string | undefined {
-  if (!task) return undefined;
-  const selected = task.contract.acceptance_criteria.find((criterion) => criterion.id === selectedCriterionId);
-  if (selected?.check?.kind === 'human_review') return selected.id;
-  return task.contract.acceptance_criteria.find((criterion) => criterion.check?.kind === 'human_review')?.id;
-}
-
 export function useAppKeys(options: AppKeyOptions): AppKeyState {
   const dependencies = useDependencies();
-  const [overlayOpen, setOverlayOpen] = useState(false);
-  const [overlayTab, setOverlayTab] = useState<OverlayTab>('Contract');
+  const [overlayOpen, setOverlayOpen] = useState(Boolean(options.initialOverlayOpen));
+  const [overlayTab, setOverlayTab] = useState<OverlayTab>('Story');
   const [inputMode, setInputMode] = useState<InputMode>();
   const [inputValue, setInputValue] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
   const [error, setError] = useState<string>();
   const inputRef = useRef('');
-  const task = options.selectedTaskId === undefined ? undefined : options.state.tasks[options.selectedTaskId];
+  const actionRef = useRef<ObjectAction | undefined>(undefined);
 
   const resetInput = () => {
     inputRef.current = '';
+    actionRef.current = undefined;
     setInputValue('');
     setInputMode(undefined);
   };
-  const beginInput = (mode: InputMode, tab: OverlayTab) => {
+  const beginInput = (action: ObjectAction, mode: InputMode, tab: OverlayTab) => {
     inputRef.current = '';
+    actionRef.current = action;
     setInputValue('');
     setInputMode(mode);
     setOverlayTab(tab);
@@ -71,38 +76,61 @@ export function useAppKeys(options: AppKeyOptions): AppKeyState {
     setError(undefined);
     void operation.catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
   };
+  const openStory = (ref = options.selectedRef) => {
+    if (!ref) return;
+    setOverlayTab('Story');
+    setOverlayOpen(true);
+  };
 
   useInput((input, key) => {
     if (inputMode === 'cancel-confirm') {
-      if (input.toLowerCase() === 'y' && task) perform(postCancel({ fetch: dependencies.fetch, url: options.url, taskId: task.id }));
+      const action = actionRef.current;
+      if (input.toLowerCase() === 'y' && action?.kind === 'cancel' && action.target.task_id) {
+        perform(postCancel({ fetch: dependencies.fetch, url: options.url, taskId: action.target.task_id }));
+      }
       if (input.toLowerCase() === 'y' || input.toLowerCase() === 'n' || key.escape) resetInput();
       return;
     }
 
-    if (inputMode === 'answer' || inputMode === 'review-failure') {
+    if (inputMode === 'answer' || inputMode === 'reply' || inputMode === 'review-failure') {
       if (key.escape) {
         resetInput();
         return;
       }
       if (key.return) {
         const value = inputRef.current.trim();
-        if (value === '' || !task) return;
-        if (inputMode === 'answer') {
-          const question = task.open_questions[0];
-          if (question) perform(postClarification({
+        const action = actionRef.current;
+        if (value === '' || !action) return;
+        const questionId = action.target.question_ids?.[0];
+        if (action.kind === 'clarify' && action.target.task_id && questionId) {
+          perform(postClarification({
             fetch: dependencies.fetch,
             url: options.url,
-            taskId: task.id,
-            questionId: question.id,
+            taskId: action.target.task_id,
+            questionId,
             answer: value,
           }));
-        } else {
-          const criterionId = humanReviewCriterion(task, options.selectedCriterionId);
-          if (criterionId) perform(postReview({
+        } else if (action.kind === 'mission_clarify' && action.target.mission_id && questionId) {
+          perform(postMissionClarification({
             fetch: dependencies.fetch,
             url: options.url,
-            taskId: task.id,
-            criterionId,
+            missionId: action.target.mission_id,
+            questionId,
+            answer: value,
+          }));
+        } else if (action.kind === 'reply' && action.target.task_id) {
+          perform(postReply({
+            fetch: dependencies.fetch,
+            url: options.url,
+            taskId: action.target.task_id,
+            message: value,
+          }));
+        } else if (action.kind === 'review' && action.target.task_id && action.target.criterion_id) {
+          perform(postReview({
+            fetch: dependencies.fetch,
+            url: options.url,
+            taskId: action.target.task_id,
+            criterionId: action.target.criterion_id,
             status: 'failed',
             observedFailure: value,
           }));
@@ -120,38 +148,42 @@ export function useAppKeys(options: AppKeyOptions): AppKeyState {
       setOverlayOpen(false);
       return;
     }
-    if (input === 'a') {
-      if (task?.open_questions[0]) beginInput('answer', 'Questions');
-      else {
-        setOverlayTab('Questions');
-        setOverlayOpen(true);
-      }
+
+    const action = options.actions.find((candidate) => candidate.key === input);
+    if (action?.kind === 'clarify' || action?.kind === 'mission_clarify') {
+      beginInput(action, 'answer', 'Questions');
       return;
     }
-    if (input === 'f') {
-      if (humanReviewCriterion(task, options.selectedCriterionId)) beginInput('review-failure', 'Evidence');
+    if (action?.kind === 'reply') {
+      beginInput(action, 'reply', 'Story');
       return;
     }
-    if (input === 'p') {
-      const criterionId = humanReviewCriterion(task, options.selectedCriterionId);
-      if (task && criterionId) perform(postReview({
+    if (action?.kind === 'review' && input === 'f') {
+      beginInput(action, 'review-failure', 'Evidence');
+      return;
+    }
+    if (action?.kind === 'review' && input === 'p' && action.target.task_id && action.target.criterion_id) {
+      perform(postReview({
         fetch: dependencies.fetch,
         url: options.url,
-        taskId: task.id,
-        criterionId,
+        taskId: action.target.task_id,
+        criterionId: action.target.criterion_id,
         status: 'passed',
       }));
       return;
     }
-    if (input === 'x' && task) {
-      beginInput('cancel-confirm', 'Contract');
+    if (action?.kind === 'cancel' && input === 'x') {
+      beginInput(action, 'cancel-confirm', 'Contract');
       return;
     }
-    if (key.return) {
-      if (options.region === 'tree' && task?.agent) perform(focusPane(dependencies.execute, options.focusCmd, task.agent.pane_id));
-      if (options.region === 'graph' && task) {
-        setOverlayTab('Contract');
-        setOverlayOpen(true);
+    if (key.return || input === 'i') {
+      if (!options.selectedRef) return;
+      if (options.selectedRef.kind === 'inbox') {
+        const item = options.graph.inbox.find((candidate) => candidate.id === options.selectedRef!.id);
+        if (item) options.onSelect?.(item.ref);
+        openStory(item?.ref);
+      } else {
+        openStory();
       }
       return;
     }
@@ -169,8 +201,8 @@ export function useAppKeys(options: AppKeyOptions): AppKeyState {
     else if (input === '[' && options.replayAvailable) options.onHalveSpeed?.();
     else if (input === ']' && options.replayAvailable) options.onDoubleSpeed?.();
     else if (input === '?') setHelpOpen((current) => !current);
-    else if (overlayOpen && ['1', '2', '3', '4', '5'].includes(input)) {
-      const tabs: OverlayTab[] = ['Contract', 'Response', 'Questions', 'Evidence', 'History'];
+    else if (overlayOpen && ['1', '2', '3', '4', '5', '6'].includes(input)) {
+      const tabs: OverlayTab[] = ['Story', 'Contract', 'Response', 'Questions', 'Evidence', 'History'];
       setOverlayTab(tabs[Number(input) - 1]!);
     }
   });
