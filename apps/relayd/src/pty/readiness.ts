@@ -16,6 +16,13 @@ const COMPOSER = /^(> |› )/;
 const QUESTION = /\?\s*$/;
 /** The agent is visibly working. */
 const BUSY = /(esc to interrupt|Working|Thinking|Running)/i;
+/**
+ * Chrome that sits *below* the prompt in agent TUIs and must not be mistaken for the last meaningful line:
+ * Claude Code's permission/status bar, Codex's model/cwd footer, box-drawing rules.
+ */
+const CHROME = /(bypass permissions|shift\+tab|^\s*⏵|^\s*gpt-\d|· ~\/|\/rc\s*$|^[\s─━╭╰│╮╯┃]+$)/;
+/** How many trailing non-empty lines are examined for a prompt. */
+const TAIL_LINES = 8;
 
 export interface ReadinessInput {
   paneId: string;
@@ -45,11 +52,18 @@ export function evaluateReadiness(input: ReadinessInput): PaneReadiness {
   if (input.exited) return { ...base, ready: false, source: 'unknown', detail: 'pane exited' };
   const sinceOutput = input.lastOutputAt === undefined ? Infinity : input.now - input.lastOutputAt;
   if (sinceOutput < quietMs) return { ...base, ready: false, source: 'screen', detail: `output flowing (${Math.round(sinceOutput)} ms ago)` };
-  const line = lastNonEmptyLine(input.lines);
-  if (line === undefined) return { ...base, ready: false, source: 'screen', detail: 'screen is empty' };
-  if (BUSY.test(line)) return { ...base, ready: false, source: 'screen', detail: `busy: ${line.trim()}` };
-  if (IDLE_PROMPT.test(line) || COMPOSER.test(line) || QUESTION.test(line)) {
-    return { ...base, ready: true, source: 'screen', detail: `prompt: ${line.trim()}` };
+  const tail = input.lines.filter((l) => l.trim().length > 0).slice(-TAIL_LINES);
+  if (tail.length === 0) return { ...base, ready: false, source: 'screen', detail: 'screen is empty' };
+  const meaningful = tail.filter((l) => !CHROME.test(l));
+  const busy = meaningful.find((l) => BUSY.test(l));
+  if (busy) return { ...base, ready: false, source: 'screen', detail: `busy: ${busy.trim().slice(0, 80)}` };
+  // Prefer the lowest prompt-like line: the composer sits above the footer chrome.
+  for (let i = meaningful.length - 1; i >= 0; i--) {
+    const line = meaningful[i]!;
+    if (IDLE_PROMPT.test(line) || COMPOSER.test(line) || QUESTION.test(line)) {
+      return { ...base, ready: true, source: 'screen', detail: `prompt: ${line.trim().slice(0, 80)}` };
+    }
   }
-  return { ...base, ready: false, source: 'screen', detail: `no prompt: ${line.trim().slice(0, 80)}` };
+  const last = lastNonEmptyLine(input.lines) ?? '';
+  return { ...base, ready: false, source: 'screen', detail: `no prompt: ${last.trim().slice(0, 80)}` };
 }

@@ -38,3 +38,41 @@ describe('readiness (screen tier)', () => {
     expect(evaluateReadiness({ ...base, lines: [], lastOutputAt: now - 1000 }).ready).toBe(false);
   });
 });
+
+describe('real agent screens', () => {
+  const now = 10_000;
+  const base = { now, lastOutputAt: now - QUIET_MS - 1, exited: false };
+
+  it('Claude Code idle: the ❯ composer sits above the permissions status bar', () => {
+    const lines = [
+      ' ▐▛███▛█   Claude Code v2.1.260',
+      '▝▜██████▀  Fable 5.1 with high effort · Claude Max',
+      '  ▝▝ ▝▝    ~/entente-demo/app/.relay/wt/t-backend-auth',
+      '⚠ 1 MCP server needs authentication · run /mcp',
+      '────────────────────────────────────────────────────────────',
+      '❯',
+      '────────────────────────────────────────────────────────────',
+      '  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 7 agents                                   /rc',
+    ];
+    const r = evaluateReadiness({ paneId: 'relay:1', lines, ...base });
+    expect(r.ready).toBe(true);
+    expect(r.detail).toContain('❯');
+  });
+
+  it('Codex idle: the › composer sits above the model/cwd footer', () => {
+    const lines = [
+      '│ >_ OpenAI Codex (v0.153.2)                               │',
+      '╰──────────────────────────────────────────────────────────╯',
+      '• You have 2 usage limit resets available. Run /usage to use one.',
+      '› Ask Codex to do anything',
+      '  gpt-5.6-sol default · ~/entente-demo/app/.relay/wt/t-frontend-login',
+    ];
+    const r = evaluateReadiness({ paneId: 'relay:2', lines, ...base });
+    expect(r.ready).toBe(true);
+  });
+
+  it('Claude Code working: the busy line wins even when a composer is drawn', () => {
+    const lines = ['⏺ Calling relay, running 1 shell command…', '✶ Discombobulating… (2m 14s · ↓ 11.3k tokens)', '     interrupting Claude\'s current work — esc to interrupt', '❯', '  ⏵⏵ bypass permissions on (shift+tab to cycle)'];
+    expect(evaluateReadiness({ paneId: 'relay:1', lines, ...base }).ready).toBe(false);
+  });
+});
