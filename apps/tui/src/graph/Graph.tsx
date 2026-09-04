@@ -52,7 +52,7 @@ function drawHorizontalEdge(options: {
     canvas.text(labelX, y, label, style);
   }
   if (particle && length > 0) {
-    canvas.text(fromX + (tick % length), y, '●', { color: 'green', bold: true });
+    canvas.text(fromX + Math.min(tick, length - 1), y, '●', { color: 'green', bold: true });
   }
 }
 

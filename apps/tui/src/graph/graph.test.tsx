@@ -69,5 +69,9 @@ describe('graph states', () => {
 
     expect(particleAtTick0).toContain('●');
     expect(particleAtTick0).not.toBe(particleAtTick3);
+
+    const lateLine = plainGraph(evidenceState, 100).split('\n').find((line) => line.includes('backend'))!;
+    const laterLine = plainGraph(evidenceState, 101).split('\n').find((line) => line.includes('backend'))!;
+    expect(lateLine.lastIndexOf('●')).toBe(laterLine.lastIndexOf('●'));
   });
 });
