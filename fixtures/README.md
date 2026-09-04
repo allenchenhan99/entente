@@ -49,3 +49,8 @@ replays both files and pins the expected end state and metrics.
   asked for clarification before writing code (7 answers → contracts v2), worked in parallel, submitted evidence
   verified by relayd's checks plus one human review, then both branches were merged into `relay/integration`,
   the integration check passed and the mission was verified.
+- `events-live-3.jsonl` — mission planned by a live Claude Code planner (`relay up --planner claude-code`):
+  its first three contracts were blocked by lint (`missing_input`: prose in `inputs` instead of file paths),
+  it fixed and re-proposed all three (v2), password-hashing and throttle ran in parallel, the routes task was
+  spawned only after both completed with its worktree based on their merged branches, all 15 criteria were
+  machine-checked, and the three branches were integrated and verified.

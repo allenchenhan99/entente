@@ -56,7 +56,10 @@ RELAY_HOST=herdr RELAY_REPO=~/entente-demo/app npx tsx apps/relayd/src/index.ts
 # 3. in another pane: the TUI
 npx tsx apps/tui/src/index.tsx --url http://127.0.0.1:7420
 
-# 4. in another pane: create the mission from hand-written contracts
+# 4. in another pane: create the mission — either let a planner agent write the contracts…
+npx tsx apps/cli/src/index.ts up "Add secure login to this application." \
+  --repo ~/entente-demo/app --planner claude-code --host herdr
+#    …or load hand-written contracts (deliberately vague, so recipients must ask first)
 npx tsx apps/cli/src/index.ts up "Add secure login to this application." \
   --repo ~/entente-demo/app --plan examples/plan-secure-login.yaml --host herdr
 
