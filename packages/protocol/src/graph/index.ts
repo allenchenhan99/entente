@@ -9,10 +9,9 @@ import type { Graph, GraphObjectRef, ObjectDescription } from './types.js';
 export * from './types.js';
 export { buildGraph } from './build.js';
 export { actionsFor } from './actions.js';
+export { narrate } from './narrate.js';
+import { narrate } from './narrate.js';
 
-export function narrate(event: Event, _state: State): string {
-  return `${event.actor} ${event.type}${event.task_id ? ` ${event.task_id}` : ''}`;
-}
 export function storyFor(_ref: GraphObjectRef, _graph: Graph, state: State, events: Iterable<Event>): string[] {
   return [...events].map((e) => narrate(e, state));
 }
