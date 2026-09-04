@@ -9,7 +9,7 @@ import path from 'node:path';
 import type { z } from 'zod';
 import {
   TaskContract, Mission, ProposeTaskOutput, RespondOutput, AwaitContractOutput, AwaitVerdictOutput,
-  SubmitEvidenceOutput, GetContractOutput, AWAIT_TIMEOUT_MAX_S, hasLintErrors,
+  SubmitEvidenceOutput, GetContractOutput, AwaitTaskOutput, AWAIT_TIMEOUT_MAX_S, hasLintErrors,
 } from '@relay/protocol';
 import type {
   TaskContractInput, ContractResponse, Clarification, EvidenceSubmission, EvidenceRecord, RepairContract,
@@ -33,12 +33,14 @@ export type AwaitContractOutput = z.infer<typeof AwaitContractOutput>;
 export type AwaitVerdictOutput = z.infer<typeof AwaitVerdictOutput>;
 export type SubmitEvidenceOutput = z.infer<typeof SubmitEvidenceOutput>;
 export type GetContractOutput = z.infer<typeof GetContractOutput>;
+export type AwaitTaskOutput = z.infer<typeof AwaitTaskOutput>;
 type RespondInputT = z.infer<typeof RespondInput>;
 type SubmitEvidenceInputT = z.infer<typeof SubmitEvidenceInput>;
 type ReportProgressInputT = z.infer<typeof ReportProgressInput>;
 type ReportBlockerInputT = z.infer<typeof ReportBlockerInput>;
 
-export type Sender = 'planner' | 'human';
+/** Who proposes / revises / answers: the planner, the human, or (agent networking) a recipient agent by role. */
+export type Sender = 'planner' | 'human' | `agent:${string}`;
 export type TokenSubject = { kind: 'task'; taskId: string } | { kind: 'mission'; missionId: string };
 
 export interface OrchestratorDeps {
@@ -95,6 +97,18 @@ export interface Orchestrator {
   taskView(taskId: string): TaskView | undefined;
 
   proposeTask(missionId: string, input: TaskContractInput, sender: Sender): Promise<ProposeTaskOutput>;
+  /**
+   * Agent networking: the recipient of `parentTaskId` delegates a separable unit of its work as a new contract
+   * it is the sender of (`agent:<role>`), in the parent's mission, with `parent_task` set. The child's
+   * `allowed_paths` must be disjoint from the parent's (`overlapping_scope` at error severity) and it may not
+   * depend on the parent (400: cycle). Otherwise identical to `proposeTask`, including lint and spawn gating.
+   */
+  proposeSubtask(parentTaskId: string, input: TaskContractInput): Promise<ProposeTaskOutput>;
+  /**
+   * Long-poll until `taskId` is completed / failed / canceled; `pending` (with both states) on timeout.
+   * Any task may be awaited; `callerTaskId` (when known) may not await itself (400) or a task of another mission.
+   */
+  awaitTask(taskId: string, timeoutS: number, signal?: AbortSignal, callerTaskId?: string): Promise<AwaitTaskOutput>;
   reviseTask(taskId: string, patch: Partial<TaskContractInput>, actor: Sender): Promise<{ contract_version: number }>;
   clarify(taskId: string, answers: Array<{ question_id: string; answer: string }>, answeredBy: Sender): Promise<{ contract_version: number }>;
   review(taskId: string, body: ReviewBody): Promise<void>;
@@ -159,6 +173,8 @@ interface TaskRecord {
   activeRepair?: RepairContract;
   repairAckPending: boolean;
   escalated: boolean;
+  /** Reason of the last `task_failed_budget` / `task_escalated`; surfaced by `awaitTask` once the task is failed. */
+  failureReason?: string;
   proposedAt?: string;
   acceptedAt?: string;
   startedAt?: string;
@@ -344,12 +360,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   };
 
   // ---------- proposals / revisions ----------
-  const proposeTask: Orchestrator['proposeTask'] = async (missionId, input, sender) => {
+  /** Shared by `proposeTask` (planner / human) and `proposeSubtask` (a recipient agent, `parentTask` set). */
+  const propose = async (missionId: string, input: TaskContractInput, sender: Sender, parentTask?: string): Promise<ProposeTaskOutput> => {
     const m = mustMission(missionId);
     const existing = tasks.get(input.id);
     if (existing && existing.missionId !== missionId) throw conflict(`task ${input.id} belongs to mission ${existing.missionId}`);
     const version = existing ? current(existing).version + 1 : 1;
-    const contract = TaskContract.parse({ ...input, mission_id: missionId, version, sender, clarifications: existing ? current(existing).clarifications : [] });
+    const contract = TaskContract.parse({
+      ...input, mission_id: missionId, version, sender, clarifications: existing ? current(existing).clarifications : [],
+      ...(parentTask !== undefined ? { parent_task: parentTask } : {}),
+    });
     let rec = existing;
     if (!rec) {
       rec = {
@@ -373,6 +393,46 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     await relintSiblings(rec);
     if (errors.length > 0) return { status: 'lint_error', task_id: rec.id, errors, warnings };
     return { status: 'proposed', task_id: rec.id, version, warnings };
+  };
+
+  const proposeTask: Orchestrator['proposeTask'] = (missionId, input, sender) => propose(missionId, input, sender);
+
+  /** Every task above `rec` through `parent_task` links (nearest first). */
+  const ancestorsOf = (rec: TaskRecord): string[] => {
+    const out: string[] = [];
+    let cursor = current(rec).parent_task;
+    while (cursor !== undefined && !out.includes(cursor)) {
+      out.push(cursor);
+      const next = tasks.get(cursor);
+      cursor = next ? current(next).parent_task : undefined;
+    }
+    return out;
+  };
+
+  const proposeSubtask: Orchestrator['proposeSubtask'] = async (parentTaskId, input) => {
+    const parent = mustTask(parentTaskId);
+    if (parent.taskState === 'completed' || parent.taskState === 'canceled' || parent.taskState === 'failed') {
+      throw conflict(`task ${parentTaskId} is ${parent.taskState}; it cannot delegate any more work`);
+    }
+    if (input.id === parentTaskId) throw new RelayError(400, `subtask ${input.id} cannot be its own parent (cycle)`);
+    const existing = tasks.get(input.id);
+    if (existing && current(existing).parent_task !== parentTaskId) {
+      throw conflict(`task ${input.id} already exists and is not a subtask of ${parentTaskId}`);
+    }
+    const lineage = [parentTaskId, ...ancestorsOf(parent)];
+    const cyclic = (input.dependencies ?? []).filter((d) => lineage.includes(d));
+    if (cyclic.length > 0) {
+      throw new RelayError(400, `subtask ${input.id} cannot depend on ${cyclic.join(', ')}: that is its parent chain (dependency cycle)`);
+    }
+    const parentContract = current(parent);
+    // The parent keeps working in its own worktree while the child runs: their allowed_paths must be disjoint.
+    // Reuse the `overlapping_scope` rule against the parent alone and promote it to an error.
+    const candidate = TaskContract.parse({ ...input, mission_id: parent.missionId, version: 1, sender: agentActor(parent), parent_task: parentTaskId });
+    const overlaps = lintContract(candidate, { siblings: [parentContract], repoRoot: deps.repoRoot, fileExists: (rel) => fs.existsSync(path.resolve(deps.repoRoot, rel)) })
+      .filter((r) => r.rule === 'overlapping_scope')
+      .map((r) => `${r.rule}: ${r.message} (a subtask's scope must be disjoint from its parent's)`);
+    if (overlaps.length > 0) return { status: 'lint_error', task_id: input.id, errors: overlaps, warnings: [] };
+    return propose(parent.missionId, input, agentActor(parent), parentTaskId);
   };
 
   const revise = async (rec: TaskRecord, next: TaskContract, actor: Sender): Promise<number> => {
@@ -572,6 +632,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       case 'escalate': {
         rec.pendingRecord = undefined;
         rec.escalated = true;
+        rec.failureReason = decision.reason;
         rec.verdicts.set(attempt, { status: 'escalated', reason: decision.reason });
         emitTask(rec, 'relayd', 'task_escalated', { reason: decision.reason, failed_criteria: decision.failed_criteria });
         return;
@@ -579,6 +640,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       case 'failed_budget': {
         rec.pendingRecord = undefined;
         rec.taskState = 'failed';
+        rec.failureReason = decision.reason;
         rec.verdicts.set(attempt, { status: 'failed_budget', reason: decision.reason });
         emitTask(rec, 'relayd', 'task_failed_budget', { attempts: attempt, reason: decision.reason });
         return;
@@ -596,6 +658,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     } catch (err) {
       const reason = `check runner failed: ${(err as Error)?.message ?? String(err)}`;
       rec.escalated = true;
+      rec.failureReason = reason;
       rec.verdicts.set(submission.attempt, { status: 'escalated', reason });
       emitTask(rec, 'relayd', 'task_escalated', { reason, failed_criteria: [] });
       return;
@@ -645,6 +708,32 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (remaining <= 0) return { status: 'pending', pending_criteria: pendingCriteria(rec, attempt) };
       if ((await waiters.wait(`task:${taskId}`, remaining, signal)) === 'aborted') {
         return { status: 'pending', pending_criteria: pendingCriteria(rec, attempt) };
+      }
+    }
+  };
+
+  const awaitTask: Orchestrator['awaitTask'] = async (taskId, timeoutS, signal, callerTaskId) => {
+    const rec = mustTask(taskId);
+    if (callerTaskId !== undefined) {
+      if (callerTaskId === taskId) throw new RelayError(400, `task ${taskId} cannot await itself`);
+      const caller = mustTask(callerTaskId);
+      if (caller.missionId !== rec.missionId) throw new RelayError(400, `task ${taskId} belongs to another mission`);
+    }
+    const deadline = Date.now() + clampTimeout(timeoutS);
+    for (;;) {
+      switch (rec.taskState) {
+        case 'completed':
+          return { status: 'completed', task_id: taskId, ...(rec.worktree ? { branch: rec.worktree.branch } : {}) };
+        case 'failed':
+          return { status: 'failed', task_id: taskId, reason: rec.failureReason ?? 'task failed' };
+        case 'canceled':
+          return { status: 'canceled', task_id: taskId };
+        default:
+          break;
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || (await waiters.wait(`task:${taskId}`, remaining, signal)) === 'aborted') {
+        return { status: 'pending', task_id: taskId, task_state: rec.taskState, handoff_state: rec.handoffState };
       }
     }
   };
@@ -828,7 +917,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const rec = tasks.get(id);
       return rec ? toView(rec) : undefined;
     },
-    proposeTask, reviseTask, clarify, review, cancel,
+    proposeTask, proposeSubtask, awaitTask, reviseTask, clarify, review, cancel,
     getContract, respond, awaitContract, reportProgress, reportBlocker, reply, awaitReply, submitEvidence, awaitVerdict,
     issueToken,
     resolveToken: (token) => tokens.get(token),
