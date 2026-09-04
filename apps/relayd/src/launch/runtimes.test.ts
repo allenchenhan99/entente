@@ -21,8 +21,14 @@ let tmp: string;
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-')); });
 afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
+/** `--dangerously-skip-permissions` needs the global disclaimer already accepted; see claude-code.ts. */
+function acceptBypass(home: string): void {
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ bypassPermissionsModeAccepted: true }));
+}
+
 describe('claude runtime', () => {
   it('prepare writes a valid mcp.json with the bearer header and returns the documented argv', async () => {
+    acceptBypass(tmp);
     const runtime = createRuntime('claude-code', { homeDir: tmp });
     expect(runtime.kind).toBe('claude-code');
     expect(runtime).toBeInstanceOf(ClaudeCodeRuntime);
@@ -51,10 +57,45 @@ describe('claude runtime', () => {
   });
 
   it('uses the planner prompt for the planner role', async () => {
+    acceptBypass(tmp);
     const runtime = createRuntime('claude-code', { homeDir: tmp });
     const { prompt } = await runtime.prepare({ ...spec, role: 'planner' }, tmp);
     expect(prompt).toBe(bootstrapPrompt({ ...spec, role: 'planner' }));
     expect(prompt).toContain('relay_propose_task');
+  });
+
+  // Observed live: without the accepted disclaimer Claude stops on the Bypass Permissions dialog with
+  // "No, exit" preselected, the prompt's Enter takes it, and the host reports only `agent_not_found`.
+  it('refuses to prepare with an actionable error when the bypass disclaimer is not accepted', async () => {
+    const runtime = createRuntime('claude-code', { homeDir: tmp, env: {} });
+    await expect(runtime.prepare(spec, path.join(tmp, 'cfg'))).rejects.toThrow(
+      /has not accepted the Bypass Permissions disclaimer/,
+    );
+    await expect(runtime.prepare(spec, path.join(tmp, 'cfg'))).rejects.toThrow(
+      /claude --dangerously-skip-permissions.*RELAY_ACCEPT_CLAUDE_BYPASS=1/s,
+    );
+    // It must not have recorded the acceptance on the user's behalf.
+    expect(fs.existsSync(path.join(tmp, '.claude.json'))).toBe(false);
+  });
+
+  it('accepts the migrated user-settings form of the disclaimer', async () => {
+    fs.mkdirSync(path.join(tmp, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.claude', 'settings.json'), JSON.stringify({ skipDangerousModePermissionPrompt: true }));
+
+    const runtime = createRuntime('claude-code', { homeDir: tmp, env: {} });
+    await expect(runtime.prepare(spec, path.join(tmp, 'cfg'))).resolves.toBeDefined();
+  });
+
+  it('records the disclaimer itself only when RELAY_ACCEPT_CLAUDE_BYPASS=1, preserving other config', async () => {
+    fs.writeFileSync(path.join(tmp, '.claude.json'), JSON.stringify({ projects: { '/keep/me': { hasTrustDialogAccepted: true } } }));
+    const runtime = createRuntime('claude-code', { homeDir: tmp, env: { RELAY_ACCEPT_CLAUDE_BYPASS: '1' } });
+
+    await runtime.prepare(spec, path.join(tmp, 'cfg'));
+
+    const written = JSON.parse(fs.readFileSync(path.join(tmp, '.claude.json'), 'utf8'));
+    expect(written.bypassPermissionsModeAccepted).toBe(true);
+    expect(written.projects['/keep/me']).toEqual({ hasTrustDialogAccepted: true });
+    expect(written.projects[spec.cwd]).toMatchObject({ hasTrustDialogAccepted: true });
   });
 });
 
@@ -62,19 +103,20 @@ describe('claude runtime folder trust', () => {
   it('marks the worktree as trusted in ~/.claude.json so no trust dialog swallows the bootstrap prompt', async () => {
     const home = path.join(tmp, 'claude-home');
     fs.mkdirSync(home, { recursive: true });
-    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ projects: { '/other': { allowedTools: ['Read'], hasTrustDialogAccepted: true } }, theme: 'dark' }));
-    const runtime = createRuntime('claude-code', { homeDir: home });
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ bypassPermissionsModeAccepted: true, projects: { '/other': { allowedTools: ['Read'], hasTrustDialogAccepted: true } }, theme: 'dark' }));
+    const runtime = createRuntime('claude-code', { homeDir: home, env: {} });
     await runtime.prepare(spec, path.join(tmp, 'cfg-trust'));
     const json = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8'));
     expect(json.projects[spec.cwd]).toMatchObject({ hasTrustDialogAccepted: true, allowedTools: [] });
     expect(json.projects['/other']).toEqual({ allowedTools: ['Read'], hasTrustDialogAccepted: true });
     expect(json.theme).toBe('dark');
+    expect(json.bypassPermissionsModeAccepted).toBe(true);
   });
 
   it('creates ~/.claude.json when missing and keeps existing project settings', async () => {
     const home = path.join(tmp, 'claude-home2');
     fs.mkdirSync(home, { recursive: true });
-    const runtime = createRuntime('claude-code', { homeDir: home });
+    const runtime = createRuntime('claude-code', { homeDir: home, env: { RELAY_ACCEPT_CLAUDE_BYPASS: '1' } });
     await runtime.prepare(spec, path.join(tmp, 'cfg-trust2'));
     fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ projects: { [spec.cwd]: { allowedTools: ['Bash'], hasTrustDialogAccepted: false, extra: 1 } } }));
     await runtime.prepare(spec, path.join(tmp, 'cfg-trust2'));
