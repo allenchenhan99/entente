@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 
-import { createContext, useContext, type ReactNode } from 'react';
+import React, { createContext, useContext, type ReactNode } from 'react';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 export type CommandExecutor = (argv: string[]) => Promise<void>;

@@ -1,5 +1,6 @@
 import type { State, TaskView } from '@relay/protocol';
 import { Text } from 'ink';
+import React from 'react';
 
 import { Canvas, type CellStyle } from './canvas.js';
 import { edgeStyle, edgeVisuals } from './edges.js';

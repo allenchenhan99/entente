@@ -1,5 +1,6 @@
 import type { Event } from '@relay/protocol';
 import { Text } from 'ink';
+import React from 'react';
 
 export interface TimelineProps {
   events: Event[];

@@ -1,5 +1,6 @@
 import type { HandoffState, State, TaskView } from '@relay/protocol';
 import { Box, Text } from 'ink';
+import React from 'react';
 
 export interface TreeProps {
   state: State;

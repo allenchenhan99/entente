@@ -1,6 +1,6 @@
 import type { Event, State } from '@relay/protocol';
 import { Box, Text, useStdout } from 'ink';
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import type { FocusCommand } from './commands.js';
 import { useDependencies } from './context.js';

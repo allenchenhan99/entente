@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { initialState, replay } from '@relay/protocol';
 import { render as renderInk } from 'ink';
 import { render as renderForTest } from 'ink-testing-library';
+import React from 'react';
 
 import { App, RelayGraphApp } from './App.js';
 import type { FocusCommand } from './commands.js';

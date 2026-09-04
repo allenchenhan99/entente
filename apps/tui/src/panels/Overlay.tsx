@@ -1,5 +1,6 @@
 import type { TaskContract, TaskView } from '@relay/protocol';
 import { Box, Text } from 'ink';
+import React from 'react';
 
 import type { InputMode, OverlayTab } from '../keys.js';
 
