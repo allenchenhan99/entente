@@ -63,6 +63,60 @@ export const LayoutPreset = z.object({
 });
 export type LayoutPreset = z.infer<typeof LayoutPreset>;
 
+/** Server-side screen model (a headless xterm per pane): what `relay pane read` and readiness detection see. */
+export const ScreenSnapshot = z.object({
+  pane_id: PaneId,
+  cols: z.number().int().positive(),
+  rows: z.number().int().positive(),
+  /** Visible rows, top to bottom, trailing whitespace trimmed. */
+  lines: z.array(z.string()),
+  cursor: z.object({ x: z.number().int().nonnegative(), y: z.number().int().nonnegative() }),
+  /** True while the process uses the alternate screen (full-screen TUIs such as Claude Code / Codex). */
+  alternate: z.boolean(),
+  /** Scrollback lines available above the visible rows. */
+  scrollback_lines: z.number().int().nonnegative(),
+});
+export type ScreenSnapshot = z.infer<typeof ScreenSnapshot>;
+
+export const ReadScreenQuery = z.object({
+  /** `visible` = the current viewport; `recent` = viewport plus up to `lines` rows of scrollback. */
+  source: z.enum(['visible', 'recent']).default('visible'),
+  lines: z.number().int().positive().max(5000).default(200),
+});
+
+export const PaneInputBody = z.object({
+  /** Literal text to type; `\r` submits. Sent with bracketed paste when the pane has it enabled. */
+  text: z.string().optional(),
+  /** Logical keys, e.g. `enter`, `esc`, `ctrl+c`, `tab`, `up`; applied after `text`. */
+  keys: z.array(z.string()).optional(),
+});
+export type PaneInputBody = z.infer<typeof PaneInputBody>;
+
+export const WaitOutputBody = z.object({
+  match: z.string().optional(),
+  regex: z.string().optional(),
+  timeout_ms: z.number().int().positive().max(600_000).default(60_000),
+  source: z.enum(['visible', 'recent']).default('recent'),
+});
+export const WaitOutputResult = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('matched'), line: z.string(), at: z.string() }),
+  z.object({ status: z.literal('timeout') }),
+  z.object({ status: z.literal('exited'), code: z.number().int() }),
+]);
+
+/**
+ * Readiness = can this pane accept a prompt right now? Three tiers, most trustworthy first:
+ * declared (the agent's own MCP heartbeat), hook (Claude Code / Codex hooks), screen (prompt heuristics).
+ */
+export const PaneReadiness = z.object({
+  pane_id: PaneId,
+  ready: z.boolean(),
+  source: z.enum(['declared', 'hook', 'screen', 'unknown']),
+  observed_at: z.string(),
+  detail: z.string().optional(),
+});
+export type PaneReadiness = z.infer<typeof PaneReadiness>;
+
 export const ptyRoutes = {
   /** `GET` → PaneInfo[] · `POST /panes/:id/kill` · `POST /panes/:id/focus` (records the focused pane for other clients). */
   panes: '/panes',
@@ -71,6 +125,14 @@ export const ptyRoutes = {
   pty: (paneId: string) => `/pty/${paneId}`,
   /** `GET` → the cast file for replay. */
   cast: (paneId: string) => `/panes/${paneId}/cast`,
+  /** `GET ?source=&lines=` → ScreenSnapshot (server-side headless xterm). */
+  screen: (paneId: string) => `/panes/${paneId}/screen`,
+  /** `POST` PaneInputBody → { ok: true }. */
+  input: (paneId: string) => `/panes/${paneId}/input`,
+  /** `POST` WaitOutputBody → WaitOutputResult (long-poll). */
+  waitOutput: (paneId: string) => `/panes/${paneId}/wait-output`,
+  /** `GET` → PaneReadiness. */
+  readiness: (paneId: string) => `/panes/${paneId}/readiness`,
   /** `GET` → LayoutPreset[] · `PUT /layouts/:name` → save. */
   layouts: '/layouts',
   /** The web app itself (static build of apps/web). */
