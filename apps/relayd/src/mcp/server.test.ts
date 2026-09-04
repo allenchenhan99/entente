@@ -215,3 +215,52 @@ describe('mcp repair path', () => {
     expect(r.types().slice(-2)).toEqual(['task_unblocked', 'progress_reported']);
   });
 });
+
+describe('mcp subtask (agent networking)', () => {
+  it('recipient proposes a subtask, the child accepts and submits, the parent\'s await_task resolves completed without a heartbeat', async () => {
+    const r = await listen();
+    const { mission_id, planner_token } = r.orchestrator.createMission({ repo: '/repo', title: 'Add login' });
+    const planner = await connect(r.url, planner_token);
+    await call(planner, PLANNER_TOOLS.propose_task, { contract: sampleContract('t-a') });
+    const parent = await connect(r.url, r.orchestrator.tokenFor('t-a'));
+    await call(parent, RECIPIENT_TOOLS.respond_to_contract, accepted);
+
+    // the planner token cannot delegate; a recipient can
+    expect(await call(planner, RECIPIENT_TOOLS.propose_subtask, { contract: sampleContract('t-a-schema') })).toMatchObject({ isError: true, text: expect.stringMatching(/recipient/i) });
+    const proposed = await call(parent, RECIPIENT_TOOLS.propose_subtask, { contract: sampleContract('t-a-schema') });
+    expect(proposed.isError).toBe(false);
+    expect(proposed.data).toEqual({ status: 'proposed', task_id: 't-a-schema', version: 1, warnings: [] });
+    expect(r.ofType('task_proposed').at(-1)).toMatchObject({ actor: 'agent:a', task_id: 't-a-schema', payload: { contract: { parent_task: 't-a', sender: 'agent:a', mission_id } } });
+    expect(r.host.calls.spawn.map((s) => s.name)).toEqual(['a', 'a-schema']);
+    // overlap with the parent and a cycle are rejected
+    expect((await call(parent, RECIPIENT_TOOLS.propose_subtask, { contract: sampleContract('t-a-x', { scope: { allowed_paths: ['src/t-a/x/**'] } }) })).data)
+      .toMatchObject({ status: 'lint_error', errors: [expect.stringMatching(/^overlapping_scope/)] });
+    expect(await call(parent, RECIPIENT_TOOLS.propose_subtask, { contract: sampleContract('t-a-y', { dependencies: ['t-a'] }) })).toMatchObject({ isError: true, text: expect.stringMatching(/cycle/) });
+    // the planner and the human see the subtask exactly like a planned task
+    const listed = await call(planner, PLANNER_TOOLS.list_tasks);
+    expect((listed.data as { tasks: Array<{ id: string }> }).tasks.map((t) => t.id)).toEqual(['t-a', 't-a-schema']);
+
+    expect(await call(parent, RECIPIENT_TOOLS.await_task, { task_id: 't-a', timeout_s: 1 })).toMatchObject({ isError: true, text: expect.stringMatching(/itself/) });
+    expect((await call(parent, RECIPIENT_TOOLS.await_task, { task_id: 't-a-schema', timeout_s: 1 })).data)
+      .toEqual({ status: 'pending', task_id: 't-a-schema', task_state: 'proposed', handoff_state: 'proposed' });
+
+    const before = r.orchestrator.taskView('t-a')!;
+    expect(before.runtime).toBe('working');
+    const parentEventsBefore = r.store.all().filter((e) => e.task_id === 't-a').length;
+    const waiting = call(parent, RECIPIENT_TOOLS.await_task, { task_id: 't-a-schema', timeout_s: 10 });
+
+    const child = await connect(r.url, r.orchestrator.tokenFor('t-a-schema'));
+    expect((await call(child, RECIPIENT_TOOLS.get_contract)).data).toMatchObject({ contract: { id: 't-a-schema', parent_task: 't-a' }, worktree: { branch: 'relay/t-a-schema' } });
+    expect((await call(child, RECIPIENT_TOOLS.respond_to_contract, accepted)).data).toMatchObject({ status: 'work_started' });
+    expect((await call(child, RECIPIENT_TOOLS.submit_evidence, { contract_version: 1, claimed: claimedAll, summary: 'schema' })).data).toEqual({ attempt: 1, checks_started: true });
+    expect((await call(child, RECIPIENT_TOOLS.await_verdict, { attempt: 1, timeout_s: 5 })).data).toEqual({ status: 'verified' });
+
+    expect((await waiting).data).toEqual({ status: 'completed', task_id: 't-a-schema', branch: 'relay/t-a-schema' });
+    // await_task is not a heartbeat: the parent's runtime state and its event stream are untouched by the call
+    const after = r.orchestrator.taskView('t-a')!;
+    expect(after.runtime).toBe('working');
+    expect(after.last_seen_at).toBe(before.last_seen_at);
+    expect(r.store.all().filter((e) => e.task_id === 't-a').length).toBe(parentEventsBefore);
+    expect(r.types()).not.toContain('tasks_planned');
+  });
+});
