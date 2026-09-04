@@ -8,6 +8,7 @@
  * as ONE comma-joined value; separate values would swallow the trailing prompt as a tool name.
  */
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { AgentRuntime, LaunchSpec } from '../../ports.js';
 import { bootstrapPrompt } from '../prompts.js';
@@ -28,18 +29,47 @@ export const CLAUDE_ALLOWED_TOOLS = [
 export interface ClaudeCodeRuntimeDeps {
   /** Executable name; defaults to `claude` on PATH. */
   executable?: string;
+  /** Home directory holding `.claude.json`; defaults to `env.HOME`, then `os.homedir()`. */
+  homeDir?: string;
+  /** Environment used to resolve HOME; defaults to `process.env`. */
+  env?: Record<string, string | undefined>;
 }
 
 export class ClaudeCodeRuntime implements AgentRuntime {
   readonly kind = 'claude-code' as const;
   private readonly executable: string;
+  private readonly homeDir: string;
 
   constructor(deps: ClaudeCodeRuntimeDeps = {}) {
+    const env = deps.env ?? process.env;
     this.executable = deps.executable ?? 'claude';
+    this.homeDir = deps.homeDir ?? env.HOME ?? os.homedir();
+  }
+
+  /**
+   * Claude Code shows a "do you trust this folder?" dialog the first time it starts in a directory. An
+   * unattended agent cannot answer it, and any typed prompt lands in the dialog instead (selecting
+   * "No, exit"). Pre-record the worktree as trusted in `~/.claude.json`, touching nothing else.
+   */
+  private async trustFolder(cwd: string): Promise<void> {
+    const file = path.join(this.homeDir, '.claude.json');
+    let root: Record<string, unknown> = {};
+    try {
+      root = JSON.parse(await fs.readFile(file, 'utf8')) as Record<string, unknown>;
+    } catch {
+      root = {};
+    }
+    const projects = (root.projects ??= {}) as Record<string, Record<string, unknown>>;
+    const existing = projects[cwd] ?? {};
+    projects[cwd] = { allowedTools: [], ...existing, hasTrustDialogAccepted: true };
+    const tmp = `${file}.relay-${process.pid}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(root, null, 2) + '\n', { mode: 0o600 });
+    await fs.rename(tmp, file);
   }
 
   async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
     await fs.mkdir(configDir, { recursive: true });
+    await this.trustFolder(spec.cwd);
     const mcpPath = path.join(configDir, 'mcp.json');
     const mcpConfig = {
       mcpServers: {

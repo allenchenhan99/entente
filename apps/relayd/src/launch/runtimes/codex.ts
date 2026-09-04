@@ -50,6 +50,8 @@ export function codexConfigToml(spec: Pick<LaunchSpec, 'mcpUrl' | 'cwd'>, roots?
     '[mcp_servers.relay]\n' +
     `url = ${tomlString(spec.mcpUrl)}\n` +
     'bearer_token_env_var = "RELAY_TOKEN"\n' +
+    // Without this every relay_* call stops for approval, which an unattended agent (approval policy `never`) can never grant.
+    'default_tools_approval_mode = "auto"\n' +
     '\n' +
     `[projects.${tomlString(spec.cwd)}]\n` +
     'trust_level = "trusted"\n';

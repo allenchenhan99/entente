@@ -23,7 +23,7 @@ afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 describe('claude runtime', () => {
   it('prepare writes a valid mcp.json with the bearer header and returns the documented argv', async () => {
-    const runtime = createRuntime('claude-code');
+    const runtime = createRuntime('claude-code', { homeDir: tmp });
     expect(runtime.kind).toBe('claude-code');
     expect(runtime).toBeInstanceOf(ClaudeCodeRuntime);
     const configDir = path.join(tmp, 'cfg', 'nested');
@@ -51,10 +51,35 @@ describe('claude runtime', () => {
   });
 
   it('uses the planner prompt for the planner role', async () => {
-    const runtime = createRuntime('claude-code');
+    const runtime = createRuntime('claude-code', { homeDir: tmp });
     const { prompt } = await runtime.prepare({ ...spec, role: 'planner' }, tmp);
     expect(prompt).toBe(bootstrapPrompt({ ...spec, role: 'planner' }));
     expect(prompt).toContain('relay_propose_task');
+  });
+});
+
+describe('claude runtime folder trust', () => {
+  it('marks the worktree as trusted in ~/.claude.json so no trust dialog swallows the bootstrap prompt', async () => {
+    const home = path.join(tmp, 'claude-home');
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ projects: { '/other': { allowedTools: ['Read'], hasTrustDialogAccepted: true } }, theme: 'dark' }));
+    const runtime = createRuntime('claude-code', { homeDir: home });
+    await runtime.prepare(spec, path.join(tmp, 'cfg-trust'));
+    const json = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8'));
+    expect(json.projects[spec.cwd]).toMatchObject({ hasTrustDialogAccepted: true, allowedTools: [] });
+    expect(json.projects['/other']).toEqual({ allowedTools: ['Read'], hasTrustDialogAccepted: true });
+    expect(json.theme).toBe('dark');
+  });
+
+  it('creates ~/.claude.json when missing and keeps existing project settings', async () => {
+    const home = path.join(tmp, 'claude-home2');
+    fs.mkdirSync(home, { recursive: true });
+    const runtime = createRuntime('claude-code', { homeDir: home });
+    await runtime.prepare(spec, path.join(tmp, 'cfg-trust2'));
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ projects: { [spec.cwd]: { allowedTools: ['Bash'], hasTrustDialogAccepted: false, extra: 1 } } }));
+    await runtime.prepare(spec, path.join(tmp, 'cfg-trust2'));
+    const json = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8'));
+    expect(json.projects[spec.cwd]).toEqual({ allowedTools: ['Bash'], hasTrustDialogAccepted: true, extra: 1 });
   });
 });
 
@@ -73,6 +98,7 @@ describe('codex runtime', () => {
     expect(toml).toContain('[mcp_servers.relay]\n');
     expect(toml).toContain(`url = "${spec.mcpUrl}"\n`);
     expect(toml).toContain('bearer_token_env_var = "RELAY_TOKEN"\n');
+    expect(toml).toContain('default_tools_approval_mode = "auto"\n');
     expect(toml).toContain(`[projects."${spec.cwd}"]\ntrust_level = "trusted"\n`);
 
     expect(env).toEqual({ CODEX_HOME: configDir, RELAY_TOKEN: spec.token });
