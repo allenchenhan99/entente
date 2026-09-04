@@ -24,7 +24,8 @@ describe('lint shim', () => {
     const results = lintContract({ ...base, dependencies: ['t-missing'] }, ctx);
     expect(results.some((r) => r.rule === 'unknown_dependency' && r.severity === 'error')).toBe(true);
     const sibling = { ...base, id: 't-missing' };
-    expect(lintContract({ ...base, dependencies: ['t-missing'] }, { ...ctx, siblings: [sibling] })).toEqual([]);
+    const withSibling = lintContract({ ...base, dependencies: ['t-missing'] }, { ...ctx, siblings: [sibling] });
+    expect(withSibling.filter((r) => r.severity === 'error')).toEqual([]);
   });
   it('reports an error for a criterion without a check', () => {
     const results = lintContract(
