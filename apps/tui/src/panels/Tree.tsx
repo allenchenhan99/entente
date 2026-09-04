@@ -45,13 +45,25 @@ function wasAccepted(task: TaskView): boolean {
     || ['accepted', 'evidence_submitted', 'retry_requested', 'verified'].includes(task.handoff_state);
 }
 
+/**
+ * Worktree paths are absolute and can be far longer than the pane is wide (`Tree` gets ~40% of the
+ * terminal per PRD §12.1). Only the tail identifies the task, so keep the path from its `.relay`
+ * segment onwards and fall back to the last three segments.
+ */
+export function shortWorktree(fullPath: string): string {
+  const segments = fullPath.split('/').filter((segment) => segment !== '');
+  const relayIndex = segments.lastIndexOf('.relay');
+  const kept = relayIndex === -1 ? segments.slice(-3) : segments.slice(relayIndex);
+  return kept.join('/');
+}
+
 export function taskDetail(task: TaskView): TaskDetail {
   if (task.blocked_on_dependencies.length > 0) {
     return { text: `◐ blocked on ${task.blocked_on_dependencies.join(', ')}`, dim: false };
   }
 
   const details: string[] = [];
-  if (task.worktree) details.push(`wt ${task.worktree.path}`);
+  if (task.worktree) details.push(`wt ${shortWorktree(task.worktree.path)}`);
   if (task.open_questions.length > 0) details.push(`? ${task.open_questions.length}`);
   if (task.blocker) details.push(`blocked: ${task.blocker.reason}`);
   if (details.length === 0) details.push(`waiting on ${task.contract.dependencies.join(', ') || 'handoff'}`);
@@ -75,20 +87,22 @@ export function Tree({ state, height, selectedTaskId }: TreeProps) {
   const maxTasks = Math.max(0, Math.floor((height - 2) / 2));
 
   return (
+    // Every row must occupy exactly one line: `maxTasks` budgets two lines per task, so a single
+    // soft-wrapped row pushes the tasks below it out of this height-clipped box.
     <Box flexDirection="column" height={height} overflow="hidden">
-      <Text bold>
+      <Text bold wrap="truncate">
         MISSION  {missionView.mission.title}  {missionView.status}
         {(missionView.open_questions?.length ?? 0) > 0 ? <Text color="yellow">  ? {missionView.open_questions!.length} for you</Text> : null}
       </Text>
-      <Text dimColor>lint: {errorCount} errors · {warningCount} warnings</Text>
+      <Text dimColor wrap="truncate">lint: {errorCount} errors · {warningCount} warnings</Text>
       {tasks.slice(0, maxTasks).map((task) => {
         const detail = taskDetail(task);
         return (
           <Box key={task.id} flexDirection="column">
-            <Text color={handoffColor(task.handoff_state)} bold={task.id === selectedTaskId}>
+            <Text color={handoffColor(task.handoff_state)} bold={task.id === selectedTaskId} wrap="truncate">
               {task.id === selectedTaskId ? '›' : '▸'} {task.contract.recipient}  {taskSummary(task)}
             </Text>
-            <Text color={handoffColor(task.handoff_state)} dimColor={detail.dim}>    {detail.text}</Text>
+            <Text color={handoffColor(task.handoff_state)} dimColor={detail.dim} wrap="truncate">    {detail.text}</Text>
           </Box>
         );
       })}

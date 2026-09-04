@@ -273,8 +273,21 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       if (JSON.stringify(results) === JSON.stringify(t.lint)) continue;
       t.lint = results;
       emitTask(t, 'relayd', 'lint_reported', { contract_version: current(t).version, results });
-      await track(maybeSpawn(t.id)).catch(() => {});
+      await track(maybeSpawn(t.id)).catch((e) => reportSpawnFailure(t.id, e));
     }
+  };
+
+  /**
+   * A failed spawn reached only relayd's stderr (via `track`'s logger) and produced no event, so the task
+   * sat at proposed/unspawned with nothing in the event log, the TUI or replay to say why. Record it as a
+   * blocker — `task_blocked` already carries a reason and the reducer already surfaces it.
+   */
+  const reportSpawnFailure = (taskId: string, error: unknown): void => {
+    const rec = tasks.get(taskId);
+    if (!rec || rec.taskState === 'canceled') return;
+    const reason = `agent spawn failed: ${error instanceof Error ? error.message : String(error)}`;
+    rec.blocker = { reason, since: clock() };
+    emitTask(rec, 'relayd', 'task_blocked', { reason });
   };
 
   const maybeSpawn = async (taskId: string): Promise<void> => {
@@ -314,7 +327,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   const spawnDependants = async (taskId: string, missionId: string): Promise<void> => {
     for (const t of tasks.values()) {
-      if (t.missionId === missionId && current(t).dependencies.includes(taskId)) await maybeSpawn(t.id);
+      if (t.missionId === missionId && current(t).dependencies.includes(taskId)) {
+        // This runs inside the verification pipeline: an unhandled spawn failure here would abort the
+        // parent's completion and skip `maybeIntegrate`. Record it and carry on to the next dependant.
+        await maybeSpawn(t.id).catch((e) => reportSpawnFailure(t.id, e));
+      }
     }
   };
 
@@ -344,7 +361,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const results = runLint(rec);
     const errors = results.filter((r) => r.severity === 'error').map((r) => `${r.rule}: ${r.message}`);
     const warnings = results.filter((r) => r.severity !== 'error').map((r) => `${r.rule}: ${r.message}`);
-    if (errors.length === 0) await track(maybeSpawn(rec.id)).catch(() => {});
+    if (errors.length === 0) await track(maybeSpawn(rec.id)).catch((e) => reportSpawnFailure(rec.id, e));
     await relintSiblings(rec);
     if (errors.length > 0) return { status: 'lint_error', task_id: rec.id, errors, warnings };
     return { status: 'proposed', task_id: rec.id, version, warnings };
@@ -357,7 +374,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     rec.openQuestions = [];
     emitTask(rec, actor, 'contract_revised', { contract: next, previous_version: previous });
     runLint(rec);
-    await track(maybeSpawn(rec.id)).catch(() => {});
+    await track(maybeSpawn(rec.id)).catch((e) => reportSpawnFailure(rec.id, e));
     await relintSiblings(rec);
     return next.version;
   };

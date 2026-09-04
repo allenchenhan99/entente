@@ -72,6 +72,24 @@ describe('orchestrator missions', () => {
     await expect(r.orchestrator.reviseTask('t-a', { constraints: ['late'] }, 'planner')).rejects.toThrow(/immutable/);
   });
 
+  it('records a failed agent spawn as a blocker instead of leaving the task silently unspawned', async () => {
+    const r = createTestRelay();
+    const { mission_id } = r.orchestrator.createMission(mission);
+    r.host.spawn = async () => { throw new Error('herdr host: agent start failed: boom'); };
+
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner');
+    await r.orchestrator.settled();
+
+    const blocked = r.ofType('task_blocked');
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]!.task_id).toBe('t-a');
+    expect(blocked[0]!.payload.reason).toMatch(/agent spawn failed: herdr host: agent start failed: boom/);
+    expect(r.ofType('agent_spawned')).toHaveLength(0);
+    // /state and the TUI are reducer-derived, so the blocker has to be visible there too.
+    expect(r.store.state().tasks['t-a']!.blocker?.reason).toMatch(/agent spawn failed/);
+    expect(r.orchestrator.taskView('t-a')!.blocker?.reason).toMatch(/agent spawn failed/);
+  });
+
   it('proposeTask rejects an unknown mission', async () => {
     const r = createTestRelay();
     await expect(r.orchestrator.proposeTask('m-nope', sampleContract('t-a'), 'planner')).rejects.toThrow(/mission/);
