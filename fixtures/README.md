@@ -45,3 +45,7 @@ replays both files and pins the expected end state and metrics.
   delta repair `r1`, agent reports a blocker (cannot reproduce) while still adding regression tests, second
   evidence, reviewer passes AC-3, task verified. The Codex frontend task was canceled in this run (its MCP
   approval config was fixed afterwards). Absolute paths in payloads are from the recording machine.
+- `events-live-2.jsonl` — full mission run (2026-09-04): both recipients (Claude Code backend, Codex frontend)
+  asked for clarification before writing code (7 answers → contracts v2), worked in parallel, submitted evidence
+  verified by relayd's checks plus one human review, then both branches were merged into `relay/integration`,
+  the integration check passed and the mission was verified.
