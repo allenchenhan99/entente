@@ -6,8 +6,9 @@
  * every other member of the port and `launch/index.ts` casts at the boundary.
  */
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import type { z } from 'zod';
-import type { PaneInfo, PaneReadiness, ScreenSnapshot, PaneInputBody } from '@relay/protocol';
+import type { HostMetrics, PaneInfo, PaneReadiness, ScreenSnapshot, PaneInputBody } from '@relay/protocol';
 import type { WaitOutputResult as WaitOutputResultSchema } from '@relay/protocol';
 
 export type WaitOutputResult = z.infer<typeof WaitOutputResultSchema>;
@@ -40,6 +41,8 @@ export interface RelayHostDeps {
 export interface RelaySpawnOptions extends SpawnOptions {
   cols?: number;
   rows?: number;
+  /** Task this pane hosts, when the caller knows it (reported in PaneInfo.task_id and GET /metrics). */
+  taskId?: string;
 }
 
 export interface WaitOutputOptions {
@@ -69,6 +72,12 @@ export class RelayHost {
   private readonly castDir: string;
   private readonly clock: () => string;
   private readonly timings: PromptTimings;
+  /** `performance.now()` at construction (HostMetrics.uptime_ms). */
+  private readonly constructedAt = performance.now();
+  /** Monotonic: every pane ever spawned, exited ones included. */
+  private panesSpawned = 0;
+  /** Prompt deliveries that threw (timeout, process exit). */
+  private promptFailures = 0;
 
   constructor(deps: RelayHostDeps) {
     this.next = deps.firstPane ?? 1;
@@ -96,9 +105,23 @@ export class RelayHost {
     return [...this.panes.values()].map((p) => p.info());
   }
 
+  /** `GET /metrics`: host counters plus every pane's timings (PRD §23 efficiency instrumentation). */
+  metrics(): HostMetrics {
+    const panes = [...this.panes.values()];
+    return {
+      host: 'relay',
+      uptime_ms: Math.max(0, performance.now() - this.constructedAt),
+      panes_spawned: this.panesSpawned,
+      panes_alive: panes.filter((p) => p.alive).length,
+      prompt_failures: this.promptFailures,
+      panes: panes.map((p) => ({ pane_id: p.id, role: p.role, task_id: p.taskId, timings: p.timings() })),
+    };
+  }
+
   // ---------- TerminalHost ----------
 
   async spawn(opts: RelaySpawnOptions): Promise<{ paneId: string }> {
+    const spawnRequestedAt = performance.now();
     if (opts.argv.length === 0) throw new Error('relay host: argv must not be empty');
     const paneId = `relay:${this.next}`;
     const env: Record<string, string> = {};
@@ -107,8 +130,10 @@ export class RelayHost {
     const pane = new Pane({
       paneId, role: opts.name, runtime: runtimeOf(opts.argv), argv: opts.argv, cwd: opts.cwd, env,
       castPath: path.join(this.castDir, `${paneId}.cast`), cols: opts.cols, rows: opts.rows, clock: this.clock, quietMs: this.timings.quietMs,
+      taskId: opts.taskId, spawnRequestedAt,
     });
     this.next++;
+    this.panesSpawned++;
     this.panes.set(paneId, pane);
     if (opts.prompt !== undefined) await this.deliverPrompt(pane, opts.prompt);
     return { paneId };
@@ -186,6 +211,15 @@ export class RelayHost {
   // ---------- prompt delivery ----------
 
   private async deliverPrompt(pane: Pane, prompt: string): Promise<void> {
+    try {
+      await this.deliverPromptOrThrow(pane, prompt);
+    } catch (err) {
+      this.promptFailures++;
+      throw err;
+    }
+  }
+
+  private async deliverPromptOrThrow(pane: Pane, prompt: string): Promise<void> {
     const { quietMs, retryMs, timeoutMs } = this.timings;
     const deadline = Date.now() + timeoutMs;
     const fail = (why: string) => new Error(`agent prompt failed: ${why}; pane ${pane.id} left open for diagnosis`);
@@ -199,9 +233,11 @@ export class RelayHost {
       if (pane.quietFor() >= quietMs && pane.readiness().ready) break;
       await sleep(POLL_MS);
     }
+    pane.marks.readyAt = performance.now();
     const before = pane.lastLine();
     pane.paste(prompt);
     pane.write('\r');
+    pane.marks.promptWrittenAt = performance.now();
     let lastEnterAt = Date.now();
     let retries = 0;
     const prefix = prompt.slice(0, 24);
@@ -224,6 +260,8 @@ export class RelayHost {
       }
       await sleep(POLL_MS);
     }
+    pane.marks.promptAcceptedAt = performance.now();
+    pane.marks.promptRetries = retries;
   }
 }
 

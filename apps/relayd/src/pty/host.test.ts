@@ -151,6 +151,78 @@ describe('relay host prompt delivery', () => {
   });
 });
 
+describe('relay host prompt timings', () => {
+  it('records readiness, prompt write and accept timings with zero retries after a clean prompt delivery', async () => {
+    const { host, dir } = makeHost();
+    const agent = fakeAgent(dir, { prompt: 'booting...\r\n> ', delayMs: 200, reply: '\r\nworking\r\n' });
+    const { paneId } = await host.spawn({ name: 'backend', cwd: dir, argv: agent.argv, env: {}, prompt: 'do the thing' });
+    const t = host.get(paneId)!.timings();
+    expect(t.readiness_ms).toBeDefined();
+    expect(t.prompt_write_ms).toBeDefined();
+    expect(t.prompt_accept_ms).toBeDefined();
+    expect(t.readiness_ms!).toBeGreaterThanOrEqual(0);
+    expect(t.prompt_write_ms!).toBeGreaterThanOrEqual(0);
+    expect(t.prompt_accept_ms!).toBeGreaterThanOrEqual(0);
+    // Readiness waits for the quiet window after the prompt line, so it is at least quietMs after first output.
+    expect(t.readiness_ms!).toBeGreaterThanOrEqual(fastTimings.quietMs - 20);
+    expect(t.prompt_retries).toBe(0);
+    expect(t.spawn_ms).toBeDefined();
+    expect(t.first_output_ms).toBeDefined();
+    expect(host.metrics().prompt_failures).toBe(0);
+  });
+
+  it('counts the extra Enter presses as prompt_retries and includes them in prompt_accept_ms', async () => {
+    const { host, dir } = makeHost();
+    const file = path.join(dir, 'agent.js');
+    fs.writeFileSync(file, `
+      let enters = 0;
+      process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (d) => { for (const ch of d) if (ch === '\\r') enters++;
+        if (enters === 1) process.stdout.write('\\r\\n› [Pasted Content 5 chars]\\r\\n  gpt-5.6-sol default · ~/x\\r\\n');
+        if (enters >= 2) process.stdout.write('\\r\\n• Working (1s • esc to interrupt)\\r\\n'); });
+      setTimeout(() => process.stdout.write('› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'), 100);
+      setTimeout(() => process.exit(0), 20000);
+    `);
+    const { paneId } = await host.spawn({ name: 'backend', cwd: dir, argv: [process.execPath, file], env: {}, prompt: 'hello' });
+    const t = host.get(paneId)!.timings();
+    expect(t.prompt_retries).toBeGreaterThanOrEqual(1);
+    expect(t.prompt_accept_ms!).toBeGreaterThanOrEqual(fastTimings.retryMs - 20);
+    expect(t.readiness_ms).toBeDefined();
+    expect(t.prompt_write_ms).toBeDefined();
+  });
+
+  it('a failed prompt delivery bumps prompt_failures and leaves the prompt marks undefined', async () => {
+    const { host, dir } = makeHost();
+    const agent = fakeAgent(dir, { prompt: 'still loading', delayMs: 100, reply: '' });
+    await expect(host.spawn({ name: 'backend', cwd: dir, argv: agent.argv, env: {}, prompt: 'hello' })).rejects.toThrow(/agent prompt failed/);
+    expect(host.metrics().prompt_failures).toBe(1);
+    const t = host.get('relay:1')!.timings();
+    expect(t.readiness_ms).toBeUndefined();
+    expect(t.prompt_write_ms).toBeUndefined();
+    expect(t.prompt_accept_ms).toBeUndefined();
+  });
+});
+
+describe('relay host metrics', () => {
+  it('counts every spawn (including exited panes), only live panes as alive, and lists each pane with timings', async () => {
+    const { host, dir } = makeHost();
+    const before = host.metrics();
+    expect(before).toMatchObject({ host: 'relay', panes_spawned: 0, panes_alive: 0, prompt_failures: 0, panes: [] });
+    expect(before.uptime_ms).toBeGreaterThanOrEqual(0);
+    const gone = await host.spawn({ name: 'backend', cwd: dir, argv: ['sh', '-c', 'echo bye; exit 0'], env: {} });
+    const live = await host.spawn({ name: 'planner', cwd: dir, argv: ['sh', '-c', 'read x'], env: {}, taskId: 't-plan' });
+    await host.get(gone.paneId)!.exited;
+    const m = host.metrics();
+    expect(m).toMatchObject({ host: 'relay', panes_spawned: 2, panes_alive: 1, prompt_failures: 0 });
+    expect(m.uptime_ms).toBeGreaterThanOrEqual(before.uptime_ms);
+    expect(m.panes.map((p) => p.pane_id)).toEqual([gone.paneId, live.paneId]);
+    expect(m.panes[0]).toMatchObject({ role: 'backend', timings: expect.objectContaining({ output_chunks: expect.any(Number) }) });
+    expect(m.panes[0]!.task_id).toBeUndefined();
+    expect(m.panes[1]).toMatchObject({ role: 'planner', task_id: 't-plan' });
+    expect(host.get(live.paneId)!.info().task_id).toBe('t-plan');
+  });
+});
+
 describe('relay host readiness and wait-output', () => {
   it('readiness is false while output streams and true once a $ prompt line is idle', async () => {
     const { host, dir } = makeHost();
