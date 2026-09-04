@@ -21,3 +21,6 @@ WORK_CONTRACT.md
 EVIDENCE.md
 HANDOFF_NOTES.md
 demo-repo/node_modules/
+
+# rust
+target/
