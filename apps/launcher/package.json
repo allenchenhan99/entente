@@ -1,0 +1,16 @@
+{
+  "name": "@relay/launcher",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "entente — start, inspect, and stop the RelayGraph terminal base",
+  "bin": {
+    "entente": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --root ../.. apps/launcher"
+  },
+  "dependencies": {
+    "@relay/protocol": "*"
+  }
+}
