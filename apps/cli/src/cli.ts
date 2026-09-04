@@ -23,6 +23,7 @@ import {
   Event as EventSchema,
   LoadPlanBody,
   OkOutput,
+  PaneId,
   PaneInputBody,
   PaneInfo,
   PaneReadiness,
@@ -57,6 +58,8 @@ const defaultGraphApi: GraphApi = { buildGraph, actionsFor, narrate, storyFor, d
 export interface CliIo {
   fetch: typeof globalThis.fetch;
   stdout: (line: string) => void;
+  /** Writes exact stdout bytes without appending a line ending. */
+  write: (text: string) => void;
   stderr: (line: string) => void;
   env: Record<string, string | undefined>;
   cwd: string;
@@ -94,6 +97,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
   const full: CliIo = {
     fetch: io.fetch ?? globalThis.fetch,
     stdout: io.stdout ?? ((line) => process.stdout.write(line + '\n')),
+    write: io.write ?? ((text) => process.stdout.write(text)),
     stderr: io.stderr ?? ((line) => process.stderr.write(line + '\n')),
     env: io.env ?? process.env,
     cwd: io.cwd ?? process.cwd(),
@@ -151,11 +155,14 @@ async function pane(args: string[], io: CliIo): Promise<number> {
 async function paneList(args: string[], io: CliIo): Promise<number> {
   const { values } = parseKnown(args, { port: { type: 'string' } });
   const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.panes);
-  if (!Array.isArray(raw)) throw new CommandError('GET /panes response does not match PaneInfo[]: expected an array');
-  const panes = raw.map((item, index) => ({
+  const list = parsePaneList(raw);
+  const panes = list.items.map((item, index) => ({
     ...validateResponse(PaneInfo, item, `PaneInfo[] at index ${index}`),
-    focused: isFocusedPane(item, index),
+    focused: list.focusedPane === undefined ? isFocusedPane(item, index) : false,
   }));
+  if (list.focusedPane !== undefined) {
+    for (const pane of panes) pane.focused = pane.pane_id === list.focusedPane;
+  }
   const headings = ['pane_id', 'role', 'task_id', 'alive', 'cols×rows', 'cwd'];
   const rows = panes.map((item) => [
     item.pane_id,
@@ -309,7 +316,7 @@ async function paneCast(args: string[], io: CliIo): Promise<number> {
   if (!paneId) throw new UsageError('relay pane cast needs a pane id');
   const cast = await new Client(io, values.port).getText(ptyRoutes.cast(paneId));
   if (values.out === undefined) {
-    io.stdout(cast);
+    io.write(cast);
     return 0;
   }
   const output = path.resolve(io.cwd, values.out);
@@ -686,6 +693,18 @@ function isFocusedPane(value: unknown, index: number): boolean {
     throw new CommandError(`response does not match PaneInfo[] at index ${index}: focused must be a boolean`);
   }
   return focused;
+}
+
+function parsePaneList(value: unknown): { items: unknown[]; focusedPane?: string } {
+  if (Array.isArray(value)) return { items: value };
+  if (typeof value !== 'object' || value === null || !('panes' in value) || !Array.isArray(value.panes)) {
+    throw new CommandError('GET /panes response does not match PaneInfo[] or { panes: PaneInfo[]; focused_pane?: PaneId }');
+  }
+  if (!('focused_pane' in value) || value.focused_pane === undefined) return { items: value.panes };
+  return {
+    items: value.panes,
+    focusedPane: validateResponse(PaneId, value.focused_pane, 'focused_pane PaneId'),
+  };
 }
 
 class Client {

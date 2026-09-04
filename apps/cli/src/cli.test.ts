@@ -22,8 +22,9 @@ function fakeFetch(respond: (url: string, init?: RequestInit) => unknown) {
 
 function capture() {
   const out: string[] = [];
+  const raw: string[] = [];
   const err: string[] = [];
-  return { out, err, stdout: (l: string) => out.push(l), stderr: (l: string) => err.push(l) };
+  return { out, raw, err, stdout: (l: string) => out.push(l), write: (text: string) => raw.push(text), stderr: (l: string) => err.push(l) };
 }
 
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
@@ -61,7 +62,7 @@ const paneInfo = (overrides: Record<string, unknown> = {}) => ({
 describe('relay pane list', () => {
   it('renders a table with two validated panes and marks the focused pane', async () => {
     const panes = [
-      paneInfo({ focused: true }),
+      paneInfo(),
       paneInfo({
         pane_id: 'relay:8',
         task_id: undefined,
@@ -77,7 +78,7 @@ describe('relay pane list', () => {
         exit_code: undefined,
       }),
     ];
-    const { fetch, requests } = fakeFetch(() => panes);
+    const { fetch, requests } = fakeFetch(() => ({ panes, focused_pane: 'relay:7' }));
     const io = capture();
 
     expect(await run(['pane', 'list', '--port', '7500'], { ...io, fetch, env: {} })).toBe(0);
@@ -87,6 +88,14 @@ describe('relay pane list', () => {
       '* relay:7  backend  t-backend  true   120×40     /work/backend',
       '  relay:8  planner  -          false  80×24      /work',
     ]);
+  });
+
+  it('accepts the frozen PaneInfo[] response when no focus metadata is available', async () => {
+    const { fetch } = fakeFetch(() => [paneInfo()]);
+    const io = capture();
+
+    expect(await run(['pane', 'list'], { ...io, fetch, env: {} })).toBe(0);
+    expect(io.out[1]).toMatch(/^  relay:7/);
   });
 
   it('fails clearly when a pane does not match PaneInfo', async () => {
@@ -306,7 +315,8 @@ describe('relay pane cast', () => {
 
     expect(await run(['pane', 'cast', 'relay:7'], { ...io, fetch, env: {} })).toBe(0);
     expect(requests[0]).toMatchObject({ url: 'http://127.0.0.1:7420/panes/relay:7/cast', method: 'GET' });
-    expect(io.out).toEqual([cast]);
+    expect(io.out).toEqual([]);
+    expect(io.raw).toEqual([cast]);
   });
 
   it('writes --out relative to the CLI cwd without printing the cast', async () => {
