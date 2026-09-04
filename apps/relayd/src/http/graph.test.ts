@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { actionsFor, buildGraph, describe as describeObject, initialState, routes, storyFor } from '@relay/protocol';
-import type { GraphObjectRef } from '@relay/protocol';
+import { actionsFor, buildGraph, describe as describeObject, initialState, narrate, reduce, routes, storyFor } from '@relay/protocol';
+import type { Event, GraphObjectRef } from '@relay/protocol';
 import { createTestRelay } from '../fakes/test-harness.js';
 import { createSessionAuth } from '../auth/token.js';
 import { createApp } from './app.js';
@@ -126,5 +126,101 @@ describe('graph object', () => {
         expect(missing.body).toEqual({ error: 'object not found' });
       }
     }
+  });
+});
+
+describe('GET /story', () => {
+  interface StoryItem { seq: number; ts: string; task_id?: string; actor: string; line: string }
+
+  /** What the Ink TUI timeline shows: every event narrated against the state *after* it, in one replay. */
+  function narrated(events: Event[]): StoryItem[] {
+    let state = initialState();
+    return events.map((e) => {
+      state = reduce(state, e);
+      return { seq: e.seq, ts: e.ts, ...(e.task_id !== undefined ? { task_id: e.task_id } : {}), actor: e.actor, line: narrate(e, state) };
+    });
+  }
+
+  it('narrates the whole log in seq order with the post-event state (default limit 200)', async () => {
+    const { app, store } = setup('events-live-1.jsonl');
+    const { status, body } = await get(app, '/story');
+    expect(status).toBe(200);
+    const expected = narrated(store.all());
+    expect(expected.length).toBe(38);
+    expect(body).toEqual({ items: expected });
+    expect(body.items.map((i: StoryItem) => i.seq)).toEqual([...body.items.map((i: StoryItem) => i.seq)].sort((a, b) => a - b));
+    expect(Object.keys(body.items[0])).toEqual(['seq', 'ts', 'actor', 'line']);
+    expect(Object.keys(body.items[1])).toEqual(['seq', 'ts', 'task_id', 'actor', 'line']);
+  });
+
+  it('since= excludes the given seq and limit= pages; seq gaps in the log are skipped', async () => {
+    const { app, store } = setup('events-live-1.jsonl');
+    const all = narrated(store.all());
+    expect(all.map((i) => i.seq)).toContain(13);
+    expect(all.map((i) => i.seq)).not.toContain(14);
+    const page1 = (await get(app, '/story?limit=5')).body.items as StoryItem[];
+    expect(page1).toEqual(all.slice(0, 5));
+    const page2 = (await get(app, `/story?since=${page1.at(-1)!.seq}&limit=5`)).body.items as StoryItem[];
+    expect(page2).toEqual(all.slice(5, 10));
+    expect((await get(app, '/story?since=13')).body.items).toEqual(all.filter((i) => i.seq > 13));
+    expect((await get(app, '/story?since=14')).body.items).toEqual(all.filter((i) => i.seq > 14));
+    expect((await get(app, '/story?since=41')).body).toEqual({ items: [] });
+    expect((await get(app, '/story?since=0&limit=2000')).body.items).toEqual(all);
+    expect((await get(app, '/story?limit=99999')).body.items).toEqual(all.slice(0, 2000));
+  });
+
+  it('rejects a non-integer since or a non-positive limit with 400', async () => {
+    const { app } = setup('events-live-1.jsonl');
+    for (const q of ['since=x', 'since=-1', 'since=1.5', 'limit=0', 'limit=-1', 'limit=x']) {
+      const res = await get(app, `/story?${q}`);
+      expect(res.status, q).toBe(400);
+      expect(res.body).toEqual({ error: expect.stringContaining(q.split('=')[0]) });
+    }
+  });
+
+  it('is empty on an empty store', async () => {
+    const { app } = setup();
+    expect((await get(app, '/story')).body).toEqual({ items: [] });
+  });
+
+  it('pins the live-1 narration to the lines the Ink TUI shows', async () => {
+    const { app } = setup('events-live-1.jsonl');
+    const { body } = await get(app, '/story');
+    const lines = (body.items as StoryItem[]).map((i) => `${i.seq} ${i.line}`);
+    expect(lines.slice(0, 13)).toEqual([
+      '1 you create mission "Add secure login to this application." in /Users/allenchenhan99/entente-demo/app',
+      '2 you propose t-backend-auth v1 to backend: "Implement secure login endpoints for this application, reusing the existing user model and session store" (5 criteria, paths src/auth/**, src/app.ts, tests/auth/**)',
+      '3 RelayGraph lints t-backend-auth v1: clean',
+      '4 RelayGraph creates worktree relay/t-backend-auth at /Users/allenchenhan99/entente-demo/app/.relay/wt/t-backend-auth',
+      '5 RelayGraph spawns backend (claude-code) in pane wP:p9',
+      '6 you propose t-frontend-login v1 to frontend: "Add a minimal login page that submits an email address to the backend login endpoint and shows the result" (2 criteria, paths public/**, tests/ui/**)',
+      '7 RelayGraph lints t-frontend-login v1: clean',
+      '8 RelayGraph creates worktree relay/t-frontend-login at /Users/allenchenhan99/entente-demo/app/.relay/wt/t-frontend-login',
+      '9 RelayGraph spawns frontend (codex) in pane wP:pA',
+      '10 you plan 2 tasks: t-backend-auth, t-frontend-login',
+      '11 backend accepts v1 and restates it: Add passwordless email login: POST /auth/login takes an email, and when it matches a user in the existing UserRepo, gen…; Add POST /auth/verify that consumes the token: a valid, unexpired, never-used token creates a session in the existing S…; Replace the fixed 401 on GET /me with a real lookup: read the session cookie, look the session up in SessionStore, and…; Wire everything in src/app.ts through an options object with injectable UserRepo, SessionStore, LoginTokenStore, EmailS…; Cover all of this with vitest tests under tests/auth/, including tests/auth/valid-login.test.ts and tests/auth/expired-…',
+      '12 backend starts working on t-backend-auth',
+      '13 backend reports: "Contract accepted. Plan: passwordless email login token (single-use, expiring, hashed at rest) in src/auth/, POST /auth…" (5%)',
+    ]);
+    expect(lines.slice(-17)).toEqual([
+      '25 you mark AC-3 failed — Manual test: after a successful POST /auth/verify with a token, replaying the exact same token a second time returned 2…',
+      '26 RelayGraph opens repair r1 for AC-3 only (1 repair left)',
+      '27 backend accepts repair r1',
+      '28 backend is stuck: Repair r1 (AC-3) reports that replaying a consumed token returned 200 and created a second session. I cannot reproduce… (waiting on human reviewer: exact reproduction steps for the AC-3 token replay observation)',
+      '29 you cancel t-frontend-login: codex config fixed; will rerun in the next mission',
+      '30 backend resumes work',
+      '31 backend reports: "Repair r1 (AC-3): replay could not be reproduced locally (sequential 200/401, concurrent 1x200+4x401). Added two regres…" (95%)',
+      '32 backend submits evidence #2 claiming 5 passed: "Repair attempt for AC-3. Investigation showed the token replay cannot be reproduced on this branch: consume-and-delete…"',
+      '33 RelayGraph starts checks on backend\'s attempt 2',
+      '34 RelayGraph runs AC-1: passed',
+      '35 RelayGraph runs AC-2: passed',
+      '36 RelayGraph runs AC-4: passed',
+      '37 RelayGraph runs AC-5: passed',
+      '38 RelayGraph records attempt 2: 4 passed, 1 pending review',
+      '39 you mark AC-3 passed',
+      '40 RelayGraph verifies backend: every criterion of attempt 2 passed',
+      '41 backend completes t-backend-auth',
+    ]);
+    expect(lines).toHaveLength(38);
   });
 });
