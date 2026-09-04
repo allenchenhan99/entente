@@ -150,8 +150,12 @@ fn verify_token(expected: &str, presented: &str) -> bool {
 
 async fn require_token(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let headers = req.headers();
+    let is_upgrade = headers
+        .get(header::UPGRADE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
     let presented = bearer_token(headers).or_else(|| {
-        if req.uri().path().starts_with("/pty/") {
+        if is_upgrade {
             upgrade_token(headers)
         } else {
             None
@@ -412,7 +416,7 @@ enum ClientMessage {
 #[derive(Serialize)]
 #[serde(tag = "t", rename_all = "lowercase")]
 enum ServerMessage {
-    Hello { pane: crate::pane::PaneInfo },
+    Hello { pane: Box<crate::pane::PaneInfo> },
     Scrollback { data: String },
     Output { data: String },
     Exit { code: i32 },
@@ -441,7 +445,14 @@ async fn send(socket: &mut WebSocket, msg: &ServerMessage) -> bool {
 
 async fn attach(mut socket: WebSocket, pane: Arc<Pane>) {
     let sub = pane.subscribe();
-    if !send(&mut socket, &ServerMessage::Hello { pane: sub.info }).await {
+    if !send(
+        &mut socket,
+        &ServerMessage::Hello {
+            pane: Box::new(sub.info),
+        },
+    )
+    .await
+    {
         return;
     }
     if !send(
