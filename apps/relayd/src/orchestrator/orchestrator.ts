@@ -496,6 +496,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   };
 
   const runChecks = async (rec: TaskRecord, submission: EvidenceSubmission): Promise<void> => {
+    // Let the tool call return before any check event is produced, even with synchronous runners.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const evidenceDir = path.join(deps.relayDir, 'evidence', rec.id);
     let record: EvidenceRecord;
     try {
