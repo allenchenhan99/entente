@@ -44,7 +44,10 @@ pub fn action_keys(actions: &[ObjectAction]) -> String {
 pub fn inbox_lines(app: &App, height: usize) -> Vec<Line<'static>> {
     let items = &app.graph.inbox;
     if items.is_empty() {
-        return vec![Line::styled("<inbox empty>", Style::new().fg(Color::DarkGray))];
+        return vec![Line::styled(
+            "<inbox empty>",
+            Style::new().fg(Color::DarkGray),
+        )];
     }
     let max_items = height.max(1);
     let selected_index = match &app.selected {
@@ -71,11 +74,21 @@ pub fn inbox_lines(app: &App, height: usize) -> Vec<Line<'static>> {
                 title_style,
             )];
             if !keys.is_empty() {
-                spans.push(Span::styled(format!("  [{keys}]"), Style::new().fg(Color::Cyan)));
+                spans.push(Span::styled(
+                    format!("  [{keys}]"),
+                    Style::new().fg(Color::Cyan),
+                ));
             }
             let detail = item.detail.join(" · ");
             spans.push(Span::styled(
-                format!("  {}", if detail.is_empty() { "-".to_string() } else { detail }),
+                format!(
+                    "  {}",
+                    if detail.is_empty() {
+                        "-".to_string()
+                    } else {
+                        detail
+                    }
+                ),
                 Style::new().fg(Color::DarkGray),
             ));
             Line::from(spans)
@@ -92,7 +105,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = panel_block(&title, region_active(app, Region::Inbox), Borders::TOP);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    frame.render_widget(Paragraph::new(inbox_lines(app, inner.height as usize)), inner);
+    frame.render_widget(
+        Paragraph::new(inbox_lines(app, inner.height as usize)),
+        inner,
+    );
 }
 
 #[cfg(test)]

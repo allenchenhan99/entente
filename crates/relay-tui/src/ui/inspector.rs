@@ -13,7 +13,11 @@ use ratatui::Frame;
 
 /// Port of `storyWindow`: facts first (at most half the rows), then the newest story lines that fit, with an
 /// `… n earlier` marker when some are cut.
-pub fn story_window(description: &ObjectDescription, story: &[String], available: usize) -> Vec<String> {
+pub fn story_window(
+    description: &ObjectDescription,
+    story: &[String],
+    available: usize,
+) -> Vec<String> {
     let mut facts = vec![description.title.clone()];
     facts.extend(description.lines.iter().cloned());
     let fact_rows = facts.len().min((available / 2).max(1));
@@ -105,7 +109,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines), inner);
     if let Some(p) = app.prompt_line() {
         if app.input_mode != Some(crate::app::InputMode::CancelConfirm) {
-            let row = inner.y + (lines_len_hint(inner.height) as u16).saturating_sub(if app.error.is_some() { 2 } else { 1 });
+            let row =
+                inner.y
+                    + (lines_len_hint(inner.height) as u16)
+                        .saturating_sub(if app.error.is_some() { 2 } else { 1 });
             let col = inner.x + (p.chars().count() as u16).min(inner.width.saturating_sub(1));
             frame.set_cursor_position((col, row));
         }
@@ -146,7 +153,10 @@ mod tests {
         );
         let all = story_window(&description(), &story[..2], 8);
         assert_eq!(all[4..], ["line 1", "line 2"]);
-        assert_eq!(story_window(&description(), &story, 1), vec!["backend · t-backend-auth"]);
+        assert_eq!(
+            story_window(&description(), &story, 1),
+            vec!["backend · t-backend-auth"]
+        );
     }
 }
 
@@ -177,19 +187,31 @@ mod snapshots {
         let f = fixture("live-1");
         let rows = draw_rows(&mut app, 120, 40);
         let text = screen_text(&rows);
-        assert!(text.contains("t-backend-auth  describe · story · actions"), "{text}");
+        assert!(
+            text.contains("t-backend-auth  describe · story · actions"),
+            "{text}"
+        );
         let description = f.describe(&r);
         assert!(text.contains(&description.title), "{text}");
         for line in &description.lines {
             let head: String = line.chars().take(60).collect();
-            assert!(text.contains(head.trim_end()), "missing describe line {line:?}:\n{text}");
+            assert!(
+                text.contains(head.trim_end()),
+                "missing describe line {line:?}:\n{text}"
+            );
         }
         let story = f.story(&r);
         for line in story.iter().rev().take(3) {
             let head: String = line.chars().take(60).collect();
-            assert!(text.contains(head.trim_end()), "missing story line {line:?}:\n{text}");
+            assert!(
+                text.contains(head.trim_end()),
+                "missing story line {line:?}:\n{text}"
+            );
         }
-        assert!(text.contains("… ") && text.contains("earlier"), "older story lines are summarised:\n{text}");
+        assert!(
+            text.contains("… ") && text.contains("earlier"),
+            "older story lines are summarised:\n{text}"
+        );
         // The action list is the fixture's actions.json entry for the node.
         let expected = &f.actions["node:t-backend-auth"];
         assert_eq!(app.inspector.actions, *expected);
@@ -218,7 +240,10 @@ mod snapshots {
         let rows = draw_rows(&mut app, 120, 40);
         let text = screen_text(&rows);
         assert!(text.contains("answer> magic"), "{text}");
-        assert!(text.contains("actions: a answer · x cancel · Esc close"), "{text}");
+        assert!(
+            text.contains("actions: a answer · x cancel · Esc close"),
+            "{text}"
+        );
         app.set_error("POST /tasks/t-backend-auth/clarify failed: 400");
         let rows = draw_rows(&mut app, 120, 40);
         assert!(screen_text(&rows).contains("clarify failed: 400"));

@@ -17,7 +17,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Parser, Debug)]
-#[command(name = "relay-tui", version, about = "Relay Terminal client for relayd")]
+#[command(
+    name = "relay-tui",
+    version,
+    about = "Relay Terminal client for relayd"
+)]
 struct Args {
     /// relayd base URL.
     #[arg(long, default_value = "http://127.0.0.1:7420")]
@@ -53,7 +57,11 @@ async fn main() -> Result<()> {
             Fixture::load(dir).with_context(|| format!("load fixture {}", dir.display()))?,
         )),
         None => {
-            let token = resolve_token(args.token.clone(), std::env::var("RELAY_TOKEN").ok(), &args.repo);
+            let token = resolve_token(
+                args.token.clone(),
+                std::env::var("RELAY_TOKEN").ok(),
+                &args.repo,
+            );
             Source::Live(Arc::new(Client::new(args.url.clone(), token)))
         }
     };

@@ -18,7 +18,11 @@ pub type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub const SESSION_TOKEN_FILE: &str = ".relay/session.token";
 
 /// `--token` › `RELAY_TOKEN` › `<repo>/.relay/session.token`.
-pub fn resolve_token(flag: Option<String>, env_token: Option<String>, repo: &Path) -> Option<String> {
+pub fn resolve_token(
+    flag: Option<String>,
+    env_token: Option<String>,
+    repo: &Path,
+) -> Option<String> {
     if let Some(t) = flag.filter(|t| !t.trim().is_empty()) {
         return Some(t.trim().to_string());
     }
@@ -86,13 +90,21 @@ impl Client {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            return Err(anyhow!("GET {path} failed: {} {}", status.as_u16(), text.trim()));
+            return Err(anyhow!(
+                "GET {path} failed: {} {}",
+                status.as_u16(),
+                text.trim()
+            ));
         }
         serde_json::from_str(&text).with_context(|| format!("GET {path}: unexpected JSON"))
     }
 
     /// `POST` a JSON body; the error text is the Ink `commands.ts` one (`POST <url> failed: <status>`).
-    pub async fn post_json(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+    pub async fn post_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let response = self
             .authorize(self.http.post(self.url(path)))
             .json(body)
@@ -130,7 +142,11 @@ impl Client {
     }
 
     fn object_path(r: &GraphObjectRef, leaf: &str) -> String {
-        format!("/graph/{}/{}/{leaf}", r.kind.as_str(), encode_component(&r.id))
+        format!(
+            "/graph/{}/{}/{leaf}",
+            r.kind.as_str(),
+            encode_component(&r.id)
+        )
     }
 
     pub async fn describe(&self, r: &GraphObjectRef) -> Result<ObjectDescription> {
@@ -147,7 +163,8 @@ impl Client {
     }
 
     pub async fn story_log(&self, since: u64, limit: usize) -> Result<StoryLog> {
-        self.get_json(&format!("/story?since={since}&limit={limit}")).await
+        self.get_json(&format!("/story?since={since}&limit={limit}"))
+            .await
     }
 
     pub async fn command(&self, command: &Command) -> Result<()> {
@@ -161,9 +178,14 @@ impl Client {
         Ok(())
     }
 
-    /// Open `GET /events?since=` and hand every `data:` payload to `on_event` until the stream ends.
-    /// Returns when the server closes the stream or the connection drops.
-    pub async fn events(&self, since: u64, mut on_event: impl FnMut(EventEnvelope)) -> Result<()> {
+    /// Open `GET /events?since=`, call `on_open` once the stream is established, and hand every `data:`
+    /// payload to `on_event` until the stream ends (server closed it or the connection dropped).
+    pub async fn events(
+        &self,
+        since: u64,
+        on_open: impl FnOnce(),
+        mut on_event: impl FnMut(EventEnvelope),
+    ) -> Result<()> {
         let response = self
             .authorize(self.http.get(self.url(&format!("/events?since={since}"))))
             .header("accept", "text/event-stream")
@@ -171,8 +193,12 @@ impl Client {
             .await
             .context("GET /events")?;
         if !response.status().is_success() {
-            return Err(anyhow!("GET /events failed: {}", response.status().as_u16()));
+            return Err(anyhow!(
+                "GET /events failed: {}",
+                response.status().as_u16()
+            ));
         }
+        on_open();
         let mut stream = response.bytes_stream();
         let mut parser = SseParser::default();
         while let Some(chunk) = stream.next().await {
@@ -180,7 +206,8 @@ impl Client {
             for message in parser.feed(&chunk) {
                 if let Ok(event) = serde_json::from_str::<EventEnvelope>(&message.data) {
                     on_event(event);
-                } else if let Some(seq) = message.id.as_deref().and_then(|s| s.parse::<u64>().ok()) {
+                } else if let Some(seq) = message.id.as_deref().and_then(|s| s.parse::<u64>().ok())
+                {
                     on_event(EventEnvelope {
                         seq,
                         ts: None,
@@ -219,8 +246,18 @@ pub fn encode_component(value: &str) -> String {
     let mut out = String::new();
     for byte in value.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!' | b'~' | b'*'
-            | b'\'' | b'(' | b')' => out.push(byte as char),
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'!'
+            | b'~'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')' => out.push(byte as char),
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
@@ -288,7 +325,9 @@ mod tests {
     #[test]
     fn sse_parser_handles_split_chunks_comments_and_ids() {
         let mut p = SseParser::default();
-        assert!(p.feed(b": ping\n\nevent: relay\nid: 7\ndata: {\"seq\":").is_empty());
+        assert!(p
+            .feed(b": ping\n\nevent: relay\nid: 7\ndata: {\"seq\":")
+            .is_empty());
         let out = p.feed(b" 7}\n\ndata: a\ndata: b\n\n");
         assert_eq!(
             out,
@@ -311,7 +350,10 @@ mod tests {
 
     #[test]
     fn encodes_object_ids_like_encode_uri_component() {
-        assert_eq!(encode_component("contract:t-backend-auth"), "contract%3At-backend-auth");
+        assert_eq!(
+            encode_component("contract:t-backend-auth"),
+            "contract%3At-backend-auth"
+        );
         assert_eq!(encode_component("dep:t-a->t-b"), "dep%3At-a-%3Et-b");
         assert_eq!(encode_component("planner"), "planner");
     }
@@ -321,10 +363,22 @@ mod tests {
         let dir = tempfile::Builder::new().prefix("relay-").tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".relay")).unwrap();
         std::fs::write(dir.path().join(SESSION_TOKEN_FILE), "filetoken\n").unwrap();
-        assert_eq!(resolve_token(Some("flag".into()), Some("env".into()), dir.path()).as_deref(), Some("flag"));
-        assert_eq!(resolve_token(None, Some("env".into()), dir.path()).as_deref(), Some("env"));
-        assert_eq!(resolve_token(None, None, dir.path()).as_deref(), Some("filetoken"));
-        assert_eq!(resolve_token(Some("  ".into()), None, dir.path()).as_deref(), Some("filetoken"));
+        assert_eq!(
+            resolve_token(Some("flag".into()), Some("env".into()), dir.path()).as_deref(),
+            Some("flag")
+        );
+        assert_eq!(
+            resolve_token(None, Some("env".into()), dir.path()).as_deref(),
+            Some("env")
+        );
+        assert_eq!(
+            resolve_token(None, None, dir.path()).as_deref(),
+            Some("filetoken")
+        );
+        assert_eq!(
+            resolve_token(Some("  ".into()), None, dir.path()).as_deref(),
+            Some("filetoken")
+        );
         let empty = tempfile::Builder::new().prefix("relay-").tempdir().unwrap();
         assert_eq!(resolve_token(None, None, empty.path()), None);
     }
@@ -334,6 +388,9 @@ mod tests {
         let c = Client::new("http://127.0.0.1:7420/", Some("t".into()));
         assert_eq!(c.url("/graph"), "http://127.0.0.1:7420/graph");
         assert_eq!(c.ws_url("/pty/relay:1"), "ws://127.0.0.1:7420/pty/relay:1");
-        assert_eq!(Client::object_path(&GraphObjectRef::edge("contract:t-a"), "story"), "/graph/edge/contract%3At-a/story");
+        assert_eq!(
+            Client::object_path(&GraphObjectRef::edge("contract:t-a"), "story"),
+            "/graph/edge/contract%3At-a/story"
+        );
     }
 }

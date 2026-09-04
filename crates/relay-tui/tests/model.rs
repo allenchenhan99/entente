@@ -30,7 +30,10 @@ fn model_round_trips_live_1() {
     assert_eq!(graph.seq, Some(43));
     assert!(graph.node("t-backend-auth").is_some());
     let state: State = round_trip("live-1", "state.json");
-    assert_eq!(state.mission().unwrap().mission.title, "Add secure login to this application.");
+    assert_eq!(
+        state.mission().unwrap().mission.title,
+        "Add secure login to this application."
+    );
     assert!(state.tasks.contains_key("t-backend-auth"));
     let story: StoryLog = round_trip("live-1", "story.json");
     assert_eq!(story.items.first().unwrap().seq, 1);
@@ -45,7 +48,10 @@ fn model_round_trips_live_1() {
 #[test]
 fn model_round_trips_live_7() {
     let graph: Graph = round_trip("live-7", "graph.json");
-    assert_eq!(graph.edge("contract:t-token-store").unwrap().label, "sub ✓ merged");
+    assert_eq!(
+        graph.edge("contract:t-token-store").unwrap().label,
+        "sub ✓ merged"
+    );
     round_trip::<State>("live-7", "state.json");
     round_trip::<StoryLog>("live-7", "story.json");
     round_trip::<PanesResponse>("live-7", "panes.json");
@@ -76,18 +82,45 @@ fn model_round_trips_pane_info_and_metrics() {
     });
     let typed: HostMetrics = serde_json::from_value(metrics.clone()).unwrap();
     assert_eq!(serde_json::to_value(&typed).unwrap(), metrics);
-    assert_eq!(millis(&typed.pane("relay:1").unwrap().readiness_ms), Some(900.0));
+    assert_eq!(
+        millis(&typed.pane("relay:1").unwrap().readiness_ms),
+        Some(900.0)
+    );
 }
 
 #[test]
 fn model_pty_frames_match_the_zod_discriminated_unions() {
     let hello = serde_json::json!({ "t": "hello", "pane": { "pane_id": "relay:1", "role": "backend", "cwd": "/x", "alive": true, "cols": 80, "rows": 24, "started_at": "t" } });
-    assert!(matches!(serde_json::from_value::<PtyServerMessage>(hello).unwrap(), PtyServerMessage::Hello { .. }));
+    assert!(matches!(
+        serde_json::from_value::<PtyServerMessage>(hello).unwrap(),
+        PtyServerMessage::Hello { .. }
+    ));
     let out: PtyServerMessage = serde_json::from_str(r#"{"t":"output","data":"aGk="}"#).unwrap();
-    assert_eq!(out, PtyServerMessage::Output { data: "aGk=".into() });
+    assert_eq!(
+        out,
+        PtyServerMessage::Output {
+            data: "aGk=".into()
+        }
+    );
     let exit: PtyServerMessage = serde_json::from_str(r#"{"t":"exit","code":0}"#).unwrap();
     assert_eq!(exit, PtyServerMessage::Exit { code: 0 });
-    assert_eq!(serde_json::to_string(&PtyClientMessage::Input { data: "eA==".into() }).unwrap(), r#"{"t":"input","data":"eA=="}"#);
-    assert_eq!(serde_json::to_string(&PtyClientMessage::Resize { cols: 100, rows: 30 }).unwrap(), r#"{"t":"resize","cols":100,"rows":30}"#);
-    assert_eq!(serde_json::to_string(&PtyClientMessage::Ping).unwrap(), r#"{"t":"ping"}"#);
+    assert_eq!(
+        serde_json::to_string(&PtyClientMessage::Input {
+            data: "eA==".into()
+        })
+        .unwrap(),
+        r#"{"t":"input","data":"eA=="}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&PtyClientMessage::Resize {
+            cols: 100,
+            rows: 30
+        })
+        .unwrap(),
+        r#"{"t":"resize","cols":100,"rows":30}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&PtyClientMessage::Ping).unwrap(),
+        r#"{"t":"ping"}"#
+    );
 }

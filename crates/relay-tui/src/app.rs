@@ -208,9 +208,16 @@ pub enum Effect {
     FetchActions(GraphObjectRef),
     Post(Command),
     /// Raw bytes for the focused pane (`{ t: "input", data: base64 }`).
-    PaneInput { pane_id: String, data: Vec<u8> },
+    PaneInput {
+        pane_id: String,
+        data: Vec<u8>,
+    },
     /// The focused pane's widget changed size (`{ t: "resize", cols, rows }`).
-    PaneResize { pane_id: String, cols: u16, rows: u16 },
+    PaneResize {
+        pane_id: String,
+        cols: u16,
+        rows: u16,
+    },
     /// `POST /panes/:id/focus`.
     FocusPane(String),
     Quit,
@@ -301,7 +308,12 @@ impl App {
                 .nodes
                 .iter()
                 .map(|n| GraphObjectRef::node(n.id.clone()))
-                .chain(self.graph.edges.iter().map(|e| GraphObjectRef::edge(e.id.clone())))
+                .chain(
+                    self.graph
+                        .edges
+                        .iter()
+                        .map(|e| GraphObjectRef::edge(e.id.clone())),
+                )
                 .collect(),
             Region::Inbox => self
                 .graph
@@ -412,7 +424,7 @@ impl App {
         match frame {
             PtyServerMessage::Hello { pane: info } => {
                 pane.connected = true;
-                pane.info = info;
+                pane.info = *info;
             }
             PtyServerMessage::Scrollback { data } | PtyServerMessage::Output { data } => {
                 if let Ok(bytes) = BASE64.decode(data.as_bytes()) {
@@ -698,7 +710,9 @@ impl App {
                 .cloned()
         };
         match key {
-            'c' => alias(ActionKind::Clarify, None).or_else(|| alias(ActionKind::MissionClarify, None)),
+            'c' => {
+                alias(ActionKind::Clarify, None).or_else(|| alias(ActionKind::MissionClarify, None))
+            }
             'y' => alias(ActionKind::Review, Some("p")),
             'n' => alias(ActionKind::Review, Some("f")),
             _ => None,
@@ -846,7 +860,11 @@ impl App {
             }
             (_, Some('i')) => {
                 if self.region == Region::Panes {
-                    if self.focused_pane_state().map(|p| p.alive()).unwrap_or(false) {
+                    if self
+                        .focused_pane_state()
+                        .map(|p| p.alive())
+                        .unwrap_or(false)
+                    {
                         self.terminal_input = true;
                     } else {
                         self.set_notice("no live pane to type into");

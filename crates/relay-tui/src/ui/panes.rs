@@ -23,8 +23,7 @@ pub fn pane_title(app: &App, pane: &PaneState) -> String {
         .task_id
         .as_deref()
         .and_then(|t| app.graph.node(t))
-        .map(|n| serde_json::to_value(n.status).ok())
-        .flatten()
+        .and_then(|n| serde_json::to_value(n.status).ok())
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_else(|| {
             if pane.alive() {
@@ -46,7 +45,11 @@ fn title_style(app: &App, pane: &PaneState) -> Style {
         .as_deref()
         .and_then(|t| app.graph.node(t))
         .map(|n| status_color(n.status))
-        .unwrap_or(if pane.alive() { Color::Cyan } else { Color::DarkGray });
+        .unwrap_or(if pane.alive() {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        });
     let mut style = Style::new().fg(color);
     if pane_matches_selection(app, pane) {
         style = style.bold();
@@ -78,7 +81,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.panes.is_empty() {
         let hint = match app.mode {
             crate::app::Mode::Replay => "<no panes in this fixture>",
-            crate::app::Mode::Live => "<no panes> — relayd's host has no PTYs (RELAY_HOST=relay serves /panes)",
+            crate::app::Mode::Live => {
+                "<no panes> — relayd's host has no PTYs (RELAY_HOST=relay serves /panes)"
+            }
         };
         frame.render_widget(
             Paragraph::new(Line::styled(hint, Style::new().fg(Color::DarkGray))),
@@ -90,9 +95,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         .focused_pane
         .clone()
         .unwrap_or_else(|| app.panes[0].clone());
-    let others: Vec<String> = app.panes.iter().filter(|p| **p != focused).cloned().collect();
-    let thumbs_height = if others.is_empty() { 0 } else { THUMB_LINES + 1 };
-    let [big, strip] = Layout::vertical([Constraint::Min(3), Constraint::Length(thumbs_height)]).areas(inner);
+    let others: Vec<String> = app
+        .panes
+        .iter()
+        .filter(|p| **p != focused)
+        .cloned()
+        .collect();
+    let thumbs_height = if others.is_empty() {
+        0
+    } else {
+        THUMB_LINES + 1
+    };
+    let [big, strip] =
+        Layout::vertical([Constraint::Min(3), Constraint::Length(thumbs_height)]).areas(inner);
 
     // The focused pane.
     if let Some(pane) = app.pane_states.get(&focused) {
@@ -129,10 +144,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     if thumbs_height > 0 {
         let shown = others.len().min(MAX_THUMBS);
         let hidden = others.len() - shown;
-        let constraints: Vec<Constraint> = (0..shown).map(|_| Constraint::Ratio(1, shown as u32)).collect();
+        let constraints: Vec<Constraint> = (0..shown)
+            .map(|_| Constraint::Ratio(1, shown as u32))
+            .collect();
         let slots = Layout::horizontal(constraints).split(strip);
         for (index, pane_id) in others.iter().take(shown).enumerate() {
-            let Some(pane) = app.pane_states.get(pane_id) else { continue };
+            let Some(pane) = app.pane_states.get(pane_id) else {
+                continue;
+            };
             let mut title = pane_title(app, pane);
             if index == shown - 1 && hidden > 0 {
                 title.push_str(&format!("  +{hidden} more"));
@@ -184,7 +203,10 @@ mod tests {
         let mut pane = pane_state(true);
         assert_eq!(pane_title(&app, &pane), "backend · t-backend-auth · alive");
         pane.exit_code = Some(2);
-        assert_eq!(pane_title(&app, &pane), "backend · t-backend-auth · exited 2");
+        assert_eq!(
+            pane_title(&app, &pane),
+            "backend · t-backend-auth · exited 2"
+        );
     }
 }
 
@@ -203,16 +225,36 @@ mod snapshots {
             ],
             None,
         );
-        app.pane_states.get_mut("relay:1").unwrap().parser.process(b"$ claude\r\n> working on AC-1\r\n");
-        app.pane_states.get_mut("relay:2").unwrap().parser.process(b"one\r\ntwo\r\nthree\r\nfour\r\nfive");
+        app.pane_states
+            .get_mut("relay:1")
+            .unwrap()
+            .parser
+            .process(b"$ claude\r\n> working on AC-1\r\n");
+        app.pane_states
+            .get_mut("relay:2")
+            .unwrap()
+            .parser
+            .process(b"one\r\ntwo\r\nthree\r\nfour\r\nfive");
         let rows = draw_rows(&mut app, 120, 40);
         let text = screen_text(&rows);
-        assert!(text.contains("backend · t-backend-auth · verified"), "{text}");
-        assert!(text.contains("frontend · t-frontend-login · failed"), "{text}");
+        assert!(
+            text.contains("backend · t-backend-auth · verified"),
+            "{text}"
+        );
+        assert!(
+            text.contains("frontend · t-frontend-login · failed"),
+            "{text}"
+        );
         assert!(text.contains("> working on AC-1"), "{text}");
         // The thumbnail shows only the last three lines of the other pane.
-        assert!(text.contains("three") && text.contains("four") && text.contains("five"), "{text}");
-        assert!(!text.contains("two"), "thumbnail is limited to three lines:\n{text}");
+        assert!(
+            text.contains("three") && text.contains("four") && text.contains("five"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("two"),
+            "thumbnail is limited to three lines:\n{text}"
+        );
         // The focused pane's widget size is recorded for resize.
         let (cols, rows_) = app.pane_areas["relay:1"];
         assert!(cols > 60 && rows_ > 20, "{cols}x{rows_}");
@@ -222,7 +264,15 @@ mod snapshots {
     #[test]
     fn pane_grid_marks_typing_mode_and_handles_no_panes() {
         let mut app = replay_app("live-1");
-        app.set_panes(vec![demo_pane("relay:1", Some("t-backend-auth"), "backend", true)], None);
+        app.set_panes(
+            vec![demo_pane(
+                "relay:1",
+                Some("t-backend-auth"),
+                "backend",
+                true,
+            )],
+            None,
+        );
         app.handle_key(Key::TAB);
         app.handle_key(Key::TAB);
         let rows = draw_rows(&mut app, 120, 40);

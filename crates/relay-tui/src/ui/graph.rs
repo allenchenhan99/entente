@@ -84,7 +84,11 @@ pub fn status_visual(status: VisualStatus, tick: u64) -> StatusVisual {
             bold: false,
             dim: tick % 8 < 4,
             glyph: "·",
-            line: if tick % 2 == 0 { "╌ ╌" } else { " ╌ " },
+            line: if tick.is_multiple_of(2) {
+                "╌ ╌"
+            } else {
+                " ╌ "
+            },
         },
         VisualStatus::Attention => StatusVisual {
             color,
@@ -105,7 +109,11 @@ pub fn status_visual(status: VisualStatus, tick: u64) -> StatusVisual {
             bold: false,
             dim: false,
             glyph: "●",
-            line: if tick % 2 == 0 { "╌─╌" } else { "─╌─" },
+            line: if tick.is_multiple_of(2) {
+                "╌─╌"
+            } else {
+                "─╌─"
+            },
         },
         VisualStatus::Done | VisualStatus::Verified => StatusVisual {
             color,
@@ -185,7 +193,7 @@ fn plan_rows(graph: &Graph, width: usize) -> Rows {
     } else {
         // Narrow: one group per column (heading row, then its nodes), columns without nodes are skipped.
         let mut row = 0;
-        for column in 0..4 {
+        for (column, heading_row) in heading_rows.iter_mut().enumerate() {
             let members: Vec<usize> = graph
                 .nodes
                 .iter()
@@ -196,7 +204,7 @@ fn plan_rows(graph: &Graph, width: usize) -> Rows {
             if members.is_empty() {
                 continue;
             }
-            heading_rows[column] = row;
+            *heading_row = row;
             row += 1;
             for index in members {
                 node_rows[index] = row;
@@ -224,7 +232,12 @@ pub fn graph_lines(
 ) -> Vec<Line<'static>> {
     let mut canvas = Canvas::new(width, height);
     if graph.nodes.is_empty() && graph.edges.is_empty() {
-        canvas.text(0, 0, "<empty graph>", Style::new().fg(Color::DarkGray).dim());
+        canvas.text(
+            0,
+            0,
+            "<empty graph>",
+            Style::new().fg(Color::DarkGray).dim(),
+        );
         return canvas.render();
     }
     let rows = plan_rows(graph, width);
@@ -237,11 +250,7 @@ pub fn graph_lines(
             .iter()
             .position(|n| n.id == r.id)
             .map(|i| rows.node_rows[i]),
-        RefKind::Edge => graph
-            .edges
-            .iter()
-            .position(|e| e.id == r.id)
-            .map(edge_row),
+        RefKind::Edge => graph.edges.iter().position(|e| e.id == r.id).map(edge_row),
         RefKind::Inbox => None,
     });
     let content_height = height.saturating_sub(1);
@@ -265,7 +274,10 @@ pub fn graph_lines(
         }
     } else {
         for (column, heading) in HEADINGS.iter().enumerate() {
-            let used = graph.nodes.iter().any(|n| (n.column as usize).min(3) == column);
+            let used = graph
+                .nodes
+                .iter()
+                .any(|n| (n.column as usize).min(3) == column);
             if !used {
                 continue;
             }
@@ -279,8 +291,7 @@ pub fn graph_lines(
     for (index, node) in graph.nodes.iter().enumerate() {
         let row = rows.node_rows[index];
         let Some(y) = visible(row) else { continue };
-        let is_selected =
-            matches!(selected, Some(r) if r.kind == RefKind::Node && r.id == node.id);
+        let is_selected = matches!(selected, Some(r) if r.kind == RefKind::Node && r.id == node.id);
         let visual = status_visual(node.status, tick);
         let identity = if node.label == node.id {
             node.id.clone()
@@ -305,9 +316,10 @@ pub fn graph_lines(
         );
     }
     for (index, edge) in graph.edges.iter().enumerate() {
-        let Some(y) = visible(edge_row(index)) else { continue };
-        let is_selected =
-            matches!(selected, Some(r) if r.kind == RefKind::Edge && r.id == edge.id);
+        let Some(y) = visible(edge_row(index)) else {
+            continue;
+        };
+        let is_selected = matches!(selected, Some(r) if r.kind == RefKind::Edge && r.id == edge.id);
         let mut style = status_style(edge.status, tick, is_selected);
         if edge.attention {
             style = style.fg(Color::Yellow).bold();
@@ -374,14 +386,28 @@ mod snapshots {
     use crate::testkit::*;
 
     fn plain(lines: &[Line<'static>]) -> Vec<String> {
-        lines.iter().map(|l| l.to_string().trim_end().to_string()).collect()
+        lines
+            .iter()
+            .map(|l| l.to_string().trim_end().to_string())
+            .collect()
     }
 
     #[test]
     fn graph_draws_columns_nodes_and_labelled_contract_edges_for_live_1() {
         let g = fixture("live-1").graph;
-        let rows = plain(&graph_lines(&g, 100, 12, 0, Some(&GraphObjectRef::node("t-backend-auth"))));
-        assert!(rows[0].contains("HUMAN / PLANNER") && rows[0].contains("AGENTS") && rows[0].contains("VERIFIER"), "{rows:?}");
+        let rows = plain(&graph_lines(
+            &g,
+            100,
+            12,
+            0,
+            Some(&GraphObjectRef::node("t-backend-auth")),
+        ));
+        assert!(
+            rows[0].contains("HUMAN / PLANNER")
+                && rows[0].contains("AGENTS")
+                && rows[0].contains("VERIFIER"),
+            "{rows:?}"
+        );
         let text = rows.join("\n");
         assert!(text.contains("✓ t-backend-auth (backend) a2"), "{text}");
         assert!(text.contains("✗ t-frontend-login (frontend)"), "{text}");
@@ -389,33 +415,71 @@ mod snapshots {
         assert!(text.contains("t-backend-auth ───✓─── ▶ verifier"), "{text}");
         // Nodes sit in their columns: human/planner at x=0, agents at 30 %, verifier at 62 %.
         let cols = columns(100);
-        let agent_row = rows.iter().find(|r| r.contains("t-backend-auth (backend)")).unwrap();
-        assert_eq!(agent_row.chars().position(|c| c == '✓'), Some(cols[1]), "{agent_row}");
+        let agent_row = rows
+            .iter()
+            .find(|r| r.contains("t-backend-auth (backend)"))
+            .unwrap();
+        assert_eq!(
+            agent_row.chars().position(|c| c == '✓'),
+            Some(cols[1]),
+            "{agent_row}"
+        );
     }
 
     #[test]
     fn graph_shows_the_delegation_edge_of_live_7() {
         let g = fixture("live-7").graph;
         let text = plain(&graph_lines(&g, 100, 14, 0, None)).join("\n");
-        assert!(text.contains("t-backend-auth ───sub ✓ merged─── ▶ t-token-store"), "{text}");
+        assert!(
+            text.contains("t-backend-auth ───sub ✓ merged─── ▶ t-token-store"),
+            "{text}"
+        );
         assert!(text.contains("human ───↩ 1─── ▶ t-backend-auth"), "{text}");
     }
 
     #[test]
     fn graph_highlights_attention_edges_and_the_selection() {
         let g = demo_graph();
-        let lines = graph_lines(&g, 100, 16, 0, Some(&GraphObjectRef::edge("contract:t-backend-auth")));
+        let lines = graph_lines(
+            &g,
+            100,
+            16,
+            0,
+            Some(&GraphObjectRef::edge("contract:t-backend-auth")),
+        );
         let attention = lines
             .iter()
             .find(|l| l.to_string().contains("?──v1 ? 2?──"))
             .expect("attention edge row");
-        let span = attention.spans.iter().find(|s| s.content.contains("planner")).unwrap();
+        let span = attention
+            .spans
+            .iter()
+            .find(|s| s.content.contains("planner"))
+            .unwrap();
         assert_eq!(span.style.fg, Some(Color::Yellow));
-        assert!(span.style.add_modifier.contains(ratatui::style::Modifier::BOLD));
-        assert!(span.style.add_modifier.contains(ratatui::style::Modifier::REVERSED), "selected edge is inverse");
-        assert!(attention.to_string().starts_with("! planner"), "{attention}");
-        let done = lines.iter().find(|l| l.to_string().contains("───v2 ✓───")).unwrap();
-        let span = done.spans.iter().find(|s| s.content.contains("planner")).unwrap();
+        assert!(span
+            .style
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD));
+        assert!(
+            span.style
+                .add_modifier
+                .contains(ratatui::style::Modifier::REVERSED),
+            "selected edge is inverse"
+        );
+        assert!(
+            attention.to_string().starts_with("! planner"),
+            "{attention}"
+        );
+        let done = lines
+            .iter()
+            .find(|l| l.to_string().contains("───v2 ✓───"))
+            .unwrap();
+        let span = done
+            .spans
+            .iter()
+            .find(|s| s.content.contains("planner"))
+            .unwrap();
         assert_eq!(span.style.fg, Some(Color::Green));
     }
 
@@ -440,10 +504,16 @@ mod snapshots {
         for _ in 0..9 {
             app.handle_key(Key::char('j'));
         }
-        assert_eq!(app.selected, Some(GraphObjectRef::edge("reply:t-backend-auth")));
+        assert_eq!(
+            app.selected,
+            Some(GraphObjectRef::edge("reply:t-backend-auth"))
+        );
         let rows = draw_rows(&mut app, 100, 30);
         let text = screen_text(&rows);
         assert!(text.contains("▶ HANDOFFS"), "{text}");
-        assert!(text.contains("↩ 1"), "the selected edge is scrolled into view:\n{text}");
+        assert!(
+            text.contains("↩ 1"),
+            "the selected edge is scrolled into view:\n{text}"
+        );
     }
 }

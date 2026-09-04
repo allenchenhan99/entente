@@ -26,6 +26,8 @@ pub const METRICS_INTERVAL: Duration = Duration::from_secs(2);
 pub const TICK: Duration = Duration::from_millis(250);
 pub const STORY_TAIL: usize = 50;
 
+/// Messages are moved once from a channel; the size difference between variants does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Msg {
     Key(Key),
@@ -39,7 +41,12 @@ pub enum Msg {
     State(State),
     Panes(Vec<PaneInfo>, Option<String>),
     Metrics(HostMetrics),
-    Inspector(GraphObjectRef, ObjectDescription, Vec<String>, Vec<ObjectAction>),
+    Inspector(
+        GraphObjectRef,
+        ObjectDescription,
+        Vec<String>,
+        Vec<ObjectAction>,
+    ),
     Actions(GraphObjectRef, Vec<ObjectAction>),
     PaneFrame(String, PtyServerMessage),
     PaneClosed(String, String),
@@ -105,7 +112,8 @@ impl<B: Backend> Runtime<B> {
                 if let Some(m) = fixture.metrics.clone() {
                     self.app.set_metrics(m);
                 }
-                self.app.set_notice(format!("replay of {}", fixture.dir.display()));
+                self.app
+                    .set_notice(format!("replay of {}", fixture.dir.display()));
             }
             Source::Live(client) => {
                 let client = client.clone();
@@ -122,10 +130,9 @@ impl<B: Backend> Runtime<B> {
                     }
                     Err(e) => self.app.set_error(e.to_string()),
                 }
-                match panes {
-                    Ok((panes, focused)) => self.apply_panes(panes, focused),
-                    // No pane routes (hosts other than `relay`): the grid stays empty, nothing else changes.
-                    Err(_) => {}
+                // No pane routes (hosts other than `relay`): the grid stays empty, nothing else changes.
+                if let Ok((panes, focused)) = panes {
+                    self.apply_panes(panes, focused);
                 }
                 self.spawn_sse();
                 self.spawn_metrics();
@@ -135,24 +142,28 @@ impl<B: Backend> Runtime<B> {
     }
 
     fn spawn_sse(&mut self) {
-        let Source::Live(client) = &self.source else { return };
+        let Source::Live(client) = &self.source else {
+            return;
+        };
         let client = client.clone();
         let tx = self.tx.clone();
         let since = self.app.last_seq;
         self.tasks.push(tokio::spawn(async move {
             let mut since = since;
             loop {
-                let connected = tx.clone();
-                let mut first = true;
+                let opened = tx.clone();
+                let events = tx.clone();
                 let result = client
-                    .events(since, |event| {
-                        if first {
-                            first = false;
-                            let _ = connected.send(Msg::Connection(Connection::Live));
-                        }
-                        since = since.max(event.seq);
-                        let _ = connected.send(Msg::Event(event.seq));
-                    })
+                    .events(
+                        since,
+                        || {
+                            let _ = opened.send(Msg::Connection(Connection::Live));
+                        },
+                        |event| {
+                            since = since.max(event.seq);
+                            let _ = events.send(Msg::Event(event.seq));
+                        },
+                    )
                     .await;
                 if tx.is_closed() {
                     return;
@@ -168,7 +179,9 @@ impl<B: Backend> Runtime<B> {
     }
 
     fn spawn_metrics(&mut self) {
-        let Source::Live(client) = &self.source else { return };
+        let Source::Live(client) = &self.source else {
+            return;
+        };
         let client = client.clone();
         let tx = self.tx.clone();
         self.tasks.push(tokio::spawn(async move {
@@ -203,7 +216,9 @@ impl<B: Backend> Runtime<B> {
 
     /// One WebSocket per pane: server frames become `Msg::PaneFrame`, `PtyClientMessage`s go out as JSON.
     fn spawn_pane(&mut self, pane_id: String) {
-        let Source::Live(client) = &self.source else { return };
+        let Source::Live(client) = &self.source else {
+            return;
+        };
         let client = client.clone();
         let tx = self.tx.clone();
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<PtyClientMessage>();
@@ -272,11 +287,14 @@ impl<B: Backend> Runtime<B> {
     }
 
     fn refresh_now(&mut self) {
-        let Source::Live(client) = &self.source else { return };
+        let Source::Live(client) = &self.source else {
+            return;
+        };
         let client = client.clone();
         let tx = self.tx.clone();
         tokio::spawn(async move {
-            let (graph, state, panes) = tokio::join!(client.graph(), client.state(), client.panes());
+            let (graph, state, panes) =
+                tokio::join!(client.graph(), client.state(), client.panes());
             match graph {
                 Ok(g) => {
                     let _ = tx.send(Msg::Graph(g));

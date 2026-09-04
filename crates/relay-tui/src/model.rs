@@ -532,8 +532,13 @@ impl HostMetrics {
 #[serde(tag = "t", rename_all = "lowercase")]
 pub enum PtyClientMessage {
     /// base64 bytes typed by the user.
-    Input { data: String },
-    Resize { cols: u16, rows: u16 },
+    Input {
+        data: String,
+    },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
     Ping,
 }
 
@@ -541,12 +546,20 @@ pub enum PtyClientMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "lowercase")]
 pub enum PtyServerMessage {
-    Hello { pane: PaneInfo },
+    Hello {
+        pane: Box<PaneInfo>,
+    },
     /// Replay of the retained scrollback (base64), sent once right after `hello`.
-    Scrollback { data: String },
+    Scrollback {
+        data: String,
+    },
     /// base64 bytes from the PTY.
-    Output { data: String },
-    Exit { code: i64 },
+    Output {
+        data: String,
+    },
+    Exit {
+        code: i64,
+    },
     Pong,
 }
 

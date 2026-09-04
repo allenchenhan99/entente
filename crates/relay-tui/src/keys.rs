@@ -84,7 +84,7 @@ impl Key {
                     out.push(upper as u8 - b'@');
                 } else if c == ' ' || c == '@' {
                     out.push(0);
-                } else if ('[' ..= '_').contains(&c) {
+                } else if ('['..='_').contains(&c) {
                     out.push(c as u8 - b'@');
                 } else {
                     let mut b = [0u8; 4];
@@ -166,12 +166,21 @@ impl From<crossterm::event::KeyEvent> for Key {
 pub const KEY_HELP: &[(&str, &str)] = &[
     ("j/k ↑/↓", "move selection"),
     ("Tab", "cycle panels (tree → graph → panes → inbox)"),
-    ("Enter", "inspect the selected object (describe · story · actions)"),
-    ("i", "inspect · in the pane grid: type into the focused terminal (Esc leaves)"),
+    (
+        "Enter",
+        "inspect the selected object (describe · story · actions)",
+    ),
+    (
+        "i",
+        "inspect · in the pane grid: type into the focused terminal (Esc leaves)",
+    ),
     ("a / c", "answer the selected question (clarify)"),
     ("r", "reply to a blocked agent"),
     ("p / y", "mark the pending human_review criterion passed"),
-    ("f / n", "mark it failed (asks for the observed failure); f otherwise focuses the pane"),
+    (
+        "f / n",
+        "mark it failed (asks for the observed failure); f otherwise focuses the pane",
+    ),
     ("x", "cancel the task (asks y/N)"),
     ("Esc", "close the inspector / help / input"),
     ("?", "toggle this help"),

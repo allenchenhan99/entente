@@ -45,6 +45,12 @@ pub fn status_text(app: &App) -> String {
             ms(app.frames.p95_ms())
         ),
     ];
+    // Errors and notices come before the metrics so they survive truncation on narrow terminals.
+    if let Some(e) = &app.error {
+        parts.push(format!("ERROR {e}"));
+    } else if let Some(n) = &app.notice {
+        parts.push(n.clone());
+    }
     if let Some(t) = pane_timings_text(app) {
         parts.push(t);
     }
@@ -59,11 +65,6 @@ pub fn status_text(app: &App) -> String {
         parts.push("typing → pane (Esc leaves)".to_string());
     } else {
         parts.push("? help".to_string());
-    }
-    if let Some(e) = &app.error {
-        parts.push(format!("ERROR {e}"));
-    } else if let Some(n) = &app.notice {
-        parts.push(n.clone());
     }
     parts.join("  ")
 }
@@ -101,13 +102,27 @@ mod snapshots {
     #[test]
     fn status_line_shows_connection_seq_frame_p95_and_pane_timings() {
         let mut app = replay_app("live-1");
-        app.set_panes(vec![demo_pane("relay:1", Some("t-backend-auth"), "backend", true)], None);
+        app.set_panes(
+            vec![demo_pane(
+                "relay:1",
+                Some("t-backend-auth"),
+                "backend",
+                true,
+            )],
+            None,
+        );
         for n in 1..=20 {
             app.frames.record(Duration::from_micros(100 * n));
         }
         let text = status_text(&app);
-        assert!(text.starts_with("▶ replay  seq 43  frame p50 1.0ms p95 1.9ms"), "{text}");
-        assert!(text.contains("relay:1: ready 900ms · accept 210ms · render p95 0.4ms"), "{text}");
+        assert!(
+            text.starts_with("▶ replay  seq 43  frame p50 1.0ms p95 1.9ms"),
+            "{text}"
+        );
+        assert!(
+            text.contains("relay:1: ready 900ms · accept 210ms · render p95 0.4ms"),
+            "{text}"
+        );
         assert!(text.contains("? help"), "{text}");
 
         // /metrics wins over the pane's own timings; errors are appended.
@@ -120,8 +135,14 @@ mod snapshots {
         app.set_error("POST /tasks/x/reply failed: 404");
         let text = status_text(&app);
         assert!(text.starts_with("● live"), "{text}");
-        assert!(text.contains("relay:1: ready 1234ms · accept 55.5ms · render p95 2.2ms"), "{text}");
-        assert!(text.ends_with("ERROR POST /tasks/x/reply failed: 404"), "{text}");
+        assert!(
+            text.contains("relay:1: ready 1234ms · accept 55.5ms · render p95 2.2ms"),
+            "{text}"
+        );
+        assert!(
+            text.contains("ms  ERROR POST /tasks/x/reply failed: 404  relay:1"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -138,6 +159,10 @@ mod snapshots {
         assert!(last.contains("a answer · x cancel"), "{last}");
         app.handle_key(Key::char('j'));
         let rows = draw_rows(&mut app, 120, 40);
-        assert!(rows.last().unwrap().contains("p pass · f fail"), "{}", rows.last().unwrap());
+        assert!(
+            rows.last().unwrap().contains("p pass · f fail"),
+            "{}",
+            rows.last().unwrap()
+        );
     }
 }

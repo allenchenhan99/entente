@@ -33,11 +33,19 @@ fn keys_j_k_and_arrows_move_within_the_region_and_clamp() {
     app.handle_key(Key::char('j'));
     assert_eq!(app.selected, Some(GraphObjectRef::node("t-frontend-login")));
     app.handle_key(Key::char('j'));
-    assert_eq!(app.selected, Some(GraphObjectRef::node("t-frontend-login")), "clamps at the end");
+    assert_eq!(
+        app.selected,
+        Some(GraphObjectRef::node("t-frontend-login")),
+        "clamps at the end"
+    );
     app.handle_key(Key::UP);
     assert_eq!(app.selected, Some(GraphObjectRef::node("t-backend-auth")));
     app.handle_key(Key::char('k'));
-    assert_eq!(app.selected, Some(GraphObjectRef::node("t-backend-auth")), "clamps at the start");
+    assert_eq!(
+        app.selected,
+        Some(GraphObjectRef::node("t-backend-auth")),
+        "clamps at the start"
+    );
     app.handle_key(Key::DOWN);
     assert_eq!(app.selected, Some(GraphObjectRef::node("t-frontend-login")));
 }
@@ -45,7 +53,10 @@ fn keys_j_k_and_arrows_move_within_the_region_and_clamp() {
 #[test]
 fn keys_tab_cycles_tree_graph_panes_inbox_and_selects_the_first_object() {
     let mut app = app_with(demo_graph());
-    app.set_panes(vec![pane("relay:1", Some("t-frontend-login"), "frontend", true)], None);
+    app.set_panes(
+        vec![pane("relay:1", Some("t-frontend-login"), "frontend", true)],
+        None,
+    );
     assert_eq!(app.region, Region::Tree);
     app.handle_key(Key::TAB);
     assert_eq!(app.region, Region::Graph);
@@ -53,10 +64,17 @@ fn keys_tab_cycles_tree_graph_panes_inbox_and_selects_the_first_object() {
     app.handle_key(Key::TAB);
     assert_eq!(app.region, Region::Panes);
     assert_eq!(app.focused_pane.as_deref(), Some("relay:1"));
-    assert_eq!(app.selected, Some(GraphObjectRef::node("t-frontend-login")), "the pane's task is selected");
+    assert_eq!(
+        app.selected,
+        Some(GraphObjectRef::node("t-frontend-login")),
+        "the pane's task is selected"
+    );
     app.handle_key(Key::TAB);
     assert_eq!(app.region, Region::Inbox);
-    assert_eq!(app.selected, Some(GraphObjectRef::inbox("question:t-backend-auth")));
+    assert_eq!(
+        app.selected,
+        Some(GraphObjectRef::inbox("question:t-backend-auth"))
+    );
     app.handle_key(Key::TAB);
     assert_eq!(app.region, Region::Tree);
 }
@@ -65,7 +83,12 @@ fn keys_tab_cycles_tree_graph_panes_inbox_and_selects_the_first_object() {
 fn keys_selecting_a_node_fetches_its_actions() {
     let mut app = app_with(graph("live-1"));
     let effects = app.handle_key(Key::char('j'));
-    assert_eq!(effects, vec![Effect::FetchActions(GraphObjectRef::node("t-frontend-login"))]);
+    assert_eq!(
+        effects,
+        vec![Effect::FetchActions(GraphObjectRef::node(
+            "t-frontend-login"
+        ))]
+    );
 }
 
 #[test]
@@ -73,7 +96,12 @@ fn keys_enter_opens_the_inspector_and_esc_closes_it() {
     let mut app = app_with(graph("live-1"));
     let effects = app.handle_key(Key::ENTER);
     assert!(app.inspector_open);
-    assert_eq!(effects, vec![Effect::FetchInspector(GraphObjectRef::node("t-backend-auth"))]);
+    assert_eq!(
+        effects,
+        vec![Effect::FetchInspector(GraphObjectRef::node(
+            "t-backend-auth"
+        ))]
+    );
     app.handle_key(Key::ESC);
     assert!(!app.inspector_open);
     // `i` inspects too, outside the pane grid (Ink).
@@ -89,10 +117,17 @@ fn keys_enter_on_an_inbox_item_jumps_to_its_ref() {
     app.handle_key(Key::TAB);
     assert_eq!(app.region, Region::Inbox);
     let effects = app.handle_key(Key::ENTER);
-    assert_eq!(app.selected, Some(GraphObjectRef::edge("contract:t-backend-auth")));
+    assert_eq!(
+        app.selected,
+        Some(GraphObjectRef::edge("contract:t-backend-auth"))
+    );
     assert_eq!(app.region, Region::Graph);
     assert!(app.inspector_open);
-    assert!(effects.contains(&Effect::FetchInspector(GraphObjectRef::edge("contract:t-backend-auth"))));
+    assert!(
+        effects.contains(&Effect::FetchInspector(GraphObjectRef::edge(
+            "contract:t-backend-auth"
+        )))
+    );
 }
 
 #[test]
@@ -103,7 +138,10 @@ fn keys_a_or_c_answers_a_question_with_the_ink_clarify_body() {
     app.handle_key(Key::TAB);
     keys(&mut app, "a");
     assert_eq!(app.input_mode, Some(InputMode::Answer));
-    assert!(app.inspector_open, "the inline editor lives in the inspector");
+    assert!(
+        app.inspector_open,
+        "the inline editor lives in the inspector"
+    );
     keys(&mut app, "magic link");
     app.handle_key(Key::BACKSPACE);
     keys(&mut app, "ks");
@@ -116,7 +154,10 @@ fn keys_a_or_c_answers_a_question_with_the_ink_clarify_body() {
     };
     assert_eq!(effects, vec![Effect::Post(expected.clone())]);
     assert_eq!(expected.route(), "/tasks/t-backend-auth/clarify");
-    assert_eq!(expected.body(), serde_json::json!({ "answers": [{ "question_id": "Q1", "answer": "magic links" }] }));
+    assert_eq!(
+        expected.body(),
+        serde_json::json!({ "answers": [{ "question_id": "Q1", "answer": "magic links" }] })
+    );
     assert_eq!(app.input_mode, None);
 
     // `c` is the contract's alias for the same action.
@@ -136,7 +177,10 @@ fn keys_p_y_pass_and_f_n_fail_a_human_review() {
     app.handle_key(Key::TAB);
     app.handle_key(Key::TAB);
     app.handle_key(Key::char('j'));
-    assert_eq!(app.selected, Some(GraphObjectRef::inbox("review:t-frontend-login:AC-3")));
+    assert_eq!(
+        app.selected,
+        Some(GraphObjectRef::inbox("review:t-frontend-login:AC-3"))
+    );
     let pass = Command::Review {
         task_id: "t-frontend-login".into(),
         criterion_id: "AC-3".into(),
@@ -146,7 +190,10 @@ fn keys_p_y_pass_and_f_n_fail_a_human_review() {
     assert_eq!(keys(&mut app, "p"), vec![Effect::Post(pass.clone())]);
     assert_eq!(keys(&mut app, "y"), vec![Effect::Post(pass.clone())]);
     assert_eq!(pass.route(), "/tasks/t-frontend-login/review");
-    assert_eq!(pass.body(), serde_json::json!({ "criterion_id": "AC-3", "status": "passed" }));
+    assert_eq!(
+        pass.body(),
+        serde_json::json!({ "criterion_id": "AC-3", "status": "passed" })
+    );
 
     keys(&mut app, "f");
     assert_eq!(app.input_mode, Some(InputMode::ReviewFailure));
@@ -159,9 +206,16 @@ fn keys_p_y_pass_and_f_n_fail_a_human_review() {
         observed_failure: Some("button hidden".into()),
     };
     assert_eq!(effects, vec![Effect::Post(fail.clone())]);
-    assert_eq!(fail.body(), serde_json::json!({ "criterion_id": "AC-3", "status": "failed", "observed_failure": "button hidden" }));
+    assert_eq!(
+        fail.body(),
+        serde_json::json!({ "criterion_id": "AC-3", "status": "failed", "observed_failure": "button hidden" })
+    );
     keys(&mut app, "n");
-    assert_eq!(app.input_mode, Some(InputMode::ReviewFailure), "n is the alias for fail");
+    assert_eq!(
+        app.input_mode,
+        Some(InputMode::ReviewFailure),
+        "n is the alias for fail"
+    );
 }
 
 #[test]
@@ -179,7 +233,10 @@ fn keys_r_replies_to_a_blocked_agent() {
     };
     assert_eq!(effects, vec![Effect::Post(reply.clone())]);
     assert_eq!(reply.route(), "/tasks/t-backend-auth/reply");
-    assert_eq!(reply.body(), serde_json::json!({ "message": "use the stub" }));
+    assert_eq!(
+        reply.body(),
+        serde_json::json!({ "message": "use the stub" })
+    );
 }
 
 #[test]
@@ -237,8 +294,14 @@ fn keys_f_focuses_the_selected_tasks_pane_and_i_routes_input_to_it() {
         }]
     );
     // Even q / Ctrl-C go to the terminal while typing into it.
-    assert!(matches!(app.handle_key(Key::char('q'))[0], Effect::PaneInput { .. }));
-    assert!(matches!(app.handle_key(Key::ctrl('c'))[0], Effect::PaneInput { .. }));
+    assert!(matches!(
+        app.handle_key(Key::char('q'))[0],
+        Effect::PaneInput { .. }
+    ));
+    assert!(matches!(
+        app.handle_key(Key::ctrl('c'))[0],
+        Effect::PaneInput { .. }
+    ));
     app.handle_key(Key::ESC);
     assert!(!app.terminal_input);
     assert_eq!(app.handle_key(Key::char('q')), vec![Effect::Quit]);
@@ -265,7 +328,12 @@ fn keys_j_k_in_the_pane_grid_move_the_focus() {
     assert_eq!(app.focused_pane.as_deref(), Some("relay:1"));
     // Enter in the grid inspects the focused pane's task.
     let effects = app.handle_key(Key::ENTER);
-    assert_eq!(effects, vec![Effect::FetchInspector(GraphObjectRef::node("t-backend-auth"))]);
+    assert_eq!(
+        effects,
+        vec![Effect::FetchInspector(GraphObjectRef::node(
+            "t-backend-auth"
+        ))]
+    );
 }
 
 #[test]
@@ -282,7 +350,10 @@ fn keys_help_quit_and_ctrl_c() {
 #[test]
 fn keys_pane_resize_is_reported_when_the_widget_size_changes() {
     let mut app = app_with(graph("live-1"));
-    app.set_panes(vec![pane("relay:1", Some("t-backend-auth"), "backend", true)], None);
+    app.set_panes(
+        vec![pane("relay:1", Some("t-backend-auth"), "backend", true)],
+        None,
+    );
     assert_eq!(app.sync_pane_sizes(), vec![], "nothing drawn yet");
     app.pane_areas.insert("relay:1".into(), (78, 20));
     assert_eq!(
@@ -300,8 +371,16 @@ fn keys_pane_resize_is_reported_when_the_widget_size_changes() {
 #[test]
 fn keys_pane_frames_feed_the_screen_model() {
     let mut app = app_with(graph("live-1"));
-    app.set_panes(vec![pane("relay:1", Some("t-backend-auth"), "backend", true)], None);
-    app.apply_pane_frame("relay:1", PtyServerMessage::Output { data: "aGVsbG8gcGFuZQ==".into() });
+    app.set_panes(
+        vec![pane("relay:1", Some("t-backend-auth"), "backend", true)],
+        None,
+    );
+    app.apply_pane_frame(
+        "relay:1",
+        PtyServerMessage::Output {
+            data: "aGVsbG8gcGFuZQ==".into(),
+        },
+    );
     let screen = app.pane_states["relay:1"].parser.screen().contents();
     assert!(screen.starts_with("hello pane"), "{screen:?}");
     app.apply_pane_frame("relay:1", PtyServerMessage::Exit { code: 3 });
@@ -316,5 +395,9 @@ fn keys_selection_survives_a_graph_refresh_and_falls_back_when_the_object_is_gon
     app.set_graph(graph("live-1"));
     assert_eq!(app.selected, Some(GraphObjectRef::node("t-frontend-login")));
     app.set_graph(graph("live-7"));
-    assert_eq!(app.selected, Some(GraphObjectRef::node("t-backend-auth")), "falls back to the first agent");
+    assert_eq!(
+        app.selected,
+        Some(GraphObjectRef::node("t-backend-auth")),
+        "falls back to the first agent"
+    );
 }

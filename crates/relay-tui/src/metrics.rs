@@ -92,7 +92,13 @@ mod tests {
         assert_eq!(s.frames(), 600);
         // Only the newest 512 samples count: 88..600 µs.
         let summary = s.summary();
-        assert!(summary.draw_p50_ms > 0.3 && summary.draw_p50_ms < 0.36, "{summary:?}");
-        assert!(summary.draw_p95_ms > 0.56 && summary.draw_p95_ms <= 0.6, "{summary:?}");
+        assert!(
+            summary.draw_p50_ms > 0.3 && summary.draw_p50_ms < 0.36,
+            "{summary:?}"
+        );
+        assert!(
+            summary.draw_p95_ms > 0.56 && summary.draw_p95_ms <= 0.6,
+            "{summary:?}"
+        );
     }
 }

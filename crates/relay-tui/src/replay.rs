@@ -24,7 +24,8 @@ pub struct Fixture {
 
 fn read<T: DeserializeOwned>(dir: &Path, file: &str) -> Result<T> {
     let path = dir.join(file);
-    let text = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("parse {}", path.display()))
 }
 
@@ -56,10 +57,13 @@ impl Fixture {
     }
 
     pub fn describe(&self, r: &GraphObjectRef) -> ObjectDescription {
-        self.describe.get(&r.key()).cloned().unwrap_or_else(|| ObjectDescription {
-            title: r.id.clone(),
-            lines: Vec::new(),
-        })
+        self.describe
+            .get(&r.key())
+            .cloned()
+            .unwrap_or_else(|| ObjectDescription {
+                title: r.id.clone(),
+                lines: Vec::new(),
+            })
     }
 
     /// The object's story: the dumped per-object story, else the global log filtered by task.

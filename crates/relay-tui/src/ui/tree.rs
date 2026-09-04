@@ -94,10 +94,7 @@ pub fn tree_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         return lines;
     };
     let mut header = vec![Span::styled(
-        format!(
-            "MISSION  {}  {}",
-            mission.mission.title, mission.status
-        ),
+        format!("MISSION  {}  {}", mission.mission.title, mission.status),
         Style::new().bold(),
     )];
     let open = mission
@@ -112,7 +109,12 @@ pub fn tree_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         ));
     }
     lines.push(Line::from(header));
-    let lint: Vec<&LintItem> = app.state.tasks.values().flat_map(|t| t.lint.iter()).collect();
+    let lint: Vec<&LintItem> = app
+        .state
+        .tasks
+        .values()
+        .flat_map(|t| t.lint.iter())
+        .collect();
     let errors = lint.iter().filter(|l| l.severity == "error").count();
     let warnings = lint.iter().filter(|l| l.severity == "warning").count();
     lines.push(Line::styled(
@@ -131,7 +133,10 @@ fn agent_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         .filter(|n| n.kind == GraphNodeKind::Agent)
         .collect();
     if agents.is_empty() {
-        return vec![Line::styled("<no agents>", Style::new().fg(Color::DarkGray))];
+        return vec![Line::styled(
+            "<no agents>",
+            Style::new().fg(Color::DarkGray),
+        )];
     }
     let max_agents = (height / 2).max(1);
     let selected_index = match &app.selected {
@@ -139,7 +144,9 @@ fn agent_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         _ => None,
     };
     let start = match selected_index {
-        Some(i) if i >= max_agents => (i + 1 - max_agents).min(agents.len().saturating_sub(max_agents)),
+        Some(i) if i >= max_agents => {
+            (i + 1 - max_agents).min(agents.len().saturating_sub(max_agents))
+        }
         _ => 0,
     };
     let mut lines = Vec::new();
@@ -220,21 +227,37 @@ mod snapshots {
         let text = screen_text(&rows);
         assert!(text.contains("MISSION  Add secure login to this"), "{text}");
         let header = tree_lines(&app, 40)[0].to_string();
-        assert_eq!(header, "MISSION  Add secure login to this application.  executing");
+        assert_eq!(
+            header,
+            "MISSION  Add secure login to this application.  executing"
+        );
         for task in app.state.tasks.keys() {
             let node = app.graph.node(task).expect("task has a node");
             let row = rows
                 .iter()
                 .find(|r| r.contains(task))
                 .unwrap_or_else(|| panic!("{task} missing from the tree:\n{text}"));
-            assert!(row.contains(runtime_glyph(node.runtime)), "{task} lacks its glyph: {row}");
+            assert!(
+                row.contains(runtime_glyph(node.runtime)),
+                "{task} lacks its glyph: {row}"
+            );
         }
         // The selected agent is marked with › and shows its three states and version.
-        let backend = rows.iter().find(|r| r.contains("› t-backend-auth")).unwrap();
+        let backend = rows
+            .iter()
+            .find(|r| r.contains("› t-backend-auth"))
+            .unwrap();
         assert!(backend.contains("✗ completed · verified"), "{backend}");
         let full: Vec<String> = tree_lines(&app, 40).iter().map(|l| l.to_string()).collect();
-        assert!(full.iter().any(|l| l == "› t-backend-auth  ✗ completed · verified  v1"), "{full:?}");
-        assert!(text.contains("backend · wt .relay/wt/t-backend-auth"), "{text}");
+        assert!(
+            full.iter()
+                .any(|l| l == "› t-backend-auth  ✗ completed · verified  v1"),
+            "{full:?}"
+        );
+        assert!(
+            text.contains("backend · wt .relay/wt/t-backend-auth"),
+            "{text}"
+        );
         assert!(text.contains("lint: 0 errors · 0 warnings"), "{text}");
     }
 
@@ -248,7 +271,11 @@ mod snapshots {
         // A short terminal keeps the selected agent visible.
         app.handle_key(Key::char('j'));
         let rows = draw_rows(&mut app, 100, 30);
-        assert!(rows.iter().any(|r| r.contains("› t-token-store")), "{}", screen_text(&rows));
+        assert!(
+            rows.iter().any(|r| r.contains("› t-token-store")),
+            "{}",
+            screen_text(&rows)
+        );
     }
 
     #[test]
@@ -257,8 +284,15 @@ mod snapshots {
         app.set_graph(demo_graph());
         let lines = tree_lines(&app, 20);
         let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
-        assert!(text.iter().any(|l| l.contains("t-backend-auth  ○ proposed · needs_clarification  v-")), "{text:?}");
-        assert!(text.iter().any(|l| l.contains("    backend · ? 2")), "{text:?}");
+        assert!(
+            text.iter()
+                .any(|l| l.contains("t-backend-auth  ○ proposed · needs_clarification  v-")),
+            "{text:?}"
+        );
+        assert!(
+            text.iter().any(|l| l.contains("    backend · ? 2")),
+            "{text:?}"
+        );
         assert!(text.iter().any(|l| l.contains("? 2")), "{text:?}");
         assert!(text.iter().any(|l| l.contains("◐ blocked")), "{text:?}");
     }
