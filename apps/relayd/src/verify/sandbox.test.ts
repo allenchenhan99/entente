@@ -186,6 +186,12 @@ describe('sandbox network', () => {
     expect(result.output).toBe('');
     expect(result.exitCode).toBe(0);
     expect(fs.existsSync(path.join(shared, '.vite-temp', 'x'))).toBe(true);
+    // A worktree without node_modules resolves the nearest ancestor's: that directory is writable too.
+    const nested = path.join(path.dirname(shared), 'wt', 'integration');
+    fs.mkdirSync(nested, { recursive: true });
+    const ancestor = await sandbox.runCheck({ run: 'mkdir -p ../../node_modules/.vite-temp && touch ../../node_modules/.vite-temp/y', cwd: nested, timeoutMs: 10_000 });
+    expect(ancestor.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(shared, '.vite-temp', 'y'))).toBe(true);
     // Only the link target is opened up, not its parent.
     const parent = await sandbox.runCheck({ run: `touch "${path.dirname(shared)}/sibling"`, cwd, timeoutMs: 10_000 });
     expect(parent.exitCode).not.toBe(0);

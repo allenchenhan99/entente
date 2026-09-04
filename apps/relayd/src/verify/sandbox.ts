@@ -127,9 +127,17 @@ function gitDirs(cwd: string): string[] {
 function linkedNodeModules(cwd: string): string[] {
   const link = path.join(cwd, 'node_modules');
   try {
-    if (!fs.lstatSync(link).isSymbolicLink()) return [];
-    return [fs.realpathSync(link)];
+    if (fs.lstatSync(link).isSymbolicLink()) return [fs.realpathSync(link)];
+    return [];
   } catch {
+    // No node_modules in the worktree: Node resolves the nearest ancestor's (a worktree under <repo>/.relay/wt
+    // finds <repo>/node_modules), and Vite writes its scratch files next to that copy. Allow that directory.
+    let dir = path.dirname(cwd);
+    while (dir !== path.dirname(dir)) {
+      const candidate = path.join(dir, 'node_modules');
+      if (fs.existsSync(candidate)) return [realpathOrSelf(candidate)];
+      dir = path.dirname(dir);
+    }
     return [];
   }
 }

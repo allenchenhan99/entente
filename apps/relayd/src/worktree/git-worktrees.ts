@@ -182,6 +182,9 @@ export class GitWorktreeManager implements WorktreeManager {
       await this.git(['worktree', 'prune'], repoRoot);
       await this.git(['worktree', 'add', worktreePath, '-B', branch, repoHead], repoRoot);
     }
+    // Integration checks run `npx vitest` here too; without the link, tools resolve the parent repo's
+    // node_modules and write scratch files outside the worktree (the check sandbox refuses that).
+    this.linkNodeModules(repoRoot, worktreePath);
 
     for (const mergeBranch of branches) {
       const merge = await this.git(['merge', '--no-edit', mergeBranch], worktreePath, [0, 1]);

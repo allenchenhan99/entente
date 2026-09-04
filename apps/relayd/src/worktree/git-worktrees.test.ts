@@ -184,6 +184,10 @@ describe('git worktree manager', () => {
 
     const integrationPath = path.join(repo, '.relay', 'wt', 'integration');
     expect(integrated).toEqual({ branch: 'relay/integration' });
+    // the integration worktree shares node_modules like task worktrees do (integration checks run there)
+    fs.mkdirSync(path.join(repo, 'node_modules'), { recursive: true });
+    await manager.integrate(repo, ['relay/one', 'relay/two']);
+    expect(fs.lstatSync(path.join(repo, '.relay', 'wt', 'integration', 'node_modules')).isSymbolicLink()).toBe(true);
     expect(fs.readFileSync(path.join(integrationPath, 'one.txt'), 'utf8')).toBe('one\n');
     expect(fs.readFileSync(path.join(integrationPath, 'two.txt'), 'utf8')).toBe('two\n');
 
