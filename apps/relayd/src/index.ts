@@ -21,15 +21,13 @@ import type { EventStore, WorktreeManager, CheckRunner, RepairPolicy, TerminalHo
 import { fakeWorktrees, fakeChecks, fakeRepair, fakeHost, fakeRuntime } from './fakes/index.js';
 
 type Module = Record<string, unknown>;
-type Factory<T> = (deps: PortDeps) => T | Promise<T>;
+export type Importer = (spec: string) => Promise<Module | undefined>;
 
 export interface PortDeps {
   config: RelaydConfig;
   store: EventStore;
   repoRoot: string;
   relayDir: string;
-  hostKind: 'tmux' | 'herdr';
-  runtimeKind?: RuntimeKind;
 }
 
 export interface Ports {
@@ -50,32 +48,36 @@ const MODULES = {
   launch: './launch/index.js',
 } as const;
 
-/** Factory export names we accept, in order of preference (see HANDOFF_NOTES.md). */
+/**
+ * Factory export names we accept, in order of preference (see HANDOFF_NOTES.md).
+ * `launch` exports `createTerminalHost(kind, deps)` / `createRuntime(kind, deps)`; the others are
+ * expected to export `create*(deps)`.
+ */
 const FACTORIES = {
   worktrees: ['createWorktreeManager', 'gitWorktreeManager', 'worktreeManager'],
   checks: ['createCheckRunner', 'createVerifier', 'checkRunner'],
   repair: ['createRepairPolicy', 'repairPolicy'],
   host: ['createTerminalHost', 'terminalHost'],
-  runtime: ['createAgentRuntime', 'createRuntime', 'agentRuntime'],
+  runtime: ['createRuntime', 'createAgentRuntime', 'agentRuntime'],
 } as const;
 
-async function tryImport(spec: string): Promise<Module | undefined> {
+const defaultImporter: Importer = async (spec) => {
   try {
     return (await import(spec)) as Module;
   } catch {
     return undefined;
   }
-}
+};
 
-async function fromModule<T>(mod: Module | undefined, names: readonly string[], deps: PortDeps): Promise<T | undefined> {
+async function fromModule<T>(mod: Module | undefined, names: readonly string[], args: unknown[], log: (msg: string) => void): Promise<T | undefined> {
   if (!mod) return undefined;
   for (const name of names) {
     const candidate = mod[name];
     if (typeof candidate === 'function') {
       try {
-        return (await (candidate as Factory<T>)(deps)) as T;
+        return (await (candidate as (...a: unknown[]) => T | Promise<T>)(...args)) as T;
       } catch (err) {
-        console.error(`relayd: ${name} failed (${(err as Error).message}); using fake`);
+        log(`relayd: ${name}(${args.map((a) => (typeof a === 'string' ? a : '…')).join(', ')}) failed: ${(err as Error).message}; using fake`);
         return undefined;
       }
     }
@@ -83,24 +85,31 @@ async function fromModule<T>(mod: Module | undefined, names: readonly string[], 
   return undefined;
 }
 
-export async function resolvePorts(config: RelaydConfig, store: EventStore, log: (msg: string) => void = () => {}): Promise<Ports> {
-  const hostKind = config.host === 'fake' ? 'tmux' : config.host;
-  const deps: PortDeps = { config, store, repoRoot: config.repoRoot, relayDir: config.relayDir, hostKind };
+export async function resolvePorts(
+  config: RelaydConfig,
+  store: EventStore,
+  log: (msg: string) => void = () => {},
+  importer: Importer = defaultImporter,
+): Promise<Ports> {
+  const deps: PortDeps = { config, store, repoRoot: config.repoRoot, relayDir: config.relayDir };
   const fakes: string[] = [];
   const [worktreeMod, verifyMod, repairMod, launchMod] = await Promise.all([
-    tryImport(MODULES.worktree), tryImport(MODULES.verify), tryImport(MODULES.repair), tryImport(MODULES.launch),
+    importer(MODULES.worktree), importer(MODULES.verify), importer(MODULES.repair), importer(MODULES.launch),
   ]);
+  const fake = <T>(name: string, make: () => T): T => {
+    fakes.push(name);
+    return make();
+  };
 
-  const worktrees = (await fromModule<WorktreeManager>(worktreeMod, FACTORIES.worktrees, deps)) ?? (fakes.push('worktrees'), fakeWorktrees());
-  const checks = (await fromModule<CheckRunner>(verifyMod, FACTORIES.checks, deps)) ?? (fakes.push('checks'), fakeChecks({}, store));
-  const repair = (await fromModule<RepairPolicy>(repairMod, FACTORIES.repair, deps)) ?? (fakes.push('repair'), fakeRepair());
-  const host = config.host === 'fake'
-    ? (fakes.push('host'), fakeHost())
-    : (await fromModule<TerminalHost>(launchMod, FACTORIES.host, deps)) ?? (fakes.push('host'), fakeHost());
+  const worktrees = (await fromModule<WorktreeManager>(worktreeMod, FACTORIES.worktrees, [deps], log)) ?? fake('worktrees', fakeWorktrees);
+  const checks = (await fromModule<CheckRunner>(verifyMod, FACTORIES.checks, [deps], log)) ?? fake('checks', () => fakeChecks({}, store));
+  const repair = (await fromModule<RepairPolicy>(repairMod, FACTORIES.repair, [deps], log)) ?? fake('repair', fakeRepair);
+  const useLaunch = config.host !== 'fake';
+  const host = (useLaunch ? await fromModule<TerminalHost>(launchMod, FACTORIES.host, [config.host, {}], log) : undefined) ?? fake('host', fakeHost);
   const runtimes = {} as Record<RuntimeKind, AgentRuntime>;
   for (const kind of ['claude-code', 'codex'] as RuntimeKind[]) {
-    const real = config.host === 'fake' ? undefined : await fromModule<AgentRuntime>(launchMod, FACTORIES.runtime, { ...deps, runtimeKind: kind });
-    runtimes[kind] = real ?? (fakes.push(`runtime:${kind}`), fakeRuntime(kind));
+    const real = useLaunch ? await fromModule<AgentRuntime>(launchMod, FACTORIES.runtime, [kind, {}], log) : undefined;
+    runtimes[kind] = real ?? fake(`runtime:${kind}`, () => fakeRuntime(kind));
   }
   if (fakes.length) log(`relayd: using in-memory fakes for ${fakes.join(', ')}`);
   if (usingFallbackLint) log('relayd: @relay/protocol has no lintContract yet; using fallback lint rules');

@@ -1,0 +1,46 @@
+import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { resolvePorts } from '../index.js';
+import { loadConfig } from '../config.js';
+import { createJsonlStore } from '../store/jsonl-store.js';
+
+const store = () => createJsonlStore({ dir: fs.mkdtempSync(path.join(os.tmpdir(), 'relay-')) });
+
+/** Mirrors the export shapes of the launch package on main: `create*(kind, deps)`. */
+const launchModule = {
+  createTerminalHost: (kind: string, deps: unknown) => ({ kind, deps, spawn: async () => ({ paneId: 'p' }), focus: async () => {}, isAlive: async () => true, kill: async () => {} }),
+  createRuntime: (kind: string, deps: unknown) => ({ kind, deps, prepare: async () => ({ argv: [], env: {} }) }),
+};
+const verifyModule = { createCheckRunner: (deps: { repoRoot: string }) => ({ repoRoot: deps.repoRoot, run: async () => { throw new Error('unused'); } }) };
+
+describe('ports wiring', () => {
+  it('uses real factories where their modules exist and fakes elsewhere', async () => {
+    const importer = async (spec: string) => (spec.includes('launch') ? launchModule : spec.includes('verify') ? verifyModule : undefined);
+    const cfg = loadConfig({ RELAY_HOST: 'herdr', RELAY_REPO: '/r' });
+    const ports = await resolvePorts(cfg, store(), () => {}, importer);
+    expect(ports.host.kind).toBe('herdr');
+    expect((ports.host as unknown as { deps: unknown }).deps).toEqual({});
+    expect(ports.runtimes['claude-code'].kind).toBe('claude-code');
+    expect(ports.runtimes.codex.kind).toBe('codex');
+    expect((ports.checks as unknown as { repoRoot: string }).repoRoot).toBe('/r');
+    expect(ports.fakes).toEqual(['worktrees', 'repair']);
+  });
+
+  it('RELAY_HOST=fake forces the fake host and runtimes even when the launch module exists', async () => {
+    const importer = async (spec: string) => (spec.includes('launch') ? launchModule : undefined);
+    const ports = await resolvePorts(loadConfig({ RELAY_HOST: 'fake' }), store(), () => {}, importer);
+    expect(ports.host.kind).toBe('tmux');
+    expect(ports.fakes).toEqual(['worktrees', 'checks', 'repair', 'host', 'runtime:claude-code', 'runtime:codex']);
+  });
+
+  it('a factory that throws falls back to the fake instead of crashing boot', async () => {
+    const importer = async (spec: string) => (spec.includes('launch') ? { createTerminalHost: () => { throw new Error('no tmux'); }, createRuntime: launchModule.createRuntime } : undefined);
+    const logs: string[] = [];
+    const ports = await resolvePorts(loadConfig({ RELAY_HOST: 'tmux' }), store(), (m) => logs.push(m), importer);
+    expect(ports.fakes).toContain('host');
+    expect(ports.fakes).not.toContain('runtime:codex');
+    expect(logs.join('\n')).toMatch(/no tmux/);
+  });
+});
