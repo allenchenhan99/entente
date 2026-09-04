@@ -73,6 +73,15 @@ export class HerdrHost implements TerminalHost {
       await this.exec(['herdr', 'pane', 'close', paneId]).catch(() => undefined);
       throw new Error(`herdr host: agent start failed: ${describeFailure(startArgv, start)}`);
     }
+    if (opts.prompt !== undefined) {
+      // `agent start` refuses multi-line arguments; `agent prompt` pastes atomically (bracketed paste + Enter).
+      const promptArgv = ['herdr', 'agent', 'prompt', opts.name, opts.prompt];
+      const prompted = await this.exec(promptArgv);
+      if (prompted.exitCode !== 0) {
+        await this.exec(['herdr', 'pane', 'close', paneId]).catch(() => undefined);
+        throw new Error(`herdr host: agent prompt failed: ${describeFailure(promptArgv, prompted)}`);
+      }
+    }
     return { paneId };
   }
 

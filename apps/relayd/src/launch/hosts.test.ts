@@ -21,11 +21,12 @@ describe('herdr host', () => {
   const spawnOpts = {
     name: 'backend',
     cwd: '/repo/.relay/wt/t-backend',
-    argv: ['claude', '--session-id', 'abc', 'bootstrap prompt'],
+    argv: ['claude', '--session-id', 'abc'],
     env: { RELAY_TOKEN: 'tok', OTHER: 'a b' },
+    prompt: 'bootstrap prompt\nline two',
   };
 
-  it('spawn issues exactly pane split then agent start with the parsed pane id', async () => {
+  it('spawn issues pane split, agent start, then delivers the prompt via agent prompt', async () => {
     const { exec, calls } = fakeExec((argv) => (argv[1] === 'pane' && argv[2] === 'split' ? { stdout: splitJson } : { stdout: '{}' }));
     const host = createTerminalHost('herdr', { exec, env: { HERDR_PANE_ID: 'w1:p1' } });
     expect(host.kind).toBe('herdr');
@@ -34,13 +35,27 @@ describe('herdr host', () => {
     const { paneId } = await host.spawn(spawnOpts);
 
     expect(paneId).toBe('w1:p7');
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     expect(calls[0]!.argv).toEqual([
       'herdr', 'pane', 'split', '--pane', 'w1:p1', '--direction', 'right', '--cwd', '/repo/.relay/wt/t-backend', '--no-focus',
       '--env', 'RELAY_TOKEN=tok', '--env', 'OTHER=a b',
     ]);
     expect(calls[1]!.argv).toEqual([
-      'herdr', 'agent', 'start', 'backend', '--kind', 'claude', '--pane', 'w1:p7', '--', '--session-id', 'abc', 'bootstrap prompt',
+      'herdr', 'agent', 'start', 'backend', '--kind', 'claude', '--pane', 'w1:p7', '--', '--session-id', 'abc',
+    ]);
+    expect(calls[2]!.argv).toEqual(['herdr', 'agent', 'prompt', 'backend', 'bootstrap prompt\nline two']);
+  });
+
+  it('closes the pane and throws when the prompt cannot be delivered', async () => {
+    const { exec, calls } = fakeExec((argv) => {
+      if (argv[1] === 'pane' && argv[2] === 'split') return { stdout: splitJson };
+      if (argv[1] === 'agent' && argv[2] === 'prompt') return { exitCode: 1, stderr: 'agent_prompt_stalled' };
+      return { stdout: '{}' };
+    });
+    const host = createTerminalHost('herdr', { exec, env: { HERDR_PANE_ID: 'w1:p1' } });
+    await expect(host.spawn(spawnOpts)).rejects.toThrow(/agent prompt failed/);
+    expect(calls.map((c) => c.argv.slice(0, 3))).toEqual([
+      ['herdr', 'pane', 'split'], ['herdr', 'agent', 'start'], ['herdr', 'agent', 'prompt'], ['herdr', 'pane', 'close'],
     ]);
   });
 
@@ -57,7 +72,7 @@ describe('herdr host', () => {
     await host.spawn({ ...spawnOpts, argv: ['codex', '-C', '/x', 'prompt'] });
     expect(calls[1]!.argv).toEqual(['herdr', 'agent', 'start', 'backend', '--kind', 'codex', '--pane', 'w1:p7', '--', '-C', '/x', 'prompt']);
     await host.spawn({ ...spawnOpts, argv: ['/opt/bin/claude-code', 'p'] });
-    expect(calls[3]!.argv.slice(4, 6)).toEqual(['--kind', 'claude']);
+    expect(calls[4]!.argv.slice(4, 6)).toEqual(['--kind', 'claude']);
   });
 
   it('omits --env when the env is empty', async () => {
@@ -140,6 +155,13 @@ describe('tmux host', () => {
     expect(argv.slice(0, 9)).toEqual(['tmux', 'split-window', '-t', 'relay', '-c', '/repo/wt', '-P', '-F', '#{pane_id}']);
     expect(argv).toHaveLength(10);
     expect(argv[9]).toBe(`claude --session-id abc 'Line one with spaces\n"double" and '\\''single'\\'' quotes; $HOME \`tick\`'`);
+  });
+
+  it('appends the prompt as the final shell-quoted argument', async () => {
+    const { exec, calls } = fakeExec(() => ({ stdout: '%7' }));
+    const host = createTerminalHost('tmux', { exec });
+    await host.spawn({ name: 'x', cwd: '/w', argv: ['claude', '--session-id', 'abc'], env: {}, prompt: 'do it now' });
+    expect(calls[0]!.argv[9]).toBe("claude --session-id abc 'do it now'");
   });
 
   it('prefixes env assignments with env(1), quoted', async () => {

@@ -83,6 +83,18 @@ describe('git worktree manager', () => {
     expect(git(repo, ['branch', '--list', 'relay/t-worktree'])).toBe('');
   });
 
+  it('links the repository node_modules into a new worktree so command checks can run', async () => {
+    const repoRoot = createRepo();
+    fs.mkdirSync(path.join(repoRoot, 'node_modules', 'left-pad'), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1;\n');
+    const manager = createWorktreeManager();
+    const info = await manager.create(repoRoot, task('t-nm'), []);
+    const link = path.join(info.path, 'node_modules');
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.existsSync(path.join(link, 'left-pad', 'index.js'))).toBe(true);
+    expect((await manager.diff(info.path, info.base)).changedFiles).toEqual([]);
+  });
+
   it('diff reports modified, untracked, and deleted files and patches untracked content', async () => {
     const repo = createRepo();
     const manager = createWorktreeManager();

@@ -95,14 +95,14 @@ export class CodexRuntime implements AgentRuntime {
     this.executable = deps.executable ?? 'codex';
   }
 
-  async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string> }> {
+  async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
     await fs.mkdir(configDir, { recursive: true });
     const roots: CodexSandboxRoots = { configDir, homeDir: this.homeDir, gitCommonDir: await gitCommonDir(spec.cwd) };
     await fs.writeFile(path.join(configDir, 'config.toml'), codexConfigToml(spec, roots), { mode: 0o600 });
     await this.copyAuth(configDir);
 
-    const argv = [this.executable, '-C', spec.cwd, '-a', 'never', '-s', 'workspace-write', bootstrapPrompt(spec)];
-    return { argv, env: { CODEX_HOME: configDir, RELAY_TOKEN: spec.token } };
+    const argv = [this.executable, '-C', spec.cwd, '-a', 'never', '-s', 'workspace-write'];
+    return { argv, env: { CODEX_HOME: configDir, RELAY_TOKEN: spec.token }, prompt: bootstrapPrompt(spec) };
   }
 
   /** Keeps the isolated CODEX_HOME logged in by copying the user's `~/.codex/auth.json` when present. */

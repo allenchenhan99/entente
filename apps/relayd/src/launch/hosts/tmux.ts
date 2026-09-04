@@ -39,7 +39,8 @@ export class TmuxHost implements TerminalHost {
   async spawn(opts: SpawnOptions): Promise<{ paneId: string }> {
     if (opts.argv.length === 0) throw new Error('tmux host: argv must not be empty');
     const envPrefix = Object.entries(opts.env).map(([k, v]) => `${k}=${shellQuote(v)}`);
-    const command = (envPrefix.length > 0 ? ['env', ...envPrefix] : []).concat(shellJoin(opts.argv)).join(' ');
+    const fullArgv = opts.prompt === undefined ? opts.argv : [...opts.argv, opts.prompt];
+    const command = (envPrefix.length > 0 ? ['env', ...envPrefix] : []).concat(shellJoin(fullArgv)).join(' ');
     const argv = ['tmux', 'split-window', '-t', TMUX_SESSION, '-c', opts.cwd, '-P', '-F', '#{pane_id}', command];
     const result = await this.exec(argv);
     if (result.exitCode !== 0) throw new Error(`tmux host: split-window failed: ${describeFailure(argv, result)}`);

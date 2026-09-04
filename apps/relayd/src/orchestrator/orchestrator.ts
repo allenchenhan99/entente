@@ -287,7 +287,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         { taskId, token, mcpUrl: deps.mcpUrl, sessionId, cwd: worktree.path, role: 'recipient', contractSummary: contract.goal },
         configDir,
       );
-      const { paneId } = await deps.host.spawn({ name: contract.recipient, cwd: worktree.path, argv: launch.argv, env: launch.env });
+      const { paneId } = await deps.host.spawn({ name: contract.recipient, cwd: worktree.path, argv: launch.argv, env: launch.env, prompt: launch.prompt });
       rec.paneId = paneId;
       rec.spawned = true;
       rec.runtimeState = 'idle';

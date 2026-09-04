@@ -38,7 +38,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     this.executable = deps.executable ?? 'claude';
   }
 
-  async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string> }> {
+  async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
     await fs.mkdir(configDir, { recursive: true });
     const mcpPath = path.join(configDir, 'mcp.json');
     const mcpConfig = {
@@ -54,8 +54,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       '--mcp-config', mcpPath,
       '--permission-mode', 'acceptEdits',
       '--allowedTools', CLAUDE_ALLOWED_TOOLS.join(','),
-      bootstrapPrompt(spec),
     ];
-    return { argv, env: {} };
+    return { argv, env: {}, prompt: bootstrapPrompt(spec) };
   }
 }

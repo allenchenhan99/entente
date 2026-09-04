@@ -48,8 +48,13 @@ export interface RepairPolicy {
 export interface SpawnOptions {
   name: string;               // unique live agent name, [a-z][a-z0-9_-]{0,31}
   cwd: string;
-  argv: string[];             // full command line, argv[0] is the executable
+  argv: string[];             // command line without the initial prompt, argv[0] is the executable
   env: Record<string, string>;
+  /**
+   * Initial prompt to deliver once the agent is interactive. Hosts choose the delivery: Herdr uses
+   * `herdr agent prompt` (multi-line CLI arguments are refused by `agent start`); tmux appends it to argv.
+   */
+  prompt?: string;
 }
 
 export interface TerminalHost {
@@ -72,6 +77,6 @@ export interface LaunchSpec {
 
 export interface AgentRuntime {
   readonly kind: RuntimeKind;
-  /** Writes any per-agent config files under configDir and returns the argv/env to spawn. */
-  prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string> }>;
+  /** Writes any per-agent config files under configDir and returns the argv/env to spawn plus the bootstrap prompt. */
+  prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt?: string }>;
 }

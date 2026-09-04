@@ -70,8 +70,21 @@ export class GitWorktreeManager implements WorktreeManager {
     const excludePath = path.isAbsolute(reportedPath) ? reportedPath : path.resolve(repoRoot, reportedPath);
     fs.mkdirSync(path.dirname(excludePath), { recursive: true });
     const current = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, 'utf8') : '';
-    if (lines(current).includes('.relay/')) return;
-    fs.appendFileSync(excludePath, `${current.length > 0 && !current.endsWith('\n') ? '\n' : ''}.relay/\n`);
+    // `.relay/` holds worktrees and evidence; `node_modules` may be a symlink relayd itself creates (see linkNodeModules).
+    const missing = ['.relay/', 'node_modules'].filter((entry) => !lines(current).includes(entry));
+    if (missing.length === 0) return;
+    fs.appendFileSync(excludePath, `${current.length > 0 && !current.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+  }
+
+  /**
+   * A fresh worktree has no installed dependencies, so `command` checks like `npx vitest` would fail before
+   * the agent wrote a line. Share the repository's `node_modules` via symlink (ignored by git) when present.
+   */
+  private linkNodeModules(repoRoot: string, worktreePath: string): void {
+    const source = path.join(repoRoot, 'node_modules');
+    const target = path.join(worktreePath, 'node_modules');
+    if (!fs.existsSync(source) || fs.existsSync(target)) return;
+    fs.symlinkSync(source, target, 'dir');
   }
 
   async create(repoRoot: string, task: TaskContract, dependencyBranches: string[]): Promise<WorktreeInfo> {
@@ -84,6 +97,7 @@ export class GitWorktreeManager implements WorktreeManager {
       if (currentBranch !== branch) {
         throw new Error(`worktree manager: ${worktreePath} is on ${currentBranch || 'detached HEAD'}, expected ${branch}`);
       }
+      this.linkNodeModules(repoRoot, worktreePath);
       return { path: worktreePath, branch, base: this.readBase(repoRoot, task.id) };
     }
 
@@ -98,6 +112,7 @@ export class GitWorktreeManager implements WorktreeManager {
       const head = await this.git(['rev-parse', 'HEAD'], worktreePath);
       const base = head.stdout.trim();
       this.writeBase(repoRoot, task.id, base);
+      this.linkNodeModules(repoRoot, worktreePath);
       return { path: worktreePath, branch, base };
     } catch (error) {
       if (worktreeAdded) {

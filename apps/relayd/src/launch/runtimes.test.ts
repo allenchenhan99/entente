@@ -28,7 +28,7 @@ describe('claude runtime', () => {
     expect(runtime).toBeInstanceOf(ClaudeCodeRuntime);
     const configDir = path.join(tmp, 'cfg', 'nested');
 
-    const { argv, env } = await runtime.prepare(spec, configDir);
+    const { argv, env, prompt } = await runtime.prepare(spec, configDir);
 
     const mcpPath = path.join(configDir, 'mcp.json');
     const parsed = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
@@ -45,16 +45,16 @@ describe('claude runtime', () => {
     // Claude's --allowedTools is variadic ("comma or space-separated"), so the tool list is one
     // comma-joined value; otherwise the trailing prompt would be swallowed as another tool name.
     expect(argv[8]).toBe('mcp__relay__*,Bash(npm *),Bash(npx *),Bash(node *),Bash(git *),Read,Edit,Write,Glob,Grep');
-    expect(argv).toHaveLength(10);
-    expect(argv[argv.length - 1]).toBe(bootstrapPrompt(spec));
-    expect(Buffer.byteLength(argv[argv.length - 1]!, 'utf8')).toBeLessThan(6 * 1024);
+    expect(argv).toHaveLength(9);
+    expect(prompt).toBe(bootstrapPrompt(spec));
+    expect(Buffer.byteLength(prompt!, 'utf8')).toBeLessThan(6 * 1024);
   });
 
   it('uses the planner prompt for the planner role', async () => {
     const runtime = createRuntime('claude-code');
-    const { argv } = await runtime.prepare({ ...spec, role: 'planner' }, tmp);
-    expect(argv[argv.length - 1]).toBe(bootstrapPrompt({ ...spec, role: 'planner' }));
-    expect(argv[argv.length - 1]).toContain('relay_propose_task');
+    const { prompt } = await runtime.prepare({ ...spec, role: 'planner' }, tmp);
+    expect(prompt).toBe(bootstrapPrompt({ ...spec, role: 'planner' }));
+    expect(prompt).toContain('relay_propose_task');
   });
 });
 
@@ -67,7 +67,7 @@ describe('codex runtime', () => {
     expect(runtime).toBeInstanceOf(CodexRuntime);
     const configDir = path.join(tmp, 'codex-cfg');
 
-    const { argv, env } = await runtime.prepare(spec, configDir);
+    const { argv, env, prompt } = await runtime.prepare(spec, configDir);
 
     const toml = fs.readFileSync(path.join(configDir, 'config.toml'), 'utf8');
     expect(toml).toContain('[mcp_servers.relay]\n');
@@ -77,8 +77,8 @@ describe('codex runtime', () => {
 
     expect(env).toEqual({ CODEX_HOME: configDir, RELAY_TOKEN: spec.token });
     expect(argv.slice(0, 7)).toEqual(['codex', '-C', spec.cwd, '-a', 'never', '-s', 'workspace-write']);
-    expect(argv).toHaveLength(8);
-    expect(argv[7]).toBe(bootstrapPrompt(spec));
+    expect(argv).toHaveLength(7);
+    expect(prompt).toBe(bootstrapPrompt(spec));
     expect(fs.existsSync(path.join(configDir, 'auth.json'))).toBe(false);
   });
 
