@@ -268,10 +268,14 @@ async function explain(args: string[], io: CliIo): Promise<number> {
   if (!object) throw new UsageError('relay explain needs an object ref');
   const { state, events } = await loadGraphSource(values.replay, values.port, io);
   const graph = io.graph.buildGraph(state);
+  const valid = validGraphRefs(graph);
+  if (valid.length === 0) {
+    io.stdout('explain empty — nothing to show');
+    return 0;
+  }
   const ref = resolveGraphRef(object, graph);
   if (!ref) {
-    const valid = validGraphRefs(graph);
-    throw new UsageError(`unknown object: ${object}\nvalid refs: ${valid.length > 0 ? valid.join(', ') : '(none)'}`);
+    throw new UsageError(`unknown object: ${object}\nvalid refs: ${valid.join(', ')}`);
   }
   const description = io.graph.describe(ref, graph, state);
   io.stdout(description.title);
@@ -382,7 +386,9 @@ function loadReplayEvents(file: string): Event[] {
 }
 
 function commandForInboxItem(item: InboxItem): string {
-  const action = item.actions[0];
+  const action = item.actions.find(({ kind }) => (
+    kind === 'clarify' || kind === 'mission_clarify' || kind === 'review' || kind === 'reply'
+  )) ?? item.actions[0];
   if (!action) return `relay explain ${item.id}`;
   const taskId = action.target.task_id ?? item.task_id;
   switch (action.kind) {

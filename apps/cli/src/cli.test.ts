@@ -55,7 +55,10 @@ describe('relay inbox', () => {
           title: 'backend asks 2 questions (v1)',
           detail: ['Q1: Which authentication method?', 'Q2: How long should links last?'],
           ref: { kind: 'edge', id: 'contract:t-a' },
-          actions: [{ key: 'a', label: 'answer', kind: 'clarify', target: { task_id: 't-a', question_ids: ['Q1', 'Q2'] } }],
+          actions: [
+            { key: 'Enter', label: 'inspect', kind: 'inspect', target: { task_id: 't-a' } },
+            { key: 'a', label: 'answer', kind: 'clarify', target: { task_id: 't-a', question_ids: ['Q1', 'Q2'] } },
+          ],
         },
         {
           id: 'inbox:review:t-a:AC-3',
@@ -190,6 +193,16 @@ describe('relay explain', () => {
     expect(code).toBe(2);
     expect(io.err.join('\n')).toContain('unknown object: nope');
     expect(io.err.join('\n')).toContain('valid refs: contract:t-a, evidence:t-a, human, inbox:blocker:t-a, planner, t-a, verifier');
+  });
+
+  it('prints nothing to show when the graph implementation has no objects yet', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    const code = await run(['explain', 't-a'], { ...io, fetch, env: {}, graph: fakeGraphApi() });
+
+    expect(code).toBe(0);
+    expect(io.out).toEqual(['explain empty — nothing to show']);
   });
 });
 
@@ -462,6 +475,8 @@ describe('relay usage', () => {
     expect(io.err.join('\n')).toMatch(/relay up/);
     const help = capture();
     expect(await run(['--help'], help)).toBe(0);
-    expect(help.out.join('\n')).toMatch(/relay replay/);
+    expect(help.out.join('\n')).toContain('relay inbox');
+    expect(help.out.join('\n')).toContain('relay explain <object>');
+    expect(help.out.join('\n')).toContain('relay story');
   });
 });
