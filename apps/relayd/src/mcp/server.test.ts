@@ -264,3 +264,19 @@ describe('mcp subtask (agent networking)', () => {
     expect(r.types()).not.toContain('tasks_planned');
   });
 });
+
+describe('recipient bootstrap prompt for agent networking', () => {
+  // The prompt test file belongs to the launch work package; this keeps the delegation wording aligned with the two tools above.
+  it('tells the recipient how to delegate: disjoint paths, no dependency on itself, re-propose on lint_error, poll await_task, handle failed/canceled', async () => {
+    const { bootstrapPrompt } = await import('../launch/index.js');
+    const text = bootstrapPrompt({ taskId: 't-a', token: 'tok', mcpUrl: 'http://127.0.0.1:0/mcp', sessionId: 's', cwd: '/wt/t-a', role: 'recipient', contractSummary: 'goal' });
+    const para = text.split('\n').find((l) => l.includes(RECIPIENT_TOOLS.propose_subtask))!;
+    expect(para).toContain(RECIPIENT_TOOLS.await_task);
+    expect(para).toMatch(/disjoint/);
+    expect(para).toMatch(/must not depend on you/);
+    expect(para).toMatch(/lint_error/);
+    expect(para).toMatch(/"pending" call it again/);
+    expect(para).toMatch(/"failed" or "canceled"/);
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThan(6 * 1024);
+  });
+});
