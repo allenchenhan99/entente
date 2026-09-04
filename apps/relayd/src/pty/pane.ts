@@ -131,12 +131,15 @@ export class Pane {
 
   private handleOutput(data: string): void {
     this.lastOutputAt = Date.now();
-    const bytes = Buffer.from(data, 'utf8');
-    this.ring.push(bytes);
-    this.term.write(data);
-    this.recorder.output(data);
     this.firstOutputResolve();
-    for (const l of this.outputListeners) l(bytes);
+    this.recorder.output(data);
+    // xterm parses asynchronously: publish the chunk (ring + listeners) only once the screen reflects it, so a
+    // wait-output scan or a client joining between chunks never sees the ring ahead of the screen or twice.
+    const bytes = Buffer.from(data, 'utf8');
+    this.term.write(data, () => {
+      this.ring.push(bytes);
+      for (const l of this.outputListeners) l(bytes);
+    });
   }
 
   get pid(): number {
