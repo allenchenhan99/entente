@@ -124,6 +124,18 @@ graph, draws contracts between them, and puts answer / review / reply next to th
 Interfaces are frozen in `packages/protocol/src/pty.ts`; the two work packages (PTY host, web app) are
 specified as Task Contracts in [`docs/relay-terminal-plan.md`](docs/relay-terminal-plan.md) — pick one up there.
 
+### Relay Terminal (Rust)
+
+`crates/relay-tui` is the native client (Ratatui): mission tree, explainable graph, live agent panes over
+`/pty/:id`, inbox and inspector — HTTP/SSE/WS only, it never runs the reducer.
+
+```bash
+cargo run -p relay-tui -- --url http://127.0.0.1:7420          # token: --token / RELAY_TOKEN / .relay/session.token
+cargo run -p relay-tui -- --replay crates/relay-tui/tests/fixtures/live-7   # no relayd needed (q quits)
+cargo run -p relay-tui -- --replay crates/relay-tui/tests/fixtures/live-1 --frames 1 --metrics-json  # headless frame + draw p50/p95
+node scripts/dump-graph-fixture.mjs fixtures/events-live-1.jsonl live-1   # regenerate a replay fixture from a run log
+```
+
 ## Repository layout and contributing
 
 - `packages/protocol/src/{contract,events,state,api,mcp}.ts` are the integration contract; changes there need a

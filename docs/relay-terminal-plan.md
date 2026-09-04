@@ -184,6 +184,55 @@ an SSE `/events` message. No SSE for the graph itself.
 
 ---
 
+## Relay Terminal rewrite (Rust)
+
+R1 is `termd`, the PTY host (`docs/relay-term-spec.md`). R2 is the native client below.
+
+### R2 · `relay-tui` (`crates/relay-tui`) — ✅ done (branch `wp/relay-tui-rust`)
+
+A Ratatui client for relayd with the same object-oriented model as the Ink TUI (`apps/tui`), rendered natively
+with real terminal panes inside the layout. It talks only HTTP / SSE / WS to relayd and never runs the reducer.
+
+- **Modules**: `api.rs` (typed GET/POST, the `/events` SSE loop, `/pty/:id` WebSocket with the `relay.<token>`
+  subprotocol; token from `--token` › `RELAY_TOKEN` › `<repo>/.relay/session.token`), `model.rs` (serde twins of
+  `graph/types.ts`, `pty.ts` and the `state.ts` slices the tree needs — every dumped JSON round-trips unchanged),
+  `app.rs` (pure state machine: selection, focus region, inspector, inline editor, pane grid; keys in, `Effect`s
+  out), `runtime.rs` (the driver: channels, debounce, WebSockets, draw timing), `ui/{tree,graph,panes,inbox,
+  inspector,status}.rs`, `keys.rs`, `replay.rs`, `metrics.rs`, `main.rs`.
+- **Layout** (best at ≥ 100×30): left column 35 % = mission tree (agents with runtime glyph, task / handoff state,
+  version, worktree, questions, blockers) over the graph (four columns human/planner · agents · verifier · done
+  when ≥ 70 cols wide, grouped under headings otherwise; one row per edge drawn with box characters and its label,
+  attention edges in bold yellow with `!`); right column 65 % = pane grid (focused pane large via `tui-term` over a
+  `vt100` screen, the others as three-line thumbnails, title bars `role · task · status`); bottom strip 5 rows =
+  inbox items with their action keys; status line = connection, last seq, draw p50/p95, the focused pane's
+  `readiness_ms` / `prompt_accept_ms` / `render_p95_ms` from `/metrics`, action hints, errors. Narrower than 80
+  cols the pane grid is dropped, shorter than 20 rows the inbox strip.
+- **Data flow**: `GET /state`, `/graph`, `/panes` at start; then `/events` SSE — every event schedules one
+  re-fetch of `/graph`, `/state`, `/panes` after a 100 ms debounce; `/metrics` every 2 s. One WebSocket per
+  listed pane feeds a `vt100::Parser`; the focused pane's parser follows its widget and `resize` is sent whenever
+  that size changes. Only the focused pane receives keys (`i` in the pane grid, `Esc` leaves); `Ctrl-C` and `q`
+  go to the pane while typing.
+- **Keys** (`apps/tui/src/keys.ts`): `Tab` cycles tree → graph → panes → inbox; `j`/`k`/arrows move; `Enter`
+  inspects (on an inbox item: jumps to its ref); `i` inspects (pane grid: type into the pane); the action's own
+  key from `/graph/:kind/:id/actions` or the inbox item runs it — `a` answer, `r` reply, `p` pass, `f` fail
+  (asks for the observed failure), `x` cancel (y/N) — plus the contract aliases `c` (answer), `y` (pass), `n`
+  (fail); `f` focuses the selected task's pane when no review action binds it; `?` help; `q` / `Ctrl-C` quit.
+  Text goes through the inline editor in the inspector; Enter sends the exact `commands.ts` bodies to the POST
+  routes; errors show in the status line.
+- **Replay**: `--replay <dir>` renders from the JSON `scripts/dump-graph-fixture.mjs` wrote (`graph`, `state`,
+  `story`, `panes`, plus `describe` / `stories` / `actions` per object) with no server; `--frames N` renders
+  headlessly into a virtual terminal and prints the last frame, `--metrics-json` prints draw p50/p95 on exit.
+- **Fixtures**: `crates/relay-tui/tests/fixtures/{live-1,live-7}` are dumped from a throw-away
+  `RELAY_HOST=fake` relayd resumed on a copy of the run log (the resume appends `agent_exited` events for the
+  recorded panes, so `seq` is a few past the log's last line; the fake host has no pane routes, so `panes.json`
+  is `{ "panes": [] }`).
+- **Tests** (`cargo test -p relay-tui`, < 1 s after compilation): serde round-trips of every fixture file,
+  `TestBackend` snapshots per panel asserting on key strings, key-map unit tests, one live suite against a fake
+  axum relayd (SSE → graph refresh, pane WebSocket bytes → widget, `i` → `input` frames, widget resize →
+  `resize`, POST bodies, 401 without a token). Filters that name several tests need cargo's `--`:
+  `cargo test -p relay-tui -- ui::tree ui::graph`.
+- **Not in R2**: termd control (relayd proxies), daemon/attach (R3), mouse, themes/config file, web.
+
 ## Order of work and integration
 
 1. WP-T1 and WP-T2 start in parallel (the web app can be built entirely against fixtures and a fake WS).
