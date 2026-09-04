@@ -36,6 +36,9 @@ export function herdrAgentKind(executable: string): HerdrAgentKind {
   throw new Error(`herdr host: cannot map runtime executable "${executable}" to a herdr agent kind (expected claude or codex)`);
 }
 
+/** How long to wait for the agent to start working after a prompt before applying a recovery step. */
+const PROMPT_WAIT_MS = 15_000;
+
 function isPaneBusy(result: { stdout: string; stderr: string }): boolean {
   return /agent_pane_busy/.test(result.stderr) || /agent_pane_busy/.test(result.stdout);
 }
@@ -93,15 +96,32 @@ export class HerdrHost implements TerminalHost {
       throw new Error(`herdr host: agent start failed: ${describeFailure(startArgv, start)}`);
     }
     if (opts.prompt !== undefined) {
-      // `agent start` refuses multi-line arguments; `agent prompt` pastes atomically (bracketed paste + Enter).
-      const promptArgv = ['herdr', 'agent', 'prompt', opts.name, opts.prompt];
-      const prompted = await this.exec(promptArgv);
-      if (prompted.exitCode !== 0) {
-        await this.exec(['herdr', 'pane', 'close', paneId]).catch(() => undefined);
-        throw new Error(`herdr host: agent prompt failed: ${describeFailure(promptArgv, prompted)}`);
-      }
+      await this.deliverPrompt(opts.name, paneId, opts.prompt);
     }
     return { paneId };
+  }
+
+  /**
+   * `agent start` refuses multi-line arguments, so the prompt goes through `agent prompt`, which pastes and
+   * presses Enter atomically and (with --wait) reports whether the agent actually started working. Two
+   * observed failure modes are handled: Codex keeps a large paste in its composer without submitting
+   * (fixed by one more Enter), and Claude Code drops a paste that arrives while it is still initialising
+   * (fixed by sending the prompt again). Anything else closes the pane and throws.
+   */
+  private async deliverPrompt(name: string, paneId: string, prompt: string): Promise<void> {
+    const promptArgv = ['herdr', 'agent', 'prompt', name, prompt, '--wait', '--until', 'working', '--timeout', String(PROMPT_WAIT_MS)];
+    let result = await this.exec(promptArgv);
+    if (result.exitCode === 0) return;
+
+    await this.exec(['herdr', 'agent', 'send-keys', name, 'enter']).catch(() => undefined);
+    const waited = await this.exec(['herdr', 'agent', 'wait', name, '--until', 'working', '--timeout', String(PROMPT_WAIT_MS)]);
+    if (waited.exitCode === 0) return;
+
+    result = await this.exec(promptArgv);
+    if (result.exitCode === 0) return;
+
+    await this.exec(['herdr', 'pane', 'close', paneId]).catch(() => undefined);
+    throw new Error(`herdr host: agent prompt failed: ${describeFailure(promptArgv, result)}`);
   }
 
   async focus(paneId: string): Promise<void> {

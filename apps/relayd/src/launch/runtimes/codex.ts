@@ -51,7 +51,7 @@ export function codexConfigToml(spec: Pick<LaunchSpec, 'mcpUrl' | 'cwd'>, roots?
     `url = ${tomlString(spec.mcpUrl)}\n` +
     'bearer_token_env_var = "RELAY_TOKEN"\n' +
     // Without this every relay_* call stops for approval, which an unattended agent (approval policy `never`) can never grant.
-    'default_tools_approval_mode = "auto"\n' +
+    'default_tools_approval_mode = "approve"\n' +
     '\n' +
     `[projects.${tomlString(spec.cwd)}]\n` +
     'trust_level = "trusted"\n';
@@ -61,7 +61,8 @@ export function codexConfigToml(spec: Pick<LaunchSpec, 'mcpUrl' | 'cwd'>, roots?
     toml +=
       '\n[sandbox_workspace_write]\n' +
       `writable_roots = [${list.map(tomlString).join(', ')}]\n` +
-      '\n[features]\nbrowser_use = false\ncomputer_use = false\n';
+      // `apps` adds a 30 s codex_apps MCP startup timeout for every agent; browser/computer use are desktop automation.
+      '\n[features]\napps = false\nbrowser_use = false\ncomputer_use = false\n';
   }
   return toml;
 }

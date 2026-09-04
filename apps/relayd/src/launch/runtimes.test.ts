@@ -40,12 +40,12 @@ describe('claude runtime', () => {
     expect(argv[0]).toBe('claude');
     expect(argv.slice(1, 3)).toEqual(['--session-id', spec.sessionId]);
     expect(argv.slice(3, 5)).toEqual(['--mcp-config', mcpPath]);
-    expect(argv.slice(5, 7)).toEqual(['--permission-mode', 'acceptEdits']);
-    expect(argv[7]).toBe('--allowedTools');
+    expect(argv[5]).toBe('--dangerously-skip-permissions');
+    expect(argv[6]).toBe('--allowedTools');
     // Claude's --allowedTools is variadic ("comma or space-separated"), so the tool list is one
     // comma-joined value; otherwise the trailing prompt would be swallowed as another tool name.
-    expect(argv[8]).toBe('mcp__relay__*,Bash(npm *),Bash(npx *),Bash(node *),Bash(git *),Read,Edit,Write,Glob,Grep');
-    expect(argv).toHaveLength(9);
+    expect(argv[7]).toBe('mcp__relay__*,Bash(npm *),Bash(npx *),Bash(node *),Bash(git *),Read,Edit,Write,Glob,Grep');
+    expect(argv).toHaveLength(8);
     expect(prompt).toBe(bootstrapPrompt(spec));
     expect(Buffer.byteLength(prompt!, 'utf8')).toBeLessThan(6 * 1024);
   });
@@ -98,7 +98,7 @@ describe('codex runtime', () => {
     expect(toml).toContain('[mcp_servers.relay]\n');
     expect(toml).toContain(`url = "${spec.mcpUrl}"\n`);
     expect(toml).toContain('bearer_token_env_var = "RELAY_TOKEN"\n');
-    expect(toml).toContain('default_tools_approval_mode = "auto"\n');
+    expect(toml).toContain('default_tools_approval_mode = "approve"\n');
     expect(toml).toContain(`[projects."${spec.cwd}"]\ntrust_level = "trusted"\n`);
 
     expect(env).toEqual({ CODEX_HOME: configDir, RELAY_TOKEN: spec.token });
@@ -151,7 +151,7 @@ describe('codex runtime', () => {
     for (const root of [configDir, '/tmp', path.join(home, '.cache', 'codex-runtimes'), path.join(repo, '.git')]) {
       expect(line).toContain(`"${root}"`);
     }
-    expect(toml).toContain('[features]\nbrowser_use = false\ncomputer_use = false\n');
+    expect(toml).toContain('[features]\napps = false\nbrowser_use = false\ncomputer_use = false\n');
   });
 
   it('escapes quotes and backslashes in the cwd trust key', async () => {

@@ -82,7 +82,10 @@ export class ClaudeCodeRuntime implements AgentRuntime {
       this.executable,
       '--session-id', spec.sessionId,
       '--mcp-config', mcpPath,
-      '--permission-mode', 'acceptEdits',
+      // Unattended agents cannot answer permission dialogs (any `ls`/`cat`/`mkdir` outside the allowlist, or a
+      // read through the node_modules symlink, would block forever). Isolation comes from the git worktree and
+      // scope.allowed_paths + diff_scope verification, not from Claude's interactive prompts.
+      '--dangerously-skip-permissions',
       '--allowedTools', CLAUDE_ALLOWED_TOOLS.join(','),
     ];
     return { argv, env: {}, prompt: bootstrapPrompt(spec) };

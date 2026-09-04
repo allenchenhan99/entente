@@ -43,7 +43,40 @@ describe('herdr host', () => {
     expect(calls[1]!.argv).toEqual([
       'herdr', 'agent', 'start', 'backend', '--kind', 'claude', '--pane', 'w1:p7', '--', '--session-id', 'abc',
     ]);
-    expect(calls[2]!.argv).toEqual(['herdr', 'agent', 'prompt', 'backend', 'bootstrap prompt\nline two']);
+    expect(calls[2]!.argv).toEqual([
+      'herdr', 'agent', 'prompt', 'backend', 'bootstrap prompt\nline two', '--wait', '--until', 'working', '--timeout', '15000',
+    ]);
+  });
+
+  it('presses Enter when the prompt stalls in the composer, then re-sends the prompt once before giving up', async () => {
+    let promptCalls = 0;
+    const { exec, calls } = fakeExec((argv) => {
+      if (argv[1] === 'pane' && argv[2] === 'split') return { stdout: splitJson };
+      if (argv[1] === 'agent' && argv[2] === 'prompt') {
+        promptCalls++;
+        return promptCalls === 1 ? { exitCode: 1, stderr: 'agent_prompt_stalled' } : { stdout: '{}' };
+      }
+      if (argv[1] === 'agent' && argv[2] === 'wait') return { exitCode: 1, stderr: 'timeout' };
+      return { stdout: '{}' };
+    });
+    const host = createTerminalHost('herdr', { exec, env: { HERDR_PANE_ID: 'w1:p1' } });
+    await host.spawn(spawnOpts);
+    expect(calls.map((c) => c.argv.slice(0, 3))).toEqual([
+      ['herdr', 'pane', 'split'], ['herdr', 'agent', 'start'], ['herdr', 'agent', 'prompt'],
+      ['herdr', 'agent', 'send-keys'], ['herdr', 'agent', 'wait'], ['herdr', 'agent', 'prompt'],
+    ]);
+    expect(calls[3]!.argv).toEqual(['herdr', 'agent', 'send-keys', 'backend', 'enter']);
+  });
+
+  it('accepts the prompt as delivered when Enter alone gets the agent working', async () => {
+    const { exec, calls } = fakeExec((argv) => {
+      if (argv[1] === 'pane' && argv[2] === 'split') return { stdout: splitJson };
+      if (argv[1] === 'agent' && argv[2] === 'prompt') return { exitCode: 1, stderr: 'agent_prompt_stalled' };
+      return { stdout: '{}' };
+    });
+    const host = createTerminalHost('herdr', { exec, env: { HERDR_PANE_ID: 'w1:p1' } });
+    await host.spawn(spawnOpts);
+    expect(calls.map((c) => c.argv[2])).toEqual(['split', 'start', 'prompt', 'send-keys', 'wait']);
   });
 
   it('retries agent start while the new pane reports agent_pane_busy, then proceeds', async () => {
@@ -79,13 +112,14 @@ describe('herdr host', () => {
   it('closes the pane and throws when the prompt cannot be delivered', async () => {
     const { exec, calls } = fakeExec((argv) => {
       if (argv[1] === 'pane' && argv[2] === 'split') return { stdout: splitJson };
-      if (argv[1] === 'agent' && argv[2] === 'prompt') return { exitCode: 1, stderr: 'agent_prompt_stalled' };
+      if (argv[1] === 'agent' && (argv[2] === 'prompt' || argv[2] === 'wait')) return { exitCode: 1, stderr: 'agent_prompt_stalled' };
       return { stdout: '{}' };
     });
     const host = createTerminalHost('herdr', { exec, env: { HERDR_PANE_ID: 'w1:p1' } });
     await expect(host.spawn(spawnOpts)).rejects.toThrow(/agent prompt failed/);
     expect(calls.map((c) => c.argv.slice(0, 3))).toEqual([
-      ['herdr', 'pane', 'split'], ['herdr', 'agent', 'start'], ['herdr', 'agent', 'prompt'], ['herdr', 'pane', 'close'],
+      ['herdr', 'pane', 'split'], ['herdr', 'agent', 'start'], ['herdr', 'agent', 'prompt'],
+      ['herdr', 'agent', 'send-keys'], ['herdr', 'agent', 'wait'], ['herdr', 'agent', 'prompt'], ['herdr', 'pane', 'close'],
     ]);
   });
 
