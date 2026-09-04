@@ -6,5 +6,5 @@ export * from './types.js';
 export { buildGraph } from './build.js';
 export { actionsFor } from './actions.js';
 export { narrate } from './narrate.js';
-export { storyFor } from './story.js';
+export { storyFor, clockLabel } from './story.js';
 export { describe } from './describe.js';

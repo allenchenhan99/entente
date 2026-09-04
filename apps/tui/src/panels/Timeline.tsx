@@ -1,3 +1,4 @@
+import { clockLabel } from '@relay/protocol';
 import type { Event } from '@relay/protocol';
 import { Box, Text } from 'ink';
 import React from 'react';
@@ -35,8 +36,9 @@ export function eventHint(event: Event): string {
   }
 }
 
+/** Local `HH:MM`, the same clock as the story and the CLI (event timestamps are recorded in UTC). */
 function eventTime(timestamp: string): string {
-  return /T(\d{2}:\d{2})/.exec(timestamp)?.[1] ?? timestamp.slice(0, 5);
+  return clockLabel(timestamp);
 }
 
 export function formatTimelineEvent(event: Event): string {
