@@ -1,0 +1,115 @@
+{
+  "nodes": [
+    {
+      "id": "human",
+      "kind": "human",
+      "label": "human",
+      "column": 0,
+      "status": "pending"
+    },
+    {
+      "id": "planner",
+      "kind": "planner",
+      "label": "planner",
+      "column": 0,
+      "status": "verified"
+    },
+    {
+      "id": "t-backend-auth",
+      "kind": "agent",
+      "label": "backend",
+      "task_id": "t-backend-auth",
+      "runtime": "exited",
+      "task_state": "completed",
+      "handoff_state": "verified",
+      "column": 1,
+      "status": "verified",
+      "badge": "a1"
+    },
+    {
+      "id": "t-frontend-login",
+      "kind": "agent",
+      "label": "frontend",
+      "task_id": "t-frontend-login",
+      "runtime": "exited",
+      "task_state": "completed",
+      "handoff_state": "verified",
+      "column": 1,
+      "status": "verified",
+      "badge": "a1"
+    },
+    {
+      "id": "verifier",
+      "kind": "verifier",
+      "label": "verifier",
+      "column": 2,
+      "status": "verified"
+    }
+  ],
+  "edges": [
+    {
+      "id": "contract:t-backend-auth",
+      "kind": "contract",
+      "from": "human",
+      "to": "t-backend-auth",
+      "task_id": "t-backend-auth",
+      "label": "v2 ✓",
+      "status": "verified",
+      "attention": false,
+      "version": 2
+    },
+    {
+      "id": "contract:t-frontend-login",
+      "kind": "contract",
+      "from": "human",
+      "to": "t-frontend-login",
+      "task_id": "t-frontend-login",
+      "label": "v3 ✓",
+      "status": "verified",
+      "attention": false,
+      "version": 3
+    },
+    {
+      "id": "evidence:t-backend-auth",
+      "kind": "evidence",
+      "from": "t-backend-auth",
+      "to": "verifier",
+      "task_id": "t-backend-auth",
+      "label": "✓",
+      "status": "verified",
+      "attention": false
+    },
+    {
+      "id": "evidence:t-frontend-login",
+      "kind": "evidence",
+      "from": "t-frontend-login",
+      "to": "verifier",
+      "task_id": "t-frontend-login",
+      "label": "✓",
+      "status": "verified",
+      "attention": false
+    },
+    {
+      "id": "reply:t-backend-auth",
+      "kind": "reply",
+      "from": "human",
+      "to": "t-backend-auth",
+      "task_id": "t-backend-auth",
+      "label": "↩ 9",
+      "status": "done",
+      "attention": false
+    },
+    {
+      "id": "reply:t-frontend-login",
+      "kind": "reply",
+      "from": "human",
+      "to": "t-frontend-login",
+      "task_id": "t-frontend-login",
+      "label": "↩ 3",
+      "status": "done",
+      "attention": false
+    }
+  ],
+  "inbox": [],
+  "seq": 56
+}

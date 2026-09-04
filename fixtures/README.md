@@ -73,3 +73,10 @@ replays both files and pins the expected end state and metrics.
   a real `diff_scope` failure exposed a relayd bug (subtask files counted against the parent), the agent explained
   it in a blocker, relayd was fixed and **restarted with `RELAY_RESUME=latest`** (the Claude session was resumed
   in `relay:3`), the human replied to the blocker, the agent resubmitted, and the mission was verified.
+- `events-live-8.jsonl` — first run on the **Rust terminal base** (`RELAY_HOST=relayterm`, 2026-09-05): relayd drove
+  `termd` (`crates/termd`), both agents (`relay:1` Claude Code backend, `relay:2` Codex frontend) got their prompts
+  through termd's readiness detection, asked 8 + 3 clarification questions (the frontend caught an endpoint name
+  that contradicted the human's answer to the backend), evidence passed on the first attempt, the human reviewed
+  AC-3, the integration branch ran the whole suite inside the check sandbox, mission verified. `metrics-live-8.json`
+  is termd's `HostMetrics` for the run: Claude prompt accepted in 30 ms, Codex needed one Enter retry (5 s) for its
+  large paste. `crates/relay-tui/tests/fixtures/live-8` is the relay-tui replay dump of this log.

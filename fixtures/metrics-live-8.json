@@ -1,0 +1,43 @@
+{
+  "host": "relayterm",
+  "uptime_ms": 348357.12691700005,
+  "panes_spawned": 2,
+  "panes_alive": 2,
+  "prompt_failures": 0,
+  "panes": [
+    {
+      "pane_id": "relay:1",
+      "role": "backend",
+      "task_id": "t-backend-auth",
+      "timings": {
+        "spawn_ms": 5.96175,
+        "first_output_ms": 555.533083,
+        "readiness_ms": 1327.840917,
+        "prompt_write_ms": 20.005499999999998,
+        "prompt_accept_ms": 29.500542,
+        "prompt_retries": 0,
+        "render_p50_ms": 0.04825,
+        "render_p95_ms": 0.167875,
+        "output_bytes": 309973,
+        "output_chunks": 2939
+      }
+    },
+    {
+      "pane_id": "relay:2",
+      "role": "frontend",
+      "task_id": "t-frontend-login",
+      "timings": {
+        "spawn_ms": 4.251958,
+        "first_output_ms": 63.390875,
+        "readiness_ms": 1119.25575,
+        "prompt_write_ms": 1.4539170000000001,
+        "prompt_accept_ms": 5033.059916,
+        "prompt_retries": 1,
+        "render_p50_ms": 0.017249999999999998,
+        "render_p95_ms": 0.078041,
+        "output_bytes": 772346,
+        "output_chunks": 11342
+      }
+    }
+  ]
+}
