@@ -20,3 +20,13 @@
 - Tests inject hand-built `Graph` objects. The runtime default uses the protocol graph
   functions and therefore renders placeholders until the parallel graph-model work
   package replaces the current stub.
+
+## Verification environment
+
+- This managed sandbox rejects Unix-domain socket creation by the installed `tsx`
+  CLI (`listen EPERM .../tsx-501/*.pipe`) and TCP listeners on `127.0.0.1`. The exact
+  headless `npx tsx` smoke command and relayd boot/MCP tests therefore cannot start
+  here. `node --import tsx` exercises the same TUI entry point without the CLI IPC
+  coordinator and prints 30 lines. All non-listener repository tests pass; the full
+  run reports only relayd's one IPC-dependent boot test and seven listener-dependent
+  MCP tests as failures.
