@@ -76,7 +76,10 @@ export function Tree({ state, height, selectedTaskId }: TreeProps) {
 
   return (
     <Box flexDirection="column" height={height} overflow="hidden">
-      <Text bold>MISSION  {missionView.mission.title}  {missionView.status}</Text>
+      <Text bold>
+        MISSION  {missionView.mission.title}  {missionView.status}
+        {(missionView.open_questions?.length ?? 0) > 0 ? <Text color="yellow">  ? {missionView.open_questions!.length} for you</Text> : null}
+      </Text>
       <Text dimColor>lint: {errorCount} errors · {warningCount} warnings</Text>
       {tasks.slice(0, maxTasks).map((task) => {
         const detail = taskDetail(task);

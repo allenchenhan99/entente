@@ -17,6 +17,8 @@ import type {
   CreateMissionBody, ReviewBody, EventInput, EventType,
   RespondInput, SubmitEvidenceInput, ReportProgressInput, ReportBlockerInput,
 } from '@relay/protocol';
+import type { AwaitAnswersOutput as AwaitAnswersOutputSchema } from '@relay/protocol';
+type AwaitAnswersOutput = z.infer<typeof AwaitAnswersOutputSchema>;
 import type {
   EventStore, WorktreeManager, WorktreeInfo, CheckRunner, RepairPolicy, TerminalHost, AgentRuntime, RepairDecision,
 } from '../ports.js';
@@ -73,12 +75,20 @@ export interface MissionSummary {
   mission: Mission;
   status: MissionStatus;
   task_ids: string[];
+  open_questions: Question[];
+  clarifications: Clarification[];
 }
 
 export interface Orchestrator {
   createMission(body: CreateMissionBody): { mission_id: string; planner_token: string };
   /** Spawns an LLM planner agent (with the mission's planner token) in the repository root. */
   spawnPlanner(missionId: string, runtime: RuntimeKind): Promise<{ pane_id: string }>;
+  /** Planner → human: mission-level questions; replaces any still-open set. */
+  askHuman(missionId: string, questions: Question[]): { status: 'waiting'; open_questions: number };
+  /** Long-poll until every open mission question is answered. */
+  awaitAnswers(missionId: string, timeoutS: number, signal?: AbortSignal): Promise<AwaitAnswersOutput>;
+  /** Human → planner: answers to open mission questions. */
+  clarifyMission(missionId: string, answers: Array<{ question_id: string; answer: string }>, answeredBy: Sender): { answered: number; open_questions: number };
   getMission(missionId: string): MissionSummary | undefined;
   listTasks(missionId?: string): TaskSummary[];
   taskView(taskId: string): TaskView | undefined;
@@ -112,6 +122,8 @@ interface MissionRecord {
   plannerToken: string;
   plannerPaneId?: string;
   integrationStarted: boolean;
+  openQuestions: Question[];
+  clarifications: Clarification[];
 }
 
 interface TaskRecord {
@@ -680,7 +692,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const id = `m-${hex(3)}`;
     const mission = Mission.parse({ id, repo: body.repo, title: body.title, success_definition: body.success_definition, integration_check: body.integration_check });
     const plannerToken = issueToken(`mission:${id}`);
-    missions.set(id, { mission, status: 'planning', taskIds: [], plannerToken, integrationStarted: false });
+    missions.set(id, { mission, status: 'planning', taskIds: [], plannerToken, integrationStarted: false, openQuestions: [], clarifications: [] });
     emit({ mission_id: id, actor: 'human', type: 'mission_created', payload: mission });
     return { mission_id: id, planner_token: plannerToken };
   };
@@ -708,12 +720,55 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return { pane_id: paneId };
   };
 
+  const askHuman: Orchestrator['askHuman'] = (missionId, questions) => {
+    const m = missions.get(missionId);
+    if (!m) throw new RelayError(404, `mission ${missionId} not found`);
+    m.openQuestions = questions.map((q) => ({ ...q }));
+    emit({ mission_id: missionId, actor: 'planner', type: 'mission_clarification_requested', payload: { questions: m.openQuestions } });
+    return { status: 'waiting', open_questions: m.openQuestions.length };
+  };
+
+  const clarifyMission: Orchestrator['clarifyMission'] = (missionId, answers, answeredBy) => {
+    const m = missions.get(missionId);
+    if (!m) throw new RelayError(404, `mission ${missionId} not found`);
+    const open = new Set(m.openQuestions.map((q) => q.id));
+    const unknown = answers.filter((a) => !open.has(a.question_id)).map((a) => a.question_id);
+    if (unknown.length > 0) throw new RelayError(400, `no open mission question ${unknown.join(', ')} (open: ${[...open].join(', ') || 'none'})`);
+    const at = clock();
+    const recorded: Clarification[] = answers.map((a) => ({ question_id: a.question_id, answer: a.answer, answered_by: answeredBy, at }));
+    m.clarifications.push(...recorded);
+    const answered = new Set(recorded.map((a) => a.question_id));
+    m.openQuestions = m.openQuestions.filter((q) => !answered.has(q.id));
+    emit({ mission_id: missionId, actor: answeredBy, type: 'mission_clarification_answered', payload: { answers: recorded } });
+    waiters.notify(`mission:${missionId}`);
+    return { answered: recorded.length, open_questions: m.openQuestions.length };
+  };
+
+  const awaitAnswers: Orchestrator['awaitAnswers'] = async (missionId, timeoutS, signal) => {
+    const m = missions.get(missionId);
+    if (!m) throw new RelayError(404, `mission ${missionId} not found`);
+    const deadline = Date.now() + clampTimeout(timeoutS);
+    const seen = m.clarifications.length;
+    for (;;) {
+      if (m.openQuestions.length === 0) {
+        const fresh = m.clarifications.slice(seen);
+        return fresh.length > 0 || seen > 0 ? { status: 'answered', answers: m.clarifications } : { status: 'none' };
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return { status: 'pending', open_questions: [...m.openQuestions] };
+      if ((await waiters.wait(`mission:${missionId}`, remaining, signal)) === 'aborted') return { status: 'pending', open_questions: [...m.openQuestions] };
+    }
+  };
+
   return {
     createMission,
     spawnPlanner,
+    askHuman,
+    awaitAnswers,
+    clarifyMission,
     getMission: (id) => {
       const m = missions.get(id);
-      return m ? { mission: m.mission, status: m.status, task_ids: [...m.taskIds] } : undefined;
+      return m ? { mission: m.mission, status: m.status, task_ids: [...m.taskIds], open_questions: [...m.openQuestions], clarifications: [...m.clarifications] } : undefined;
     },
     listTasks: (missionId) => [...tasks.values()].filter((t) => !missionId || t.missionId === missionId).map(summarize),
     taskView: (id) => {

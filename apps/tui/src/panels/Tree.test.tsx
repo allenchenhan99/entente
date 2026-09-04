@@ -29,6 +29,12 @@ describe('tree', () => {
     expect(frame).toContain('wt .relay/wt/t-frontend-login');
   });
 
+  it('shows open mission-level questions for the human on the mission line', () => {
+    const missions = Object.fromEntries(Object.entries(midClarificationState.missions).map(([id, m]) => [id, { ...m, open_questions: [{ id: 'Q1', text: 'Which mechanism?', blocking: true }] }]));
+    const { lastFrame } = render(<Tree state={{ ...midClarificationState, missions }} height={14} />);
+    expect(lastFrame() ?? '').toContain('? 1 for you');
+  });
+
   it('marks a worktree dim until its handoff is accepted', () => {
     const frontend = midClarificationState.tasks['t-frontend-login']!;
     const backend = midClarificationState.tasks['t-backend-auth']!;

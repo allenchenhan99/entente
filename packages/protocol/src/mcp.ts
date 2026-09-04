@@ -3,7 +3,7 @@
  * relayd identifies the caller by `Authorization: Bearer <task_token>`; the planner uses the mission token.
  */
 import { z } from 'zod';
-import { TaskContract, TaskContractInput, ContractResponse, EvidenceSubmission, RepairContract } from './contract.js';
+import { TaskContract, TaskContractInput, ContractResponse, EvidenceSubmission, RepairContract, Question, Clarification } from './contract.js';
 
 export const RECIPIENT_TOOLS = {
   get_contract: 'relay_get_contract',
@@ -21,6 +21,8 @@ export const PLANNER_TOOLS = {
   list_tasks: 'relay_list_tasks',
   revise_task: 'relay_revise_task',
   answer_clarification: 'relay_answer_clarification',
+  ask_human: 'relay_ask_human',
+  await_answers: 'relay_await_answers',
 } as const;
 
 /** Max long-poll per call; agents re-call on `pending`. Keeps under MCP client timeouts. */
@@ -69,4 +71,13 @@ export const ProposeTaskOutput = z.discriminatedUnion('status', [
   z.object({ status: z.literal('lint_error'), task_id: z.string(), errors: z.array(z.string()), warnings: z.array(z.string()) }),
 ]);
 export const ReviseTaskInput = z.object({ task_id: z.string(), patch: TaskContractInput.partial() });
+/** Planner → human: mission-level questions that must be settled before decomposition. */
+export const AskHumanInput = z.object({ questions: z.array(Question).min(1) });
+export const AskHumanOutput = z.object({ status: z.literal('waiting'), open_questions: z.number().int() });
+export const AwaitAnswersInput = z.object({ timeout_s: z.number().int().min(1).max(AWAIT_TIMEOUT_MAX_S).default(30) });
+export const AwaitAnswersOutput = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('answered'), answers: z.array(Clarification) }),
+  z.object({ status: z.literal('pending'), open_questions: z.array(Question) }),
+  z.object({ status: z.literal('none') }),
+]);
 export const AnswerClarificationInput = z.object({ task_id: z.string(), answers: z.array(z.object({ question_id: z.string(), answer: z.string() })) });

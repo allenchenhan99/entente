@@ -172,6 +172,15 @@ function missionTransition(mission: MissionView, event: Event): Partial<MissionV
       return { status: 'verified' };
     case 'mission_failed':
       return { status: 'failed' };
+    case 'mission_clarification_requested':
+      return { open_questions: event.payload.questions };
+    case 'mission_clarification_answered': {
+      const answered = new Set(event.payload.answers.map((a) => a.question_id));
+      return {
+        open_questions: (mission.open_questions ?? []).filter((q) => !answered.has(q.id)),
+        clarifications: [...(mission.clarifications ?? []), ...event.payload.answers],
+      };
+    }
     default:
       return undefined;
   }
@@ -186,6 +195,7 @@ function metricsTransition(state: State, prevTask: TaskView | undefined, event: 
   const m = state.metrics;
   switch (event.type) {
     case 'clarification_answered':
+    case 'mission_clarification_answered':
       return { ...m, fields_filled_via_clarification: m.fields_filled_via_clarification + event.payload.answers.length };
     case 'evidence_recorded':
       return { ...m, self_report_mismatches: m.self_report_mismatches + event.payload.record.self_report_mismatch.length };
@@ -216,7 +226,7 @@ export function reduce(state: State, event: Event): State {
 
   // --- missions -------------------------------------------------------------------------------
   if (event.type === 'mission_created') {
-    const created: MissionView = { mission: event.payload, status: 'planning', task_ids: [] };
+    const created: MissionView = { mission: event.payload, status: 'planning', task_ids: [], open_questions: [], clarifications: [] };
     missions = { ...missions, [event.payload.id]: created };
   } else {
     const mission = missions[event.mission_id];

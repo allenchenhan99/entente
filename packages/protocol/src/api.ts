@@ -7,6 +7,7 @@
  *   POST /missions               → CreateMissionBody → { mission_id }
  *   POST /missions/:id/plan      → LoadPlanBody      → { task_ids }   (planner fallback: hand-written contracts)
  *   POST /missions/:id/planner   → SpawnPlannerBody  → { pane_id }    (spawn an LLM planner agent for the mission)
+ *   POST /missions/:id/clarify   → ClarifyBody       → { answered }    (human answers the planner's mission-level questions)
  *   POST /tasks/:id/clarify      → ClarifyBody       → { contract_version }
  *   POST /tasks/:id/review       → ReviewBody        → { ok: true }
  *   POST /tasks/:id/cancel       → CancelBody        → { ok: true }
@@ -51,6 +52,7 @@ export const routes = {
   missions: '/missions',
   plan: (missionId: string) => `/missions/${missionId}/plan`,
   planner: (missionId: string) => `/missions/${missionId}/planner`,
+  missionClarify: (missionId: string) => `/missions/${missionId}/clarify`,
   clarify: (taskId: string) => `/tasks/${taskId}/clarify`,
   review: (taskId: string) => `/tasks/${taskId}/review`,
   cancel: (taskId: string) => `/tasks/${taskId}/cancel`,

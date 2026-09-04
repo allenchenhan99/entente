@@ -76,6 +76,18 @@ describe('http', () => {
     expect(ofType('agent_spawned')).toHaveLength(1);
   });
 
+  it('POST /missions/:id/clarify answers open mission questions and rejects unknown ones', async () => {
+    const { app, orchestrator, ofType } = setup();
+    const { mission_id } = await createMission(app);
+    orchestrator.askHuman(mission_id, [{ id: 'Q1', text: 'Which mechanism?', blocking: true }]);
+    const bad = await app.request(`/missions/${mission_id}/clarify`, json({ answers: [{ question_id: 'Q7', answer: 'x' }] }));
+    expect(bad.status).toBe(400);
+    const ok = await app.request(`/missions/${mission_id}/clarify`, json({ answers: [{ question_id: 'Q1', answer: 'magic link' }] }));
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ answered: 1, open_questions: 0 });
+    expect(ofType('mission_clarification_answered')).toHaveLength(1);
+  });
+
   it('POST /missions/:id/plan loads 3 contracts, lints them and reports task ids', async () => {
     const { app, ofType, host } = setup();
     const { mission_id } = await createMission(app);

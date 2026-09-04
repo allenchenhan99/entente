@@ -13,7 +13,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   RECIPIENT_TOOLS, PLANNER_TOOLS, routes,
   RespondInput, AwaitContractInput, ReportProgressInput, ReportBlockerInput, SubmitEvidenceInput, AwaitVerdictInput,
-  ProposeTaskInput, ReviseTaskInput, AnswerClarificationInput,
+  ProposeTaskInput, ReviseTaskInput, AnswerClarificationInput, AskHumanInput, AwaitAnswersInput,
 } from '@relay/protocol';
 import type { Orchestrator, TokenSubject } from '../orchestrator/orchestrator.js';
 import { RELAYD_VERSION } from '../config.js';
@@ -116,6 +116,16 @@ export function buildMcpServer(orchestrator: Orchestrator, subject: TokenSubject
     ownedTask(missionId, args.task_id);
     return ok(await orchestrator.clarify(args.task_id, args.answers, 'planner'));
   }));
+
+  server.registerTool(PLANNER_TOOLS.ask_human, {
+    description: 'Ask the human the mission-level questions that must be settled before decomposition (e.g. which mechanism to build). Replaces any still-open questions. Then poll relay_await_answers.',
+    inputSchema: AskHumanInput,
+  }, (args) => asPlanner((missionId) => ok(orchestrator.askHuman(missionId, args.questions))));
+
+  server.registerTool(PLANNER_TOOLS.await_answers, {
+    description: 'Wait (up to timeout_s) until the human has answered every open mission question. Returns pending on timeout: call again.',
+    inputSchema: AwaitAnswersInput,
+  }, (args, extra) => asPlanner(async (missionId) => ok(await orchestrator.awaitAnswers(missionId, args.timeout_s, extra.signal))));
 
   return server;
 }

@@ -82,6 +82,59 @@
               "type": "string"
             }
           },
+          "open_questions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^Q\\d+$"
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "blocking": {
+                  "default": true,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "text",
+                "blocking"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "clarifications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "answer": {
+                  "type": "string"
+                },
+                "answered_by": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "question_id",
+                "answer",
+                "answered_by",
+                "at"
+              ],
+              "additionalProperties": false
+            }
+          },
           "integration": {
             "type": "object",
             "properties": {

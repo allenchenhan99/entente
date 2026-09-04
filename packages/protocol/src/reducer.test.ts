@@ -76,12 +76,14 @@ describe('reducer', () => {
       log.add('agent_exited', { pane_id: '%1', exit_reason: 'done' }, { task_id: BACKEND });
       log.add('integration_started', { branch: 'relay/integration', order: [BACKEND] });
       log.add('integration_conflict', { task_id: BACKEND, files: ['src/auth/token.ts'] });
+      log.add('mission_clarification_requested', { questions: [{ id: 'Q1', text: 'Which mechanism?', blocking: true }] }, { actor: 'planner' });
+      log.add('mission_clarification_answered', { answers: [{ question_id: 'Q1', answer: 'magic link', answered_by: 'human', at: '2026-09-05T10:06:00+08:00' }] }, { actor: 'human' });
       log.add('mission_verified', {}, { actor: 'human' });
       log.add('mission_failed', { reason: 'boom' });
 
       const seen = new Set<EventType>(log.events.map((e) => e.type));
       expect([...EVENT_TYPES].filter((t) => !seen.has(t))).toEqual([]);
-      expect(EVENT_TYPES).toHaveLength(33);
+      expect(EVENT_TYPES).toHaveLength(35);
 
       let state = initialState();
       for (const e of log.events) {
@@ -126,6 +128,8 @@ describe('reducer', () => {
         integration_conflict: { task_id: BACKEND, files: [] },
         mission_verified: {},
         mission_failed: { reason: 'r' },
+        mission_clarification_requested: { questions: [{ id: 'Q1', text: 'Which mechanism?', blocking: true }] },
+        mission_clarification_answered: { answers: [{ question_id: 'Q1', answer: 'magic link', answered_by: 'human', at: 'x' }] },
       };
       for (const type of EVENT_TYPES) {
         const e = log.add(type, payloads[type] as never, { task_id: BACKEND });
@@ -382,6 +386,20 @@ describe('reducer', () => {
   });
 
   describe('mission', () => {
+    it('mission-level clarification: questions stay open until answered, answers accumulate and count as filled fields', () => {
+      const log = proposedBackend();
+      const missionId = log.events[0]!.mission_id;
+      log.add('mission_clarification_requested', { questions: [{ id: 'Q1', text: 'Which mechanism?', blocking: true }, { id: 'Q2', text: 'Cookie or bearer?', blocking: true }] }, { actor: 'planner' });
+      let m = replay(log.events).missions[missionId]!;
+      expect(m.open_questions?.map((q) => q.id)).toEqual(['Q1', 'Q2']);
+      log.add('mission_clarification_answered', { answers: [{ question_id: 'Q1', answer: 'magic link', answered_by: 'human', at: 'x' }] }, { actor: 'human' });
+      const s = replay(log.events);
+      m = s.missions[missionId]!;
+      expect(m.open_questions?.map((q) => q.id)).toEqual(['Q2']);
+      expect(m.clarifications?.map((c) => c.answer)).toEqual(['magic link']);
+      expect(s.metrics.fields_filled_via_clarification).toBe(1);
+    });
+
     it('mission_created → planning; first task_accepted → executing; integration → integrating; mission_verified → verified', () => {
       const log = proposedBackend();
       let m = replay(log.events).missions[MISSION_ID]!;

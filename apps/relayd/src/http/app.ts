@@ -125,6 +125,13 @@ export function createApp(opts: AppOptions): Hono {
     return c.json(await orchestrator.spawnPlanner(missionId, body.data.runtime));
   });
 
+  app.post('/missions/:id/clarify', async (c) => {
+    const missionId = c.req.param('id');
+    const body = await parseBody(c, ClarifyBody);
+    if (!body.ok) return body.res;
+    return c.json(orchestrator.clarifyMission(missionId, body.data.answers, 'human'));
+  });
+
   app.post('/tasks/:id/clarify', async (c) => {
     const taskId = c.req.param('id');
     const body = await parseBody(c, ClarifyBody);

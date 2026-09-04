@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import {
-  Mission, MissionStatus, TaskContract, ContractResponse, EvidenceRecord, RepairContract, RuntimeKind, Question,
+  Mission, MissionStatus, TaskContract, ContractResponse, EvidenceRecord, RepairContract, RuntimeKind, Question, Clarification,
 } from './contract.js';
 import { LintResult } from './lint.js';
 
@@ -58,6 +58,10 @@ export const MissionView = z.object({
   mission: Mission,
   status: MissionStatus,
   task_ids: z.array(z.string()),
+  /** Mission-level questions the planner asked the human and that are still unanswered. */
+  open_questions: z.array(Question).optional(),
+  /** Mission-level answers given by the human, in order. */
+  clarifications: z.array(Clarification).optional(),
   integration: z.object({ branch: z.string(), order: z.array(z.string()), conflict: z.object({ task_id: z.string(), files: z.array(z.string()) }).optional() }).optional(),
 });
 export type MissionView = z.infer<typeof MissionView>;

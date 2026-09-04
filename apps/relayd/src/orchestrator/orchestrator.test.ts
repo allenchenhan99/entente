@@ -33,6 +33,25 @@ describe('orchestrator missions', () => {
     await expect(r.orchestrator.spawnPlanner('m-nope', 'codex')).rejects.toThrow(/not found/);
   });
 
+  it('askHuman / clarifyMission / awaitAnswers: the planner waits until the human answers every open question', async () => {
+    const r = createTestRelay();
+    const { mission_id } = r.orchestrator.createMission(mission);
+    expect(await r.orchestrator.awaitAnswers(mission_id, 1)).toEqual({ status: 'none' });
+    expect(r.orchestrator.askHuman(mission_id, [{ id: 'Q1', text: 'Which mechanism?', blocking: true }, { id: 'Q2', text: 'Cookie?', blocking: true }])).toEqual({ status: 'waiting', open_questions: 2 });
+    expect(r.orchestrator.getMission(mission_id)!.open_questions.map((q) => q.id)).toEqual(['Q1', 'Q2']);
+    const pending = await r.orchestrator.awaitAnswers(mission_id, 1);
+    expect(pending.status).toBe('pending');
+    const poll = r.orchestrator.awaitAnswers(mission_id, 5);
+    expect(() => r.orchestrator.clarifyMission(mission_id, [{ question_id: 'Q9', answer: 'x' }], 'human')).toThrow(/no open mission question Q9/);
+    expect(r.orchestrator.clarifyMission(mission_id, [{ question_id: 'Q1', answer: 'magic link' }], 'human')).toEqual({ answered: 1, open_questions: 1 });
+    expect(r.orchestrator.clarifyMission(mission_id, [{ question_id: 'Q2', answer: 'cookie' }], 'human')).toEqual({ answered: 1, open_questions: 0 });
+    const answered = await poll;
+    expect(answered.status).toBe('answered');
+    if (answered.status === 'answered') expect(answered.answers.map((a) => a.answer)).toEqual(['magic link', 'cookie']);
+    expect(r.types().filter((t) => t.startsWith('mission_clarification'))).toEqual(['mission_clarification_requested', 'mission_clarification_answered', 'mission_clarification_answered']);
+    expect(r.orchestrator.getMission(mission_id)!.clarifications).toHaveLength(2);
+  });
+
   it('proposeTask rejects an unknown mission', async () => {
     const r = createTestRelay();
     await expect(r.orchestrator.proposeTask('m-nope', sampleContract('t-a'), 'planner')).rejects.toThrow(/mission/);

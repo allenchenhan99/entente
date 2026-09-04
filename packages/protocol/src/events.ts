@@ -24,6 +24,8 @@ const ev = <T extends string, P extends z.ZodTypeAny>(type: T, payload: P) =>
 
 export const EventSchemas = [
   ev('mission_created', Mission),
+  ev('mission_clarification_requested', z.object({ questions: z.array(Question).min(1) })),
+  ev('mission_clarification_answered', z.object({ answers: z.array(Clarification).min(1) })),
   ev('tasks_planned', z.object({ task_ids: z.array(z.string()) })),
   ev('lint_reported', z.object({ contract_version: z.number().int(), results: z.array(LintResult) })),
 

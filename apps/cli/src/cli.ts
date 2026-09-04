@@ -29,7 +29,7 @@ export interface CliIo {
 export const USAGE = `usage:
   relay up "<mission title>" [--repo <path>] [--plan plan.yaml | --planner claude-code|codex] [--host herdr|tmux] [--port N]
   relay status [--port N]
-  relay clarify <task-id> Q1="..." [Q2="..."] [--port N]
+  relay clarify <task-id|mission-id> Q1="..." [Q2="..."] [--port N]
   relay review <task-id> <AC-id> pass|fail ["observed failure"] [--port N]
   relay cancel <task-id> ["reason"] [--port N]
   relay replay <file.jsonl>
@@ -115,6 +115,9 @@ async function up(args: string[], io: CliIo): Promise<number> {
 async function status(args: string[], io: CliIo): Promise<number> {
   const { values } = parseKnown(args, { port: { type: 'string' } });
   const state = await new Client(io, values.port).get<State>(routes.state);
+  for (const m of Object.values(state.missions)) {
+    for (const q of m.open_questions ?? []) io.stdout(`${m.mission.id} ? ${q.id}: ${q.text}`);
+  }
   for (const task of Object.values(state.tasks ?? {})) {
     io.stdout(`${task.id} ${task.runtime}/${task.task_state}/${task.handoff_state} v${task.contract?.version ?? '?'}`);
   }
@@ -132,6 +135,11 @@ async function clarify(args: string[], io: CliIo): Promise<number> {
     return { question_id: match[1]!, answer: match[2]! };
   });
   const body: ClarifyBody = { answers };
+  if (taskId.startsWith('m-')) {
+    const result = await new Client(io, values.port).post<{ answered: number; open_questions: number }>(routes.missionClarify(taskId), body);
+    io.stdout(`mission ${taskId}: ${result.answered} answered, ${result.open_questions} open`);
+    return 0;
+  }
   const result = await new Client(io, values.port).post<{ contract_version: number }>(routes.clarify(taskId), body);
   io.stdout(`contract v${result.contract_version}`);
   return 0;

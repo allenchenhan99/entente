@@ -198,6 +198,15 @@ describe('relay clarify / review / cancel', () => {
     expect(io.out.join('\n')).toContain('2');
   });
 
+  it('clarify with a mission id posts to /missions/:id/clarify', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ answered: 1, open_questions: 0 }));
+    const io = capture();
+    const code = await run(['clarify', 'm-cd0a69', 'Q1=email magic link'], { ...io, fetch, env: {} });
+    expect(code).toBe(0);
+    expect(requests[0]).toMatchObject({ method: 'POST', url: 'http://127.0.0.1:7420/missions/m-cd0a69/clarify', body: { answers: [{ question_id: 'Q1', answer: 'email magic link' }] } });
+    expect(io.out).toEqual(['mission m-cd0a69: 1 answered, 0 open']);
+  });
+
   it('clarify rejects malformed answers', async () => {
     const { fetch, requests } = fakeFetch(() => ({}));
     const io = capture();

@@ -27,6 +27,8 @@ Generated from `packages/protocol/src` by `scripts/gen-protocol-docs.mjs`. JSON 
 ## Event types
 
 - `mission_created`
+- `mission_clarification_requested`
+- `mission_clarification_answered`
 - `tasks_planned`
 - `lint_reported`
 - `task_proposed`
@@ -89,6 +91,8 @@ Generated from `packages/protocol/src` by `scripts/gen-protocol-docs.mjs`. JSON 
 | `relay_list_tasks` | no input → task views |
 | `relay_revise_task` | `{ task_id, patch }` → new version |
 | `relay_answer_clarification` | `{ task_id, answers }` → new version |
+| `relay_ask_human` |  |
+| `relay_await_answers` |  |
 
 ## HTTP API
 
