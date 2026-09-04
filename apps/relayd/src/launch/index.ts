@@ -20,7 +20,7 @@ export { CodexRuntime, type CodexRuntimeDeps, codexConfigToml } from './runtimes
 export { bootstrapPrompt, PROMPT_MAX_BYTES } from './prompts.js';
 
 /** `relay` is the in-process PTY host (PRD §23); the frozen port does not list it yet (see HANDOFF_NOTES.md). */
-export type TerminalHostKind = TerminalHost['kind'] | 'relay';
+export type TerminalHostKind = TerminalHost['kind'];
 export type TerminalHostDeps = HerdrHostDeps & TmuxHostDeps & Partial<RelayHostDeps>;
 
 export function createTerminalHost(kind: TerminalHostKind, deps: TerminalHostDeps = {}): TerminalHost {
@@ -32,7 +32,7 @@ export function createTerminalHost(kind: TerminalHostKind, deps: TerminalHostDep
     case 'relay': {
       if (!deps.relayDir || !deps.runId) throw new Error('relay host: relayDir and runId are required');
       const host = createRelayHost({ relayDir: deps.relayDir, runId: deps.runId, clock: deps.clock, timings: deps.timings });
-      return host as unknown as TerminalHost;
+      return host;
     }
     default:
       throw new Error(`unknown terminal host kind: ${String(kind)} (expected herdr, tmux or relay)`);

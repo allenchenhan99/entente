@@ -63,7 +63,7 @@ export interface SpawnOptions {
 }
 
 export interface TerminalHost {
-  readonly kind: 'tmux' | 'herdr';
+  readonly kind: 'tmux' | 'herdr' | 'relay';
   spawn(opts: SpawnOptions): Promise<{ paneId: string }>;
   focus(paneId: string): Promise<void>;
   isAlive(paneId: string): Promise<boolean>;
