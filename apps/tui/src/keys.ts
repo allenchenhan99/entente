@@ -194,7 +194,7 @@ export function useAppKeys(options: AppKeyOptions): AppKeyState {
     if (input === 'j' || key.downArrow) options.onMove?.(1);
     else if (input === 'k' || key.upArrow) options.onMove?.(-1);
     else if (input === 't') options.onToggleTimeline?.();
-    else if (input === 'r' && options.replayAvailable) options.onToggleReplay?.();
+    else if (input === 'r' && !options.selectedRef && options.replayAvailable) options.onToggleReplay?.();
     else if (key.leftArrow && options.replayAvailable) options.onReplayStep?.(-1);
     else if (key.rightArrow && options.replayAvailable) options.onReplayStep?.(1);
     else if (input === ' ' && options.replayAvailable) options.onTogglePlaying?.();

@@ -12,6 +12,8 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 function renderObjects(options: {
   fetch?: FetchLike;
   initialSelectedRef?: { kind: 'node' | 'edge' | 'inbox'; id: string };
+  replayAvailable?: boolean;
+  onToggleSource?: () => void;
 } = {}) {
   return render(
     <DependenciesProvider graphApi={objectGraphApi()} fetch={options.fetch} execute={vi.fn()}>
@@ -24,6 +26,8 @@ function renderObjects(options: {
         width={100}
         height={41}
         initialSelectedRef={options.initialSelectedRef}
+        replayAvailable={options.replayAvailable}
+        onToggleSource={options.onToggleSource}
       />
     </DependenciesProvider>,
   );
@@ -90,6 +94,20 @@ describe('object actions', () => {
     expect(ClarifyBody.parse(JSON.parse(String(init?.body)))).toEqual({
       answers: [{ question_id: 'Q9', answer: 'Use email magic links' }],
     });
+  });
+
+  it('does not reuse an unavailable reply key as a global replay command', async () => {
+    const toggle = vi.fn();
+    const view = renderObjects({
+      initialSelectedRef: { kind: 'node', id: 't-frontend-login' },
+      replayAvailable: true,
+      onToggleSource: toggle,
+    });
+
+    expect(view.lastFrame()).not.toContain('r reply');
+    view.stdin.write('r');
+    await flush();
+    expect(toggle).not.toHaveBeenCalled();
   });
 });
 
