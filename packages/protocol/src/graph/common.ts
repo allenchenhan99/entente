@@ -30,6 +30,11 @@ export function sortedTasks(state: State): TaskView[] {
   return Object.values(state.tasks).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
+/** Direct subtasks (agent networking: `contract.parent_task === taskId`), by id. */
+export function subtasksOf(state: State, taskId: string): TaskView[] {
+  return sortedTasks(state).filter((t) => t.contract.parent_task === taskId && t.id !== taskId);
+}
+
 export function sortedMissions(state: State): MissionView[] {
   return Object.values(state.missions).sort((a, b) => (a.mission.id < b.mission.id ? -1 : a.mission.id > b.mission.id ? 1 : 0));
 }

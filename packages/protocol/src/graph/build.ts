@@ -67,8 +67,25 @@ function verifierStatus(tasks: TaskView[], missions: MissionView[]): VisualStatu
 
 // --- edges -------------------------------------------------------------------------------------
 
-function contractEdge(task: TaskView): GraphEdge {
+/**
+ * The node a task's contract comes from: its parent agent for a subtask (agent networking), otherwise the
+ * sender — `planner`, `human`, or the agent whose task has that role (`agent:<role>` or a bare role) in the
+ * same mission. Unknown senders fall back to the planner so every contract edge has an origin.
+ */
+function senderNode(task: TaskView, tasks: TaskView[]): string {
+  const parent = task.contract.parent_task;
+  if (parent !== undefined && parent !== task.id && tasks.some((t) => t.id === parent)) return parent;
+  const sender = task.contract.sender;
+  if (sender === PLANNER) return PLANNER;
+  if (sender === HUMAN) return HUMAN;
+  const role = sender.startsWith('agent:') ? sender.slice('agent:'.length) : sender;
+  const byRole = tasks.find((t) => t.id !== task.id && t.mission_id === task.mission_id && t.contract.recipient === role);
+  return byRole ? byRole.id : PLANNER;
+}
+
+function contractEdge(task: TaskView, from: string): GraphEdge {
   const v = task.contract.version;
+  const isSubtask = task.contract.parent_task !== undefined && from === task.contract.parent_task;
   let label = `v${v}`;
   let status: VisualStatus = 'pending';
   let attention = false;
@@ -104,7 +121,9 @@ function contractEdge(task: TaskView): GraphEdge {
       break;
   }
   if (task.task_state === 'canceled' || task.task_state === 'failed') status = 'failed';
-  return { id: `contract:${task.id}`, kind: 'contract', from: PLANNER, to: task.id, task_id: task.id, label, status, attention, version: v };
+  // A delegation edge (parent agent → subtask) reads `v1 ✓ (sub)` once the child has accepted.
+  if (isSubtask && label === `v${v} ✓`) label = `${label} (sub)`;
+  return { id: `contract:${task.id}`, kind: 'contract', from, to: task.id, task_id: task.id, label, status, attention, version: v };
 }
 
 function evidenceEdge(task: TaskView): GraphEdge | undefined {
@@ -282,7 +301,48 @@ function inboxFor(state: State, mission: MissionView, tasks: TaskView[]): InboxI
 
 // --- graph -------------------------------------------------------------------------------------
 
-const COLUMN_THEN_ID = (a: GraphNode, b: GraphNode) => a.column - b.column || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * Position of every agent in column 1. Top-level tasks keep their id order; each subtask sits right after
+ * its parent (and the parent's earlier subtasks), siblings ordered by dependency depth among themselves, then
+ * id. Tasks whose parent chain is cyclic or unknown are appended in id order so the map is total.
+ */
+function agentRanks(tasks: TaskView[]): Map<string, number> {
+  const known = new Map(tasks.map((t) => [t.id, t]));
+  const children = new Map<string, TaskView[]>();
+  const roots: TaskView[] = [];
+  for (const t of tasks) {
+    const parent = t.contract.parent_task;
+    if (parent !== undefined && parent !== t.id && known.has(parent)) {
+      const list = children.get(parent) ?? [];
+      list.push(t);
+      children.set(parent, list);
+    } else {
+      roots.push(t);
+    }
+  }
+  const ranks = new Map<string, number>();
+  const visit = (task: TaskView): void => {
+    if (ranks.has(task.id)) return;
+    ranks.set(task.id, ranks.size);
+    const kids = children.get(task.id) ?? [];
+    const ids = new Set(kids.map((k) => k.id));
+    const depth = (id: string, seen: Set<string>): number => {
+      const kid = known.get(id);
+      if (!kid || seen.has(id)) return 0;
+      seen.add(id);
+      return Math.max(0, ...kid.contract.dependencies.filter((d) => ids.has(d)).map((d) => 1 + depth(d, seen)));
+    };
+    for (const kid of [...kids].sort((a, b) => depth(a.id, new Set()) - depth(b.id, new Set()) || byId(a.id, b.id))) visit(kid);
+  };
+  for (const root of roots) visit(root);
+  for (const t of tasks) visit(t);
+  return ranks;
+}
+
+const columnThenRankThenId = (ranks: Map<string, number>) => (a: GraphNode, b: GraphNode) =>
+  a.column - b.column || (ranks.get(a.id) ?? 0) - (ranks.get(b.id) ?? 0) || byId(a.id, b.id);
 const KIND_THEN_ID = (a: GraphEdge, b: GraphEdge) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export function buildGraph(state: State): Graph {
@@ -290,14 +350,14 @@ export function buildGraph(state: State): Graph {
   const missions = sortedMissions(state);
 
   const agents = tasks.map(agentNode);
-  const byId = new Map(agents.map((n) => [n.id, n]));
+  const nodesById = new Map(agents.map((n) => [n.id, n]));
 
   const edges: GraphEdge[] = [];
   for (const task of tasks) {
-    edges.push(contractEdge(task));
+    edges.push(contractEdge(task, senderNode(task, tasks)));
     const ev = evidenceEdge(task);
     if (ev) edges.push(ev);
-    edges.push(...dependencyEdges(task, byId));
+    edges.push(...dependencyEdges(task, nodesById));
     const q = questionEdge(task);
     if (q) edges.push(q);
     const r = replyEdge(task);
@@ -325,5 +385,5 @@ export function buildGraph(state: State): Graph {
     { id: VERIFIER, kind: 'verifier', label: 'verifier', column: 2, status: verifierStatus(tasks, missions) },
   ];
 
-  return { nodes: nodes.sort(COLUMN_THEN_ID), edges: edges.sort(KIND_THEN_ID), inbox };
+  return { nodes: nodes.sort(columnThenRankThenId(agentRanks(tasks))), edges: edges.sort(KIND_THEN_ID), inbox };
 }

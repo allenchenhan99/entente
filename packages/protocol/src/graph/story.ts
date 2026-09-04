@@ -5,7 +5,7 @@
 import type { Event, EventType } from '../events.js';
 import type { State } from '../state.js';
 import type { Graph, GraphObjectRef } from './types.js';
-import { HUMAN, PLANNER, VERIFIER, sortedMissions } from './common.js';
+import { HUMAN, PLANNER, VERIFIER, sortedMissions, subtasksOf } from './common.js';
 import { narrate } from './narrate.js';
 
 type Pred = (e: Event) => boolean;
@@ -20,6 +20,8 @@ const QUESTION_TYPES = typeIn('clarification_');
 const MISSION_QUESTION_TYPES = typeIn('mission_clarification_');
 const REPLY_TYPES = typeIn('clarification_answered', 'blocker_replied', 'human_review_recorded');
 const DEPENDENCY_TYPES = typeIn('task_proposed', 'task_accepted', 'work_started', 'task_verified', 'task_completed', 'task_canceled', 'task_failed_budget', 'task_escalated');
+/** What a parent agent's story says about its subtasks: that it delegated them and that they were verified. */
+const SUBTASK_TYPES = typeIn('task_proposed', 'task_verified');
 
 const ofTask = (taskId: string, types: (t: EventType) => boolean): Pred => (e) => e.task_id === taskId && types(e.type);
 
@@ -34,7 +36,9 @@ function predicateFor(ref: GraphObjectRef, graph: Graph, state: State): Pred | u
     if (ref.id === PLANNER) return (e) => PLANNER_TYPES(e.type);
     if (ref.id === VERIFIER) return (e) => VERIFIER_TYPES(e.type);
     if (!state.tasks[ref.id] && !graph.nodes.some((n) => n.id === ref.id)) return undefined;
-    return (e) => e.task_id === ref.id;
+    const subtasks = new Set(subtasksOf(state, ref.id).map((t) => t.id));
+    if (subtasks.size === 0) return (e) => e.task_id === ref.id;
+    return (e) => e.task_id === ref.id || (e.task_id !== undefined && subtasks.has(e.task_id) && SUBTASK_TYPES(e.type));
   }
   const idx = ref.id.indexOf(':');
   if (idx === -1) return undefined;

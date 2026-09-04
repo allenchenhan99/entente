@@ -6,7 +6,7 @@ import { clockLabel } from './story.js';
 import type { AcceptanceCriterion, CheckResult } from '../contract.js';
 import type { State, TaskView } from '../state.js';
 import type { Graph, GraphObjectRef, ObjectDescription } from './types.js';
-import { HUMAN, PLANNER, VERIFIER, clip, latestRecord, plural, recordSummary, repairName, sortedMissions, sortedTasks } from './common.js';
+import { HUMAN, PLANNER, VERIFIER, clip, latestRecord, plural, recordSummary, repairName, sortedMissions, sortedTasks, subtasksOf } from './common.js';
 
 const none = (ref: GraphObjectRef): ObjectDescription => ({ title: ref.id, lines: [] });
 
@@ -110,6 +110,9 @@ function describeAgent(state: State, task: TaskView): ObjectDescription {
   if (c.dependencies.length > 0) {
     lines.push(`depends on: ${c.dependencies.map((d) => `${d} (${state.tasks[d]?.task_state ?? 'unknown'})`).join(', ')}`);
   }
+  if (c.parent_task !== undefined) lines.push(`parent: ${c.parent_task}`);
+  const subtasks = subtasksOf(state, task.id);
+  if (subtasks.length > 0) lines.push(`subtasks: ${subtasks.map((t) => t.id).join(', ')}`);
   if (task.escalated) lines.push('escalated: needs a planner or human decision');
   return { title: `${c.recipient} · ${task.id}`, lines };
 }
