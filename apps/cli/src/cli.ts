@@ -35,7 +35,9 @@ import type {
   ClarifyBody,
   CreateMissionBody,
   Event,
+  Graph,
   GraphApi,
+  GraphObjectRef,
   InboxItem,
   ReviewBody,
   State,
@@ -89,6 +91,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
       case 'reply': return await reply(rest, full);
       case 'replay': return replay(rest, full);
       case 'inbox': return await inbox(rest, full);
+      case 'explain': return await explain(rest, full);
       case '-h': case '--help': case 'help':
         full.stdout(USAGE);
         return 0;
@@ -255,6 +258,30 @@ async function inbox(args: string[], io: CliIo): Promise<number> {
   return 0;
 }
 
+async function explain(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, {
+    replay: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const object = positionals[0];
+  if (!object) throw new UsageError('relay explain needs an object ref');
+  const { state, events } = await loadGraphSource(values.replay, values.port, io);
+  const graph = io.graph.buildGraph(state);
+  const ref = resolveGraphRef(object, graph);
+  if (!ref) {
+    const valid = validGraphRefs(graph);
+    throw new UsageError(`unknown object: ${object}\nvalid refs: ${valid.length > 0 ? valid.join(', ') : '(none)'}`);
+  }
+  const description = io.graph.describe(ref, graph, state);
+  io.stdout(description.title);
+  for (const line of description.lines) io.stdout(line);
+  io.stdout('');
+  const story = io.graph.storyFor(ref, graph, state, events);
+  if (story.length === 0) io.stdout('nothing to show');
+  else for (const line of story) io.stdout(line);
+  return 0;
+}
+
 // ---------------------------------------------------------------- helpers
 
 /** `HH:MM:SS` in local time; falls back to the raw string if it is not a date. */
@@ -358,6 +385,21 @@ function commandForInboxItem(item: InboxItem): string {
     case 'inspect':
       return `relay explain ${item.ref.id}`;
   }
+}
+
+function resolveGraphRef(id: string, graph: Graph): GraphObjectRef | undefined {
+  if (graph.nodes.some((node) => node.id === id)) return { kind: 'node', id };
+  if (graph.edges.some((edge) => edge.id === id)) return { kind: 'edge', id };
+  if (graph.inbox.some((item) => item.id === id)) return { kind: 'inbox', id };
+  return undefined;
+}
+
+function validGraphRefs(graph: Graph): string[] {
+  return [...new Set([
+    ...graph.nodes.map((node) => node.id),
+    ...graph.edges.map((edge) => edge.id),
+    ...graph.inbox.map((item) => item.id),
+  ])].sort();
 }
 
 class Client {

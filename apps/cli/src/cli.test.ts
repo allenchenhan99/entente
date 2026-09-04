@@ -124,6 +124,75 @@ describe('relay inbox', () => {
   });
 });
 
+describe('relay explain', () => {
+  const graph: Graph = {
+    nodes: [
+      { id: 'human', kind: 'human', label: 'human', column: 0, status: 'pending' },
+      { id: 'planner', kind: 'planner', label: 'planner', column: 0, status: 'done' },
+      { id: 't-a', kind: 'agent', label: 'backend', task_id: 't-a', column: 1, status: 'working' },
+      { id: 'verifier', kind: 'verifier', label: 'verifier', column: 2, status: 'pending' },
+    ],
+    edges: [
+      { id: 'contract:t-a', kind: 'contract', from: 'planner', to: 't-a', task_id: 't-a', label: 'v1', status: 'done', attention: false },
+      { id: 'evidence:t-a', kind: 'evidence', from: 't-a', to: 'verifier', task_id: 't-a', label: 'awaiting evidence', status: 'pending', attention: false },
+    ],
+    inbox: [
+      {
+        id: 'inbox:blocker:t-a',
+        kind: 'blocker',
+        mission_id: 'm-1',
+        task_id: 't-a',
+        title: 'backend is blocked',
+        detail: ['Needs a product decision'],
+        ref: { kind: 'node', id: 't-a' },
+        actions: [{ key: 'r', label: 'reply', kind: 'reply', target: { task_id: 't-a' } }],
+      },
+    ],
+  };
+
+  it('prints describe, a blank line, then storyFor for a task ref', async () => {
+    const event = {
+      seq: 1,
+      ts: '2026-09-04T01:02:03.000Z',
+      mission_id: 'm-1',
+      actor: 'human' as const,
+      type: 'mission_created' as const,
+      payload: { id: 'm-1', repo: '/r', title: 'Login', success_definition: '', integration_check: 'npx vitest run', budget: { max_repairs_per_task: 3 } },
+    };
+    const state = initialState();
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [event] : state));
+    const io = capture();
+    const graphApi = fakeGraphApi({
+      buildGraph: () => graph,
+      describe: (ref) => ({ title: `${ref.id} — backend agent`, lines: ['runtime: working', 'contract: v1 accepted'] }),
+      storyFor: (ref, _graph, _state, events) => [`${ref.id} accepted its contract`, `${[...events].length} event considered`],
+    });
+
+    const code = await run(['explain', 't-a'], { ...io, fetch, env: {}, graph: graphApi });
+
+    expect(code).toBe(0);
+    expect(io.out).toEqual([
+      't-a — backend agent',
+      'runtime: working',
+      'contract: v1 accepted',
+      '',
+      't-a accepted its contract',
+      '1 event considered',
+    ]);
+  });
+
+  it('exits 2 for an unknown ref and lists every valid ref', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    const code = await run(['explain', 'nope'], { ...io, fetch, env: {}, graph: fakeGraphApi({ buildGraph: () => graph }) });
+
+    expect(code).toBe(2);
+    expect(io.err.join('\n')).toContain('unknown object: nope');
+    expect(io.err.join('\n')).toContain('valid refs: contract:t-a, evidence:t-a, human, inbox:blocker:t-a, planner, t-a, verifier');
+  });
+});
+
 describe('relay replay', () => {
   it('prints one timeline line per event: HH:MM:SS actor type task_id', async () => {
     const dir = tmpDir();
