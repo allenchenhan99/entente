@@ -204,6 +204,17 @@ describe('relay explain', () => {
     expect(code).toBe(0);
     expect(io.out).toEqual(['explain empty — nothing to show']);
   });
+
+  it('still rejects an invalid ref when the graph implementation is empty', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    const code = await run(['explain', 'nope'], { ...io, fetch, env: {}, graph: fakeGraphApi() });
+
+    expect(code).toBe(2);
+    expect(io.err.join('\n')).toContain('unknown object: nope');
+    expect(io.err.join('\n')).toContain('valid refs: (none)');
+  });
 });
 
 describe('relay story', () => {

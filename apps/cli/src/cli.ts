@@ -269,13 +269,13 @@ async function explain(args: string[], io: CliIo): Promise<number> {
   const { state, events } = await loadGraphSource(values.replay, values.port, io);
   const graph = io.graph.buildGraph(state);
   const valid = validGraphRefs(graph);
-  if (valid.length === 0) {
+  if (valid.length === 0 && hasGraphRefSyntax(object)) {
     io.stdout('explain empty — nothing to show');
     return 0;
   }
   const ref = resolveGraphRef(object, graph);
   if (!ref) {
-    throw new UsageError(`unknown object: ${object}\nvalid refs: ${valid.join(', ')}`);
+    throw new UsageError(`unknown object: ${object}\nvalid refs: ${valid.length > 0 ? valid.join(', ') : '(none)'}`);
   }
   const description = io.graph.describe(ref, graph, state);
   io.stdout(description.title);
@@ -425,6 +425,14 @@ function validGraphRefs(graph: Graph): string[] {
     ...graph.edges.map((edge) => edge.id),
     ...graph.inbox.map((item) => item.id),
   ])].sort();
+}
+
+function hasGraphRefSyntax(ref: string): boolean {
+  return ref === 'planner'
+    || ref === 'human'
+    || ref === 'verifier'
+    || /^t-/.test(ref)
+    || /^(contract|evidence):t-/.test(ref);
 }
 
 class Client {
