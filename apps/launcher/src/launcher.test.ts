@@ -6,7 +6,7 @@ import path from 'node:path';
 import { DEFAULT_PORT } from '@relay/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { parseArgs, runLauncher, type ChildProcessLike, type SpawnFunction } from './launcher.js';
+import { parseArgs, runLauncher, runTui, type ChildProcessLike, type SpawnFunction } from './launcher.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -215,6 +215,28 @@ describe('up', () => {
       '--replay', 'fixtures/demo.jsonl',
     ], expect.objectContaining({ detached: false, stdio: 'inherit' }));
   });
+
+  it('up keeps the TUI foreground child attached and forwards termination signals', async () => {
+    const workspaceRoot = temporaryDirectory();
+    const tui = childProcess(7002);
+    const signalBus = new EventEmitter();
+    const signals = {
+      on: (signal: 'SIGINT' | 'SIGTERM', listener: () => void) => { signalBus.on(signal, listener); },
+      off: (signal: 'SIGINT' | 'SIGTERM', listener: () => void) => { signalBus.off(signal, listener); },
+    };
+    const result = runTui(
+      { workspaceRoot, replay: 'run.jsonl' },
+      { spawn: vi.fn(() => tui) as unknown as SpawnFunction, fs, signals },
+    );
+
+    signalBus.emit('SIGTERM');
+    expect(tui.kill).toHaveBeenCalledExactlyOnceWith('SIGTERM');
+    tui.emit('exit', null, 'SIGTERM');
+
+    await expect(result).resolves.toBe(143);
+    expect(signalBus.listenerCount('SIGINT')).toBe(0);
+    expect(signalBus.listenerCount('SIGTERM')).toBe(0);
+  });
 });
 
 describe('timeout and no-spawn', () => {
@@ -383,10 +405,7 @@ describe('status and down', () => {
     const pidFile = path.join(relayDir, 'relayd.pid');
     fs.mkdirSync(relayDir);
     fs.writeFileSync(pidFile, '7001\n');
-    const processKill = vi.fn((_pid: number, signal: NodeJS.Signals | 0) => {
-      if (signal === 0) throw Object.assign(new Error('not found'), { code: 'ESRCH' });
-      return true;
-    });
+    const processKill = vi.fn((_pid: number, signal: NodeJS.Signals | 0) => signal !== 0);
     const stderr = vi.fn();
 
     const code = await runLauncher(['down'], {

@@ -390,8 +390,7 @@ function readPid(relayDir: string, fileSystem: Pick<FileSystem, 'readFileSync'>)
 
 function processIsAlive(pid: number, processKill: LauncherDependencies['processKill']): boolean {
   try {
-    processKill(pid, 0);
-    return true;
+    return processKill(pid, 0) !== false;
   } catch {
     return false;
   }
