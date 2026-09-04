@@ -37,3 +37,11 @@ npx tsx fixtures/scripts/generate-events.ts
 
 The generator validates each event with `Event.parse` before writing. `packages/protocol/src/fixtures.test.ts`
 replays both files and pins the expected end state and metrics.
+
+## Recorded runs
+
+- `events-live-1.jsonl` — first real end-to-end run (2026-09-04): one Claude Code recipient on the demo app,
+  contract accepted, evidence with 4 machine checks passing, `human_review` on AC-3 failed by the reviewer,
+  delta repair `r1`, agent reports a blocker (cannot reproduce) while still adding regression tests, second
+  evidence, reviewer passes AC-3, task verified. The Codex frontend task was canceled in this run (its MCP
+  approval config was fixed afterwards). Absolute paths in payloads are from the recording machine.
