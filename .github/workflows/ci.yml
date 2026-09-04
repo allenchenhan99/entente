@@ -19,3 +19,14 @@ jobs:
         run: cd demo-repo && npm ci && npx vitest run && npx tsc --noEmit
       - name: protocol docs are up to date
         run: node scripts/gen-protocol-docs.mjs && git diff --exit-code -- docs/protocol.md docs/schema
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
