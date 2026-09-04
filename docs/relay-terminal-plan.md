@@ -1,6 +1,6 @@
 # Relay Terminal — plan for Phase 2 (our own agent-based terminal)
 
-> Status: **ready to pick up**. Interfaces are frozen in code; the two work packages below are written as
+> Status: **WP-T1 (PTY host) is merged and proven live** (`fixtures/events-live-6.jsonl`); WP-T2 (web app) is ready to pick up. Interfaces are frozen in code; the two work packages below are written as
 > RelayGraph Task Contracts so they can be executed by a person or by an agent. Owner of WP-T2 (web app):
 > the UI teammate. Owner of WP-T1 (PTY host): engine.
 
@@ -44,7 +44,7 @@ Runtime requirements: Node ≥ 22, `node-pty` (native module; `npm rebuild node-
 
 ---
 
-## WP-T1 · Task Contract: `pty-host`
+## WP-T1 · Task Contract: `pty-host` — ✅ done (merged 2026-09-04; `apps/relayd/src/pty/`, `relay pane …` CLI)
 
 - id: `t-pty-host` · recipient: engine · branch: `wp/pty-host`
 - goal: relayd hosts agent terminals itself: a `TerminalHost` of kind `relay` backed by `node-pty`, a

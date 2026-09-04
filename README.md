@@ -50,8 +50,12 @@ npm install && npx tsc -b
 # 1. materialise the demo app as its own git repository
 bash demo-repo/scripts/init-demo.sh ~/entente-demo/app && (cd ~/entente-demo/app && npm install)
 
-# 2. start the daemon (inside a Herdr pane; use RELAY_HOST=tmux otherwise)
-RELAY_HOST=herdr RELAY_REPO=~/entente-demo/app npx tsx apps/relayd/src/index.ts
+# 2. start the daemon. RELAY_HOST=relay hosts the agents' terminals inside relayd itself (no tmux/Herdr needed);
+#    RELAY_HOST=herdr runs them as Herdr panes (start relayd inside a Herdr pane); RELAY_HOST=tmux uses a tmux session.
+RELAY_HOST=relay RELAY_REPO=~/entente-demo/app npx tsx apps/relayd/src/index.ts
+#    with the relay host, look at any agent from another shell:
+npx tsx apps/cli/src/index.ts pane list
+npx tsx apps/cli/src/index.ts pane read relay:1
 
 # 3. in another pane: the TUI
 npx tsx apps/tui/src/index.tsx --url http://127.0.0.1:7420

@@ -63,3 +63,7 @@ replays both files and pins the expected end state and metrics.
   clarification from the inbox (`a`), failed a `human_review` criterion (`f`) which opened repair r1, replied to the
   agent's "cannot reproduce" blocker (`r`), passed the criterion on attempt 2 (`p`); Codex frontend verified first
   try; both branches integrated, mission verified.
+- `events-live-6.jsonl` — first run on RelayGraph's **own terminal host** (`RELAY_HOST=relay`, 2026-09-04): both
+  agents lived in relayd-managed PTYs (`relay:1` Claude Code, `relay:2` Codex) with server-side screen models;
+  prompts were delivered by readiness detection, clarifications answered, evidence verified, branches integrated,
+  mission verified. Casts (asciinema v2) were recorded under `.relay/runs/<run>/casts/` (not committed: ~1 MB).
