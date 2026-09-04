@@ -1,0 +1,18 @@
+{
+  "name": "@relay/cli",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "relay — thin CLI over relayd's HTTP API (up / status / clarify / review / cancel / replay)",
+  "bin": {
+    "relay": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run --root ../.. apps/cli"
+  },
+  "dependencies": {
+    "@relay/protocol": "*",
+    "yaml": "^2.8.0"
+  }
+}
