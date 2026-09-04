@@ -3,11 +3,11 @@
  * pure read endpoints that hand clients without the TypeScript reducer (the Rust relay-tui) exactly what the
  * Ink TUI computes locally — `buildGraph`, `describe`, `storyFor`, `actionsFor` and the narrated event log.
  */
-import type { Context, Hono, MiddlewareHandler } from 'hono';
+import type { Context, Hono } from 'hono';
 import { actionsFor, buildGraph, describe, initialState, narrate, reduce, routes, storyFor } from '@relay/protocol';
 import type { Graph, GraphObjectRef } from '@relay/protocol';
 import type { EventStore } from '../ports.js';
-import { INVALID_TOKEN, MISSING_TOKEN, bearerToken, isGuardedPath, verifySessionToken, type SessionAuth } from '../auth/token.js';
+import type { SessionAuth } from '../auth/token.js';
 
 export interface GraphDeps {
   store: EventStore;
@@ -62,19 +62,7 @@ function objectExists(ref: GraphObjectRef, graph: Graph): boolean {
 }
 
 export function mountGraph(app: Hono, deps: GraphDeps): void {
-  const { store, auth } = deps;
-
-  if (auth && isGuardedPath(routes.state, auth.mode)) {
-    const guard: MiddlewareHandler = async (c, next) => {
-      const presented = bearerToken(c.req.header('authorization'));
-      if (presented === undefined) return c.json({ error: MISSING_TOKEN }, 401);
-      if (!verifySessionToken(auth, presented)) return c.json({ error: INVALID_TOKEN }, 401);
-      return next();
-    };
-    app.use(routes.graph, guard);
-    app.use(`${routes.graph}/*`, guard);
-    app.use(routes.story, guard);
-  }
+  const { store } = deps;
 
   app.get(routes.graph, (c) => {
     const state = store.state();

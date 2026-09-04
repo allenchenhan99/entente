@@ -50,8 +50,8 @@ Two modes, selected by `RELAY_AUTH`:
 
 | Route | `RELAY_AUTH=optional` (default) | `RELAY_AUTH=required` |
 | --- | --- | --- |
-| `/panes*`, `/pty/*`, `/runs*` | token required | token required |
-| `/state`, `/events*`, `/missions*`, `/tasks*` | open | token required |
+| `/panes*`, `/pty/*`, `/runs*`, `/metrics` | token required | token required |
+| `/state`, `/events*`, `/missions*`, `/tasks*`, `/graph*`, `/story` | open | token required |
 | `/health` | open | open |
 | `/mcp` | task / planner MCP tokens (unchanged) | task / planner MCP tokens (unchanged) |
 

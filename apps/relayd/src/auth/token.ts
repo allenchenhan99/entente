@@ -6,7 +6,7 @@
  *
  * Two modes (`RELAY_AUTH`): `optional` (default) guards only the pane/pty/runs routes, so the existing MCP
  * agent flow — which authenticates with task tokens on `/mcp` — and the thin clients keep working;
- * `required` additionally guards /state, /events*, /missions* and /tasks*. `/health` and `/mcp` are never
+ * `required` additionally guards /state, /events*, /missions*, /tasks*, /graph* and /story. `/health` and `/mcp` are never
  * guarded here. Task and planner MCP tokens are never accepted by this guard.
  */
 import crypto from 'node:crypto';
@@ -26,7 +26,7 @@ export interface SessionAuth {
 export const SESSION_TOKEN_FILE = 'session.token';
 
 const ALWAYS_GUARDED = ['/panes', '/pty', '/runs', '/metrics'];
-const GUARDED_WHEN_REQUIRED = ['/state', '/events', '/missions', '/tasks'];
+const GUARDED_WHEN_REQUIRED = ['/state', '/events', '/missions', '/tasks', '/graph', '/story'];
 
 export function generateSessionToken(): string {
   return crypto.randomBytes(16).toString('hex');
