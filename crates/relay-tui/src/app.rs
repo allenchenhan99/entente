@@ -1,0 +1,970 @@
+//! The state machine: what is selected, which panel has focus, whether the inspector / help / an inline
+//! editor is open, the pane grid and the focused pane. `App` is pure — keys go in, `Effect`s (HTTP posts,
+//! WebSocket frames, fetches) come out — so every rule here is unit-testable without a terminal or a server.
+//! The rules mirror `apps/tui/src/keys.ts` and `App.tsx` (see `keys.rs` for the map).
+
+use crate::keys::{Key, KeyCode};
+use crate::metrics::FrameStats;
+use crate::model::*;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Live,
+    Replay,
+}
+
+/// Panels in Tab order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Region {
+    Tree,
+    Graph,
+    Panes,
+    Inbox,
+}
+
+const REGIONS: [Region; 4] = [Region::Tree, Region::Graph, Region::Panes, Region::Inbox];
+
+impl Region {
+    pub fn title(self) -> &'static str {
+        match self {
+            Region::Tree => "MISSION / WORKTREES",
+            Region::Graph => "HANDOFFS",
+            Region::Panes => "PANES",
+            Region::Inbox => "INBOX",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    Answer,
+    Reply,
+    ReviewFailure,
+    CancelConfirm,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Connection {
+    Connecting,
+    Live,
+    Replay,
+    Disconnected(String),
+}
+
+impl Connection {
+    pub fn label(&self) -> String {
+        match self {
+            Connection::Connecting => "○ connecting".into(),
+            Connection::Live => "● live".into(),
+            Connection::Replay => "▶ replay".into(),
+            Connection::Disconnected(why) => format!("✗ disconnected ({why})"),
+        }
+    }
+}
+
+/// What the inspector shows for one object: `describe`, the story tail and the actions.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Inspector {
+    pub reference: Option<GraphObjectRef>,
+    pub description: ObjectDescription,
+    pub story: Vec<String>,
+    pub actions: Vec<ObjectAction>,
+    pub loaded: bool,
+}
+
+/// One live terminal: its `PaneInfo` and the screen model fed by the `/pty/:id` WebSocket.
+pub struct PaneState {
+    pub info: PaneInfo,
+    pub parser: vt100::Parser,
+    pub connected: bool,
+    pub exit_code: Option<i64>,
+    pub bytes: u64,
+}
+
+impl PaneState {
+    fn new(info: PaneInfo) -> Self {
+        let parser = vt100::Parser::new(info.rows.max(1), info.cols.max(1), 1000);
+        Self {
+            info,
+            parser,
+            connected: false,
+            exit_code: None,
+            bytes: 0,
+        }
+    }
+
+    /// (cols, rows) of the screen model.
+    pub fn size(&self) -> (u16, u16) {
+        let (rows, cols) = self.parser.screen().size();
+        (cols, rows)
+    }
+
+    pub fn alive(&self) -> bool {
+        self.info.alive && self.exit_code.is_none()
+    }
+}
+
+/// A `POST` the Ink `commands.ts` would send; `route()` / `body()` are exactly its URL and JSON.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    Clarify {
+        task_id: String,
+        question_id: String,
+        answer: String,
+    },
+    MissionClarify {
+        mission_id: String,
+        question_id: String,
+        answer: String,
+    },
+    Review {
+        task_id: String,
+        criterion_id: String,
+        status: &'static str,
+        observed_failure: Option<String>,
+    },
+    Reply {
+        task_id: String,
+        message: String,
+    },
+    Cancel {
+        task_id: String,
+    },
+}
+
+impl Command {
+    pub fn route(&self) -> String {
+        match self {
+            Command::Clarify { task_id, .. } => format!("/tasks/{task_id}/clarify"),
+            Command::MissionClarify { mission_id, .. } => format!("/missions/{mission_id}/clarify"),
+            Command::Review { task_id, .. } => format!("/tasks/{task_id}/review"),
+            Command::Reply { task_id, .. } => format!("/tasks/{task_id}/reply"),
+            Command::Cancel { task_id } => format!("/tasks/{task_id}/cancel"),
+        }
+    }
+
+    pub fn body(&self) -> serde_json::Value {
+        match self {
+            Command::Clarify {
+                question_id,
+                answer,
+                ..
+            }
+            | Command::MissionClarify {
+                question_id,
+                answer,
+                ..
+            } => serde_json::to_value(ClarifyBody {
+                answers: vec![ClarifyAnswer {
+                    question_id: question_id.clone(),
+                    answer: answer.clone(),
+                }],
+            })
+            .unwrap(),
+            Command::Review {
+                criterion_id,
+                status,
+                observed_failure,
+                ..
+            } => serde_json::to_value(ReviewBody {
+                criterion_id: criterion_id.clone(),
+                status: (*status).to_string(),
+                observed_failure: observed_failure.clone(),
+            })
+            .unwrap(),
+            Command::Reply { message, .. } => serde_json::to_value(ReplyBody {
+                message: message.clone(),
+            })
+            .unwrap(),
+            Command::Cancel { .. } => serde_json::to_value(CancelBody::default()).unwrap(),
+        }
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Command::Clarify { task_id, .. } => format!("answer sent to {task_id}"),
+            Command::MissionClarify { mission_id, .. } => format!("answer sent for {mission_id}"),
+            Command::Review {
+                task_id,
+                criterion_id,
+                status,
+                ..
+            } => format!("{criterion_id} marked {status} on {task_id}"),
+            Command::Reply { task_id, .. } => format!("reply sent to {task_id}"),
+            Command::Cancel { task_id } => format!("cancel requested for {task_id}"),
+        }
+    }
+}
+
+/// Side effects the runtime performs; `App` itself never touches the network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Effect {
+    /// Load describe + story tail + actions for the inspector.
+    FetchInspector(GraphObjectRef),
+    /// Load the actions of the newly selected object (drives the inbox strip / status hints).
+    FetchActions(GraphObjectRef),
+    Post(Command),
+    /// Raw bytes for the focused pane (`{ t: "input", data: base64 }`).
+    PaneInput { pane_id: String, data: Vec<u8> },
+    /// The focused pane's widget changed size (`{ t: "resize", cols, rows }`).
+    PaneResize { pane_id: String, cols: u16, rows: u16 },
+    /// `POST /panes/:id/focus`.
+    FocusPane(String),
+    Quit,
+}
+
+pub struct App {
+    pub mode: Mode,
+    pub graph: Graph,
+    pub state: State,
+    /// Pane ids in `/panes` order.
+    pub panes: Vec<String>,
+    pub pane_states: BTreeMap<String, PaneState>,
+    pub focused_pane: Option<String>,
+    pub metrics: Option<HostMetrics>,
+    pub region: Region,
+    pub selected: Option<GraphObjectRef>,
+    /// Actions of the selected node / edge (inbox items carry their own).
+    pub actions: Vec<ObjectAction>,
+    /// `i` in the pane grid: keys go to the focused pane until Esc.
+    pub terminal_input: bool,
+    pub inspector_open: bool,
+    pub inspector: Inspector,
+    pub input_mode: Option<InputMode>,
+    pub input_value: String,
+    pending_action: Option<ObjectAction>,
+    pub help_open: bool,
+    pub error: Option<String>,
+    pub notice: Option<String>,
+    pub connection: Connection,
+    pub last_seq: u64,
+    pub frames: FrameStats,
+    /// (cols, rows) each pane widget was last drawn with; filled by `ui::panes`.
+    pub pane_areas: BTreeMap<String, (u16, u16)>,
+    pub tick: u64,
+}
+
+fn same_task(graph: &Graph, r: &GraphObjectRef, task_id: &str) -> bool {
+    graph.task_of(r) == Some(task_id)
+}
+
+impl App {
+    pub fn new(mode: Mode) -> Self {
+        Self {
+            mode,
+            graph: Graph::default(),
+            state: State::default(),
+            panes: Vec::new(),
+            pane_states: BTreeMap::new(),
+            focused_pane: None,
+            metrics: None,
+            region: Region::Tree,
+            selected: None,
+            actions: Vec::new(),
+            terminal_input: false,
+            inspector_open: false,
+            inspector: Inspector::default(),
+            input_mode: None,
+            input_value: String::new(),
+            pending_action: None,
+            help_open: false,
+            error: None,
+            notice: None,
+            connection: match mode {
+                Mode::Live => Connection::Connecting,
+                Mode::Replay => Connection::Replay,
+            },
+            last_seq: 0,
+            frames: FrameStats::default(),
+            pane_areas: BTreeMap::new(),
+            tick: 0,
+        }
+    }
+
+    // --- data in -----------------------------------------------------------------------------------
+
+    /// Port of `refsForRegion` (`App.tsx`): the objects j/k walk in each panel.
+    pub fn refs_for_region(&self, region: Region) -> Vec<GraphObjectRef> {
+        match region {
+            Region::Tree => self
+                .graph
+                .nodes
+                .iter()
+                .filter(|n| n.kind == GraphNodeKind::Agent)
+                .map(|n| GraphObjectRef::node(n.id.clone()))
+                .collect(),
+            Region::Graph => self
+                .graph
+                .nodes
+                .iter()
+                .map(|n| GraphObjectRef::node(n.id.clone()))
+                .chain(self.graph.edges.iter().map(|e| GraphObjectRef::edge(e.id.clone())))
+                .collect(),
+            Region::Inbox => self
+                .graph
+                .inbox
+                .iter()
+                .map(|i| GraphObjectRef::inbox(i.id.clone()))
+                .collect(),
+            Region::Panes => self
+                .panes
+                .iter()
+                .filter_map(|p| self.pane_states.get(p))
+                .filter_map(|p| p.info.task_id.clone())
+                .filter(|t| self.graph.node(t).is_some())
+                .map(GraphObjectRef::node)
+                .collect(),
+        }
+    }
+
+    fn initial_ref(&self) -> Option<GraphObjectRef> {
+        self.refs_for_region(Region::Tree)
+            .into_iter()
+            .next()
+            .or_else(|| self.refs_for_region(Region::Graph).into_iter().next())
+            .or_else(|| self.refs_for_region(Region::Inbox).into_iter().next())
+    }
+
+    /// New graph from `/graph`: keeps the selection when the object still exists, else falls back like the
+    /// Ink app; returns the fetches a changed selection needs.
+    pub fn set_graph(&mut self, graph: Graph) -> Vec<Effect> {
+        self.graph = graph;
+        if let Some(seq) = self.graph.seq {
+            self.last_seq = self.last_seq.max(seq);
+        }
+        let mut effects = Vec::new();
+        let keep = self
+            .selected
+            .as_ref()
+            .map(|r| self.graph.contains(r))
+            .unwrap_or(false);
+        if !keep {
+            let next = self.initial_ref();
+            effects.extend(self.select(next));
+        }
+        if self.inspector_open {
+            if let Some(r) = self.inspector.reference.clone() {
+                if self.graph.contains(&r) {
+                    effects.push(Effect::FetchInspector(r));
+                } else {
+                    self.inspector_open = false;
+                }
+            }
+        }
+        effects
+    }
+
+    pub fn set_state(&mut self, state: State) {
+        self.last_seq = self.last_seq.max(state.last_seq);
+        self.state = state;
+    }
+
+    /// New `/panes` listing: new panes get a screen model sized like the PTY; known ones keep theirs.
+    pub fn set_panes(&mut self, panes: Vec<PaneInfo>, focused: Option<String>) -> Vec<Effect> {
+        self.panes = panes.iter().map(|p| p.pane_id.clone()).collect();
+        for info in panes {
+            match self.pane_states.get_mut(&info.pane_id) {
+                Some(existing) => {
+                    if info.exit_code.is_some() {
+                        existing.exit_code = info.exit_code;
+                    }
+                    existing.info = info;
+                }
+                None => {
+                    self.pane_states
+                        .insert(info.pane_id.clone(), PaneState::new(info));
+                }
+            }
+        }
+        let focus_valid = self
+            .focused_pane
+            .as_ref()
+            .map(|p| self.panes.contains(p))
+            .unwrap_or(false);
+        if !focus_valid {
+            self.focused_pane = focused
+                .filter(|f| self.panes.contains(f))
+                .or_else(|| self.first_alive_pane())
+                .or_else(|| self.panes.first().cloned());
+        }
+        Vec::new()
+    }
+
+    fn first_alive_pane(&self) -> Option<String> {
+        self.panes
+            .iter()
+            .find(|p| self.pane_states.get(*p).map(|s| s.alive()).unwrap_or(false))
+            .cloned()
+    }
+
+    pub fn set_metrics(&mut self, metrics: HostMetrics) {
+        self.metrics = Some(metrics);
+    }
+
+    /// A frame from `/pty/:id`.
+    pub fn apply_pane_frame(&mut self, pane_id: &str, frame: PtyServerMessage) {
+        let Some(pane) = self.pane_states.get_mut(pane_id) else {
+            return;
+        };
+        match frame {
+            PtyServerMessage::Hello { pane: info } => {
+                pane.connected = true;
+                pane.info = info;
+            }
+            PtyServerMessage::Scrollback { data } | PtyServerMessage::Output { data } => {
+                if let Ok(bytes) = BASE64.decode(data.as_bytes()) {
+                    pane.bytes += bytes.len() as u64;
+                    pane.parser.process(&bytes);
+                }
+            }
+            PtyServerMessage::Exit { code } => {
+                pane.exit_code = Some(code);
+                pane.info.alive = false;
+                if self.terminal_input && self.focused_pane.as_deref() == Some(pane_id) {
+                    self.terminal_input = false;
+                }
+            }
+            PtyServerMessage::Pong => {}
+        }
+    }
+
+    pub fn set_pane_connected(&mut self, pane_id: &str, connected: bool) {
+        if let Some(pane) = self.pane_states.get_mut(pane_id) {
+            pane.connected = connected;
+        }
+    }
+
+    pub fn set_inspector(
+        &mut self,
+        reference: GraphObjectRef,
+        description: ObjectDescription,
+        story: Vec<String>,
+        actions: Vec<ObjectAction>,
+    ) {
+        if self.inspector.reference.as_ref() != Some(&reference) && self.inspector_open {
+            // A stale response for an object we already left.
+            if self.inspector.loaded {
+                return;
+            }
+        }
+        self.inspector = Inspector {
+            reference: Some(reference),
+            description,
+            story,
+            actions,
+            loaded: true,
+        };
+    }
+
+    pub fn set_actions(&mut self, reference: &GraphObjectRef, actions: Vec<ObjectAction>) {
+        if self.selected.as_ref() == Some(reference) {
+            self.actions = actions;
+        }
+    }
+
+    pub fn set_error(&mut self, error: impl Into<String>) {
+        self.error = Some(error.into());
+    }
+
+    pub fn set_notice(&mut self, notice: impl Into<String>) {
+        self.notice = Some(notice.into());
+    }
+
+    pub fn set_connection(&mut self, connection: Connection) {
+        self.connection = connection;
+    }
+
+    pub fn note_event(&mut self, seq: u64) {
+        self.last_seq = self.last_seq.max(seq);
+    }
+
+    // --- queries -----------------------------------------------------------------------------------
+
+    pub fn task_view(&self, task_id: &str) -> Option<&TaskView> {
+        self.state.tasks.get(task_id)
+    }
+
+    pub fn pane_for_task(&self, task_id: &str) -> Option<String> {
+        // Prefer the alive pane (a resumed session gets a new pane id, e.g. relay:3 after relay:1).
+        let mut candidates = self
+            .panes
+            .iter()
+            .filter_map(|p| self.pane_states.get(p))
+            .filter(|p| p.info.task_id.as_deref() == Some(task_id));
+        let first = candidates.next()?;
+        let alive = std::iter::once(first)
+            .chain(candidates)
+            .find(|p| p.alive())
+            .unwrap_or(first);
+        Some(alive.info.pane_id.clone())
+    }
+
+    pub fn focused_pane_state(&self) -> Option<&PaneState> {
+        self.focused_pane
+            .as_ref()
+            .and_then(|p| self.pane_states.get(p))
+    }
+
+    /// Actions that apply to the selection: the inbox item's own, else the fetched ones.
+    pub fn current_actions(&self) -> &[ObjectAction] {
+        match &self.selected {
+            Some(r) if r.kind == RefKind::Inbox => self
+                .graph
+                .inbox_item(&r.id)
+                .map(|i| i.actions.as_slice())
+                .unwrap_or(&[]),
+            _ => &self.actions,
+        }
+    }
+
+    /// The Ink footer: `a answer · r reply · p pass · f fail · x cancel` for the current actions.
+    pub fn action_hints(&self) -> String {
+        let mut parts = Vec::new();
+        for action in self.current_actions() {
+            let label = match action.kind {
+                ActionKind::Clarify | ActionKind::MissionClarify => "answer",
+                ActionKind::Reply => "reply",
+                ActionKind::Review if action.key == "p" => "pass",
+                ActionKind::Review => "fail",
+                ActionKind::Cancel => "cancel",
+                ActionKind::Focus => "focus",
+                ActionKind::Inspect => continue,
+            };
+            let key = if action.kind == ActionKind::Focus {
+                "f".to_string()
+            } else {
+                action.key.clone()
+            };
+            parts.push(format!("{key} {label}"));
+        }
+        parts.join(" · ")
+    }
+
+    pub fn prompt_line(&self) -> Option<String> {
+        match self.input_mode? {
+            InputMode::Answer => Some(format!("answer> {}", self.input_value)),
+            InputMode::Reply => Some(format!("reply> {}", self.input_value)),
+            InputMode::ReviewFailure => Some(format!("observed failure> {}", self.input_value)),
+            InputMode::CancelConfirm => Some("cancel task? y/N".to_string()),
+        }
+    }
+
+    // --- selection ---------------------------------------------------------------------------------
+
+    /// Select an object (fetching its actions when it is a node or an edge).
+    pub fn select(&mut self, reference: Option<GraphObjectRef>) -> Vec<Effect> {
+        if self.selected == reference {
+            return Vec::new();
+        }
+        self.selected = reference.clone();
+        self.actions.clear();
+        match reference {
+            Some(r) if r.kind != RefKind::Inbox => vec![Effect::FetchActions(r)],
+            _ => Vec::new(),
+        }
+    }
+
+    fn move_selection(&mut self, delta: i32) -> Vec<Effect> {
+        if self.region == Region::Panes {
+            return self.move_pane_focus(delta);
+        }
+        let refs = self.refs_for_region(self.region);
+        if refs.is_empty() {
+            return Vec::new();
+        }
+        let current = refs.iter().position(|r| Some(r) == self.selected.as_ref());
+        let next = match current {
+            None => 0,
+            Some(i) => (i as i32 + delta).clamp(0, refs.len() as i32 - 1) as usize,
+        };
+        self.select(Some(refs[next].clone()))
+    }
+
+    fn move_pane_focus(&mut self, delta: i32) -> Vec<Effect> {
+        if self.panes.is_empty() {
+            return Vec::new();
+        }
+        let current = self
+            .focused_pane
+            .as_ref()
+            .and_then(|p| self.panes.iter().position(|x| x == p));
+        let next = match current {
+            None => 0,
+            Some(i) => (i as i32 + delta).clamp(0, self.panes.len() as i32 - 1) as usize,
+        };
+        let pane = self.panes[next].clone();
+        self.focus_pane(pane, false)
+    }
+
+    fn cycle_region(&mut self) -> Vec<Effect> {
+        let index = REGIONS.iter().position(|r| *r == self.region).unwrap_or(0);
+        let next = REGIONS[(index + 1) % REGIONS.len()];
+        self.region = next;
+        if next == Region::Panes {
+            if let Some(p) = self.focused_pane.clone() {
+                return self.focus_pane(p, false);
+            }
+            return Vec::new();
+        }
+        let first = self.refs_for_region(next).into_iter().next();
+        match first {
+            Some(r) => self.select(Some(r)),
+            None => Vec::new(),
+        }
+    }
+
+    /// Make `pane_id` the large pane; `post` also tells relayd (`POST /panes/:id/focus`).
+    pub fn focus_pane(&mut self, pane_id: String, post: bool) -> Vec<Effect> {
+        if !self.panes.contains(&pane_id) {
+            return Vec::new();
+        }
+        let mut effects = Vec::new();
+        if self.focused_pane.as_ref() != Some(&pane_id) {
+            self.focused_pane = Some(pane_id.clone());
+            self.terminal_input = false;
+        }
+        if post {
+            effects.push(Effect::FocusPane(pane_id.clone()));
+        }
+        let task_node = self
+            .pane_states
+            .get(&pane_id)
+            .and_then(|p| p.info.task_id.clone())
+            .filter(|t| self.graph.node(t).is_some())
+            .map(GraphObjectRef::node);
+        if let Some(r) = task_node {
+            effects.extend(self.select(Some(r)));
+        }
+        effects
+    }
+
+    fn open_inspector(&mut self, reference: Option<GraphObjectRef>) -> Vec<Effect> {
+        let Some(reference) = reference else {
+            return Vec::new();
+        };
+        if !self.graph.contains(&reference) {
+            return Vec::new();
+        }
+        self.inspector_open = true;
+        if self.inspector.reference.as_ref() != Some(&reference) {
+            self.inspector = Inspector {
+                reference: Some(reference.clone()),
+                ..Inspector::default()
+            };
+        }
+        vec![Effect::FetchInspector(reference)]
+    }
+
+    pub fn close_inspector(&mut self) {
+        self.inspector_open = false;
+        self.reset_input();
+    }
+
+    fn reset_input(&mut self) {
+        self.input_mode = None;
+        self.input_value.clear();
+        self.pending_action = None;
+    }
+
+    fn begin_input(&mut self, action: ObjectAction, mode: InputMode) -> Vec<Effect> {
+        self.input_value.clear();
+        self.input_mode = Some(mode);
+        self.pending_action = Some(action);
+        self.error = None;
+        // The inline editor lives in the inspector, like the Ink overlay tabs.
+        let target = self.selected.clone();
+        self.open_inspector(target)
+    }
+
+    fn selected_task_id(&self) -> Option<String> {
+        let r = self.selected.as_ref()?;
+        self.graph.task_of(r).map(str::to_string)
+    }
+
+    fn find_action(&self, key: char) -> Option<ObjectAction> {
+        let actions = self.current_actions();
+        let by_key = actions.iter().find(|a| a.key == key.to_string()).cloned();
+        if by_key.is_some() {
+            return by_key;
+        }
+        // Contract aliases on top of the server-assigned keys.
+        let alias = |kind: ActionKind, key: Option<&str>| {
+            actions
+                .iter()
+                .find(|a| a.kind == kind && key.is_none_or(|k| a.key == k))
+                .cloned()
+        };
+        match key {
+            'c' => alias(ActionKind::Clarify, None).or_else(|| alias(ActionKind::MissionClarify, None)),
+            'y' => alias(ActionKind::Review, Some("p")),
+            'n' => alias(ActionKind::Review, Some("f")),
+            _ => None,
+        }
+    }
+
+    // --- keys --------------------------------------------------------------------------------------
+
+    /// Port of `useInput` in `keys.ts`, plus the pane grid.
+    pub fn handle_key(&mut self, key: Key) -> Vec<Effect> {
+        if self.terminal_input {
+            if key.code == KeyCode::Esc && !key.ctrl && !key.alt {
+                self.terminal_input = false;
+                return Vec::new();
+            }
+            return match self.focused_pane.clone() {
+                Some(pane_id) => vec![Effect::PaneInput {
+                    pane_id,
+                    data: key.encode(),
+                }],
+                None => {
+                    self.terminal_input = false;
+                    Vec::new()
+                }
+            };
+        }
+        if key.is_ctrl_c() {
+            return vec![Effect::Quit];
+        }
+
+        if self.input_mode == Some(InputMode::CancelConfirm) {
+            let answer = key.plain_char().map(|c| c.to_ascii_lowercase());
+            let mut effects = Vec::new();
+            if answer == Some('y') {
+                if let Some(task_id) = self
+                    .pending_action
+                    .as_ref()
+                    .filter(|a| a.kind == ActionKind::Cancel)
+                    .and_then(|a| a.target.task_id.clone())
+                {
+                    effects.push(Effect::Post(Command::Cancel { task_id }));
+                }
+            }
+            if answer == Some('y') || answer == Some('n') || key.code == KeyCode::Esc {
+                self.reset_input();
+            }
+            return effects;
+        }
+
+        if let Some(mode) = self.input_mode {
+            match key.code {
+                KeyCode::Esc => {
+                    self.reset_input();
+                    return Vec::new();
+                }
+                KeyCode::Enter => {
+                    let value = self.input_value.trim().to_string();
+                    let Some(action) = self.pending_action.clone() else {
+                        self.reset_input();
+                        return Vec::new();
+                    };
+                    if value.is_empty() {
+                        return Vec::new();
+                    }
+                    let command = submit_command(&action, mode, value);
+                    self.reset_input();
+                    return command.map(|c| vec![Effect::Post(c)]).unwrap_or_default();
+                }
+                KeyCode::Backspace | KeyCode::Delete => {
+                    self.input_value.pop();
+                }
+                KeyCode::Char(c) if !key.ctrl && !key.alt => self.input_value.push(c),
+                _ => {}
+            }
+            return Vec::new();
+        }
+
+        if key.code == KeyCode::Esc {
+            if self.help_open {
+                self.help_open = false;
+            } else if self.inspector_open {
+                self.close_inspector();
+            }
+            return Vec::new();
+        }
+
+        let ch = key.plain_char();
+        if let Some(c) = ch {
+            if let Some(action) = self.find_action(c) {
+                match action.kind {
+                    ActionKind::Clarify | ActionKind::MissionClarify => {
+                        return self.begin_input(action, InputMode::Answer);
+                    }
+                    ActionKind::Reply => return self.begin_input(action, InputMode::Reply),
+                    ActionKind::Review if action.key == "f" => {
+                        return self.begin_input(action, InputMode::ReviewFailure);
+                    }
+                    ActionKind::Review if action.key == "p" => {
+                        if let (Some(task_id), Some(criterion_id)) = (
+                            action.target.task_id.clone(),
+                            action.target.criterion_id.clone(),
+                        ) {
+                            self.error = None;
+                            return vec![Effect::Post(Command::Review {
+                                task_id,
+                                criterion_id,
+                                status: "passed",
+                                observed_failure: None,
+                            })];
+                        }
+                        return Vec::new();
+                    }
+                    ActionKind::Cancel if c == 'x' => {
+                        return self.begin_input(action, InputMode::CancelConfirm);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        match (key.code, ch) {
+            (KeyCode::Enter, _) => {
+                if self.region == Region::Panes {
+                    let target = self
+                        .focused_pane_state()
+                        .and_then(|p| p.info.task_id.clone())
+                        .map(GraphObjectRef::node)
+                        .or_else(|| self.selected.clone());
+                    return self.open_inspector(target);
+                }
+                if let Some(r) = self.selected.clone() {
+                    if r.kind == RefKind::Inbox {
+                        let target = self.graph.inbox_item(&r.id).map(|i| i.reference.clone());
+                        let mut effects = Vec::new();
+                        if let Some(t) = target.clone() {
+                            self.region = region_for_ref(&self.graph, &t);
+                            effects.extend(self.select(Some(t)));
+                        }
+                        effects.extend(self.open_inspector(target));
+                        return effects;
+                    }
+                    return self.open_inspector(Some(r));
+                }
+                Vec::new()
+            }
+            (_, Some('i')) => {
+                if self.region == Region::Panes {
+                    if self.focused_pane_state().map(|p| p.alive()).unwrap_or(false) {
+                        self.terminal_input = true;
+                    } else {
+                        self.set_notice("no live pane to type into");
+                    }
+                    return Vec::new();
+                }
+                let target = self.selected.clone();
+                self.open_inspector(target)
+            }
+            (_, Some('f')) => {
+                let pane = self
+                    .selected_task_id()
+                    .and_then(|t| self.pane_for_task(&t))
+                    .or_else(|| {
+                        if self.region == Region::Panes {
+                            self.focused_pane.clone()
+                        } else {
+                            None
+                        }
+                    });
+                match pane {
+                    Some(p) => {
+                        self.region = Region::Panes;
+                        self.focus_pane(p, true)
+                    }
+                    None => {
+                        self.set_notice("no pane for the selected object");
+                        Vec::new()
+                    }
+                }
+            }
+            (KeyCode::Tab, _) | (KeyCode::BackTab, _) => self.cycle_region(),
+            (KeyCode::Down, _) | (_, Some('j')) => self.move_selection(1),
+            (KeyCode::Up, _) | (_, Some('k')) => self.move_selection(-1),
+            (_, Some('?')) => {
+                self.help_open = !self.help_open;
+                Vec::new()
+            }
+            (_, Some('q')) => vec![Effect::Quit],
+            _ => Vec::new(),
+        }
+    }
+
+    // --- pane sizing -------------------------------------------------------------------------------
+
+    /// After a draw: if the focused pane's widget changed size, resize its screen model and tell relayd.
+    pub fn sync_pane_sizes(&mut self) -> Vec<Effect> {
+        let Some(pane_id) = self.focused_pane.clone() else {
+            return Vec::new();
+        };
+        let Some(&(cols, rows)) = self.pane_areas.get(&pane_id) else {
+            return Vec::new();
+        };
+        if cols == 0 || rows == 0 {
+            return Vec::new();
+        }
+        let Some(pane) = self.pane_states.get_mut(&pane_id) else {
+            return Vec::new();
+        };
+        if pane.size() == (cols, rows) {
+            return Vec::new();
+        }
+        pane.parser.screen_mut().set_size(rows, cols);
+        vec![Effect::PaneResize {
+            pane_id,
+            cols,
+            rows,
+        }]
+    }
+}
+
+fn submit_command(action: &ObjectAction, mode: InputMode, value: String) -> Option<Command> {
+    let question_id = action
+        .target
+        .question_ids
+        .as_ref()
+        .and_then(|q| q.first().cloned());
+    match (action.kind, mode) {
+        (ActionKind::Clarify, InputMode::Answer) => Some(Command::Clarify {
+            task_id: action.target.task_id.clone()?,
+            question_id: question_id?,
+            answer: value,
+        }),
+        (ActionKind::MissionClarify, InputMode::Answer) => Some(Command::MissionClarify {
+            mission_id: action.target.mission_id.clone()?,
+            question_id: question_id?,
+            answer: value,
+        }),
+        (ActionKind::Reply, InputMode::Reply) => Some(Command::Reply {
+            task_id: action.target.task_id.clone()?,
+            message: value,
+        }),
+        (ActionKind::Review, InputMode::ReviewFailure) => Some(Command::Review {
+            task_id: action.target.task_id.clone()?,
+            criterion_id: action.target.criterion_id.clone()?,
+            status: "failed",
+            observed_failure: Some(value),
+        }),
+        _ => None,
+    }
+}
+
+/// Port of `regionForRef`: where an object lives, so Enter on an inbox item moves focus with it.
+pub fn region_for_ref(graph: &Graph, r: &GraphObjectRef) -> Region {
+    match r.kind {
+        RefKind::Inbox => Region::Inbox,
+        RefKind::Edge => Region::Graph,
+        RefKind::Node => match graph.node(&r.id) {
+            Some(n) if n.kind == GraphNodeKind::Agent => Region::Tree,
+            _ => Region::Graph,
+        },
+    }
+}
+
+/// Does the pane's task match the selection (used by the pane grid to highlight the selected task's pane)?
+pub fn pane_matches_selection(app: &App, pane: &PaneState) -> bool {
+    match (&app.selected, &pane.info.task_id) {
+        (Some(r), Some(t)) => same_task(&app.graph, r, t),
+        _ => false,
+    }
+}
