@@ -1,0 +1,79 @@
+# Hand-written contracts for the demo mission "Add secure login to this application."
+# Loaded with: relay up "Add secure login to this application." --repo <demo-app> --plan examples/plan-secure-login.yaml
+# The backend contract is deliberately silent about the authentication method and expiry policy so the
+# recipient must ask before writing code (PRD §14 step 3).
+tasks:
+  - id: t-backend-auth
+    recipient: backend
+    runtime: claude-code
+    goal: Implement secure login endpoints for this application, reusing the existing user model and session store
+    inputs:
+      - README.md
+      - src/models/user.ts
+      - src/session/store.ts
+      - src/email/stub.ts
+      - src/app.ts
+    constraints:
+      - Reuse the existing SessionStore and UserRepo; do not add a database
+      - Do not add new paid infrastructure or external services
+      - Keep all changes covered by vitest tests under tests/auth/
+    non_goals:
+      - OAuth or social login
+      - Account recovery or password reset
+      - Any frontend or HTML changes
+    scope:
+      allowed_paths:
+        - src/auth/**
+        - src/app.ts
+        - tests/auth/**
+    acceptance_criteria:
+      - id: AC-1
+        condition: A valid login credential creates a user session and GET /me returns the user
+        check: { kind: command, run: "npx vitest run tests/auth/valid-login.test.ts" }
+      - id: AC-2
+        condition: An expired login credential is rejected with HTTP 401
+        check: { kind: command, run: "npx vitest run tests/auth/expired-login.test.ts" }
+      - id: AC-3
+        condition: A login credential cannot be reused after its first successful use
+        check: { kind: human_review }
+      - id: AC-4
+        condition: Changes stay within the allowed scope
+        check: { kind: diff_scope }
+      - id: AC-5
+        condition: The whole test suite still passes
+        check: { kind: command, run: "npx vitest run" }
+    output:
+      type: code_change
+      evidence_required: [git_diff, changed_files, check_outputs]
+    dependencies: []
+    budget: { max_repairs: 2, stagnation_limit: 2 }
+
+  - id: t-frontend-login
+    recipient: frontend
+    runtime: codex
+    goal: Add a minimal login page that submits an email address to the backend login endpoint and shows the result
+    inputs:
+      - README.md
+      - public/index.html
+    constraints:
+      - Plain HTML and vanilla JavaScript only; no framework, no build step
+      - "The page must call POST /auth/request with a JSON body {\"email\": \"...\"} and display the response message"
+    non_goals:
+      - Backend changes
+      - Styling beyond basic readability
+    scope:
+      allowed_paths:
+        - public/**
+        - tests/ui/**
+    acceptance_criteria:
+      - id: AC-1
+        condition: public/login.html exists and contains a form posting an email to /auth/request
+        check: { kind: command, run: "grep -q '/auth/request' public/login.html && grep -qi 'type=\"email\"' public/login.html" }
+      - id: AC-2
+        condition: Changes stay within the allowed scope
+        check: { kind: diff_scope }
+    output:
+      type: code_change
+      evidence_required: [git_diff, changed_files, check_outputs]
+    dependencies: []
+    budget: { max_repairs: 1, stagnation_limit: 2 }
