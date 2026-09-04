@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { initialState } from '@relay/protocol';
+import type { Graph, GraphApi } from '@relay/protocol';
 import { run, formatTimestamp } from './cli.js';
 
 interface Recorded { url: string; method: string; body?: unknown }
@@ -25,6 +27,232 @@ function capture() {
 }
 
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+
+const emptyGraph = (): Graph => ({ nodes: [], edges: [], inbox: [] });
+
+function fakeGraphApi(overrides: Partial<GraphApi> = {}): GraphApi {
+  return {
+    buildGraph: emptyGraph,
+    actionsFor: () => [],
+    narrate: (event) => `${event.actor} ${event.type}`,
+    storyFor: () => [],
+    describe: (ref) => ({ title: ref.id, lines: [] }),
+    ...overrides,
+  };
+}
+
+describe('relay inbox', () => {
+  it('prints one block per item with the exact command to act', async () => {
+    const graph: Graph = {
+      nodes: [],
+      edges: [],
+      inbox: [
+        {
+          id: 'inbox:questions:t-a',
+          kind: 'task_question',
+          mission_id: 'm-1',
+          task_id: 't-a',
+          title: 'backend asks 2 questions (v1)',
+          detail: ['Q1: Which authentication method?', 'Q2: How long should links last?'],
+          ref: { kind: 'edge', id: 'contract:t-a' },
+          actions: [
+            { key: 'Enter', label: 'inspect', kind: 'inspect', target: { task_id: 't-a' } },
+            { key: 'a', label: 'answer', kind: 'clarify', target: { task_id: 't-a', question_ids: ['Q1', 'Q2'] } },
+          ],
+        },
+        {
+          id: 'inbox:review:t-a:AC-3',
+          kind: 'human_review',
+          mission_id: 'm-1',
+          task_id: 't-a',
+          title: 'AC-3 needs human review',
+          detail: ['A link cannot be reused'],
+          ref: { kind: 'edge', id: 'evidence:t-a' },
+          actions: [{ key: 'p', label: 'review', kind: 'review', target: { task_id: 't-a', criterion_id: 'AC-3' } }],
+        },
+      ],
+    };
+    const state = initialState();
+    const { fetch, requests } = fakeFetch((url) => (url.includes('/events/log') ? [] : state));
+    const io = capture();
+
+    const code = await run(['inbox'], { ...io, fetch, env: {}, graph: fakeGraphApi({ buildGraph: () => graph }) });
+
+    expect(code).toBe(0);
+    expect(requests.map((request) => request.url)).toEqual([
+      'http://127.0.0.1:7420/state',
+      'http://127.0.0.1:7420/events/log?since=0',
+    ]);
+    expect(io.out).toEqual([
+      '[task_question] backend asks 2 questions (v1)',
+      '  Q1: Which authentication method?',
+      '  Q2: How long should links last?',
+      '→ relay clarify t-a Q1="…" Q2="…"',
+      '',
+      '[human_review] AC-3 needs human review',
+      '  A link cannot be reused',
+      '→ relay review t-a AC-3 pass|fail',
+    ]);
+  });
+
+  it('prints the empty message when nothing needs attention', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    expect(await run(['inbox'], { ...io, fetch, env: {}, graph: fakeGraphApi() })).toBe(0);
+    expect(io.out).toEqual(['inbox empty — nothing needs you']);
+  });
+
+  it('replays a JSONL file without calling fetch', async () => {
+    const dir = tmpDir();
+    const file = path.join(dir, 'events.jsonl');
+    fs.writeFileSync(file, `${JSON.stringify({
+      seq: 1,
+      ts: '2026-09-04T01:02:03.000Z',
+      mission_id: 'm-1',
+      actor: 'human',
+      type: 'mission_created',
+      payload: { id: 'm-1', repo: '/r', title: 'Login' },
+    })}\n`);
+    let fetchCalls = 0;
+    const fetch = (async () => {
+      fetchCalls += 1;
+      throw new Error('fetch must not be called in replay mode');
+    }) as typeof globalThis.fetch;
+    const io = capture();
+
+    expect(await run(['inbox', '--replay', file], { ...io, fetch, env: {}, graph: fakeGraphApi() })).toBe(0);
+    expect(fetchCalls).toBe(0);
+    expect(io.out).toEqual(['inbox empty — nothing needs you']);
+  });
+});
+
+describe('relay explain', () => {
+  const graph: Graph = {
+    nodes: [
+      { id: 'human', kind: 'human', label: 'human', column: 0, status: 'pending' },
+      { id: 'planner', kind: 'planner', label: 'planner', column: 0, status: 'done' },
+      { id: 't-a', kind: 'agent', label: 'backend', task_id: 't-a', column: 1, status: 'working' },
+      { id: 'verifier', kind: 'verifier', label: 'verifier', column: 2, status: 'pending' },
+    ],
+    edges: [
+      { id: 'contract:t-a', kind: 'contract', from: 'planner', to: 't-a', task_id: 't-a', label: 'v1', status: 'done', attention: false },
+      { id: 'evidence:t-a', kind: 'evidence', from: 't-a', to: 'verifier', task_id: 't-a', label: 'awaiting evidence', status: 'pending', attention: false },
+    ],
+    inbox: [
+      {
+        id: 'inbox:blocker:t-a',
+        kind: 'blocker',
+        mission_id: 'm-1',
+        task_id: 't-a',
+        title: 'backend is blocked',
+        detail: ['Needs a product decision'],
+        ref: { kind: 'node', id: 't-a' },
+        actions: [{ key: 'r', label: 'reply', kind: 'reply', target: { task_id: 't-a' } }],
+      },
+    ],
+  };
+
+  it('prints describe, a blank line, then storyFor for a task ref', async () => {
+    const event = {
+      seq: 1,
+      ts: '2026-09-04T01:02:03.000Z',
+      mission_id: 'm-1',
+      actor: 'human' as const,
+      type: 'mission_created' as const,
+      payload: { id: 'm-1', repo: '/r', title: 'Login', success_definition: '', integration_check: 'npx vitest run', budget: { max_repairs_per_task: 3 } },
+    };
+    const state = initialState();
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [event] : state));
+    const io = capture();
+    const graphApi = fakeGraphApi({
+      buildGraph: () => graph,
+      describe: (ref) => ({ title: `${ref.id} — backend agent`, lines: ['runtime: working', 'contract: v1 accepted'] }),
+      storyFor: (ref, _graph, _state, events) => [`${ref.id} accepted its contract`, `${[...events].length} event considered`],
+    });
+
+    const code = await run(['explain', 't-a'], { ...io, fetch, env: {}, graph: graphApi });
+
+    expect(code).toBe(0);
+    expect(io.out).toEqual([
+      't-a — backend agent',
+      'runtime: working',
+      'contract: v1 accepted',
+      '',
+      't-a accepted its contract',
+      '1 event considered',
+    ]);
+  });
+
+  it('exits 2 for an unknown ref and lists every valid ref', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    const code = await run(['explain', 'nope'], { ...io, fetch, env: {}, graph: fakeGraphApi({ buildGraph: () => graph }) });
+
+    expect(code).toBe(2);
+    expect(io.err.join('\n')).toContain('unknown object: nope');
+    expect(io.err.join('\n')).toContain('valid refs: contract:t-a, evidence:t-a, human, inbox:blocker:t-a, planner, t-a, verifier');
+  });
+
+  it('prints nothing to show when the graph implementation has no objects yet', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    const code = await run(['explain', 't-a'], { ...io, fetch, env: {}, graph: fakeGraphApi() });
+
+    expect(code).toBe(0);
+    expect(io.out).toEqual(['explain empty — nothing to show']);
+  });
+
+  it('still rejects an invalid ref when the graph implementation is empty', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    const code = await run(['explain', 'nope'], { ...io, fetch, env: {}, graph: fakeGraphApi() });
+
+    expect(code).toBe(2);
+    expect(io.err.join('\n')).toContain('unknown object: nope');
+    expect(io.err.join('\n')).toContain('valid refs: (none)');
+  });
+});
+
+describe('relay story', () => {
+  it('narrates only the selected task events with HH:MM prefixes', async () => {
+    const events = [
+      { seq: 1, ts: '2026-09-04T01:02:03.000Z', mission_id: 'm-1', task_id: 't-a', actor: 'agent:backend', type: 'progress_reported', payload: { message: 'started' } },
+      { seq: 2, ts: '2026-09-04T01:03:03.000Z', mission_id: 'm-1', task_id: 't-b', actor: 'agent:frontend', type: 'progress_reported', payload: { message: 'unrelated' } },
+      { seq: 3, ts: '2026-09-04T01:04:03.000Z', mission_id: 'm-1', task_id: 't-a', actor: 'agent:backend', type: 'task_blocked', payload: { reason: 'needs decision' } },
+    ];
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? events : initialState()));
+    const narrated: number[] = [];
+    const graph = fakeGraphApi({
+      narrate: (event) => {
+        narrated.push(event.seq);
+        return `event ${event.seq} for ${event.task_id}`;
+      },
+    });
+    const io = capture();
+
+    const code = await run(['story', '--task', 't-a'], { ...io, fetch, env: {}, graph });
+
+    expect(code).toBe(0);
+    expect(narrated).toEqual([1, 3]);
+    expect(io.out).toEqual([
+      `${formatTimestamp(events[0]!.ts).slice(0, 5)}  event 1 for t-a`,
+      `${formatTimestamp(events[2]!.ts).slice(0, 5)}  event 3 for t-a`,
+    ]);
+    expect(io.out.every((line) => /^\d{2}:\d{2}  /.test(line))).toBe(true);
+  });
+
+  it('prints a clear message when there are no events to narrate', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    expect(await run(['story'], { ...io, fetch, env: {}, graph: fakeGraphApi() })).toBe(0);
+    expect(io.out).toEqual(['story empty — nothing to show']);
+  });
+});
 
 describe('relay replay', () => {
   it('prints one timeline line per event: HH:MM:SS actor type task_id', async () => {
@@ -258,6 +486,8 @@ describe('relay usage', () => {
     expect(io.err.join('\n')).toMatch(/relay up/);
     const help = capture();
     expect(await run(['--help'], help)).toBe(0);
-    expect(help.out.join('\n')).toMatch(/relay replay/);
+    expect(help.out.join('\n')).toContain('relay inbox');
+    expect(help.out.join('\n')).toContain('relay explain <object>');
+    expect(help.out.join('\n')).toContain('relay story');
   });
 });
