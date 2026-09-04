@@ -75,14 +75,14 @@ Tests       28 passed (28)
 exit code   0
 ```
 
-## Git diff and changed files
+## Code diff and changed files
 
 Command:
 
 ```text
-git diff --check b0c4d2e..HEAD
-git diff --name-only b0c4d2e..HEAD
-git diff --stat b0c4d2e..HEAD
+git diff --check b0c4d2e..4df3522
+git diff --name-only b0c4d2e..4df3522
+git diff --stat b0c4d2e..4df3522
 ```
 
 Trimmed output:
@@ -97,7 +97,7 @@ apps/cli/src/cli.ts
 
 `git diff --check` produced no output. The pre-existing unstaged `package-lock.json` change was not modified or staged.
 
-Commits:
+Implementation commits:
 
 ```text
 4df3522 fix(cli): distinguish empty graphs from invalid refs
