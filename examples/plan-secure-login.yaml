@@ -54,9 +54,9 @@ tasks:
     goal: Add a minimal login page that submits an email address to the backend login endpoint and shows the result
     inputs:
       - README.md
-      - public/index.html
+      - src/app.ts
     constraints:
-      - Plain HTML and vanilla JavaScript only; no framework, no build step
+      - Plain HTML and vanilla JavaScript only; no framework, no build step; create the public/ directory if it does not exist
       - "The page must call POST /auth/request with a JSON body {\"email\": \"...\"} and display the response message"
     non_goals:
       - Backend changes
