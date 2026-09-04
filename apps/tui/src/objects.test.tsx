@@ -163,7 +163,8 @@ describe('object story', () => {
     }
 
     const view = render(<DeferredReplay />);
-    const deadline = Date.now() + 1_000;
+    // Generous: this only bounds a loaded CI runner (the frame normally lands within ~50 ms).
+    const deadline = Date.now() + 5_000;
     while (!view.lastFrame()?.includes('t-backend-auth  [Story]') && Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
