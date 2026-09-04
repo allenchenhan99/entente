@@ -96,7 +96,9 @@ export const USAGE = `usage:
   relay cast screen <file|run:pane> --t <seconds> [--port N]
   relay cast play <file> [--speed x]
 
-Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).`;
+Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).
+Session token (pane/runs routes need it): --token <t>, RELAY_TOKEN, or <repo>/.relay/session.token
+(repo = --repo, RELAY_REPO or the cwd; RELAY_DIR overrides the .relay directory).`;
 
 class UsageError extends Error {}
 class CommandError extends Error {}
@@ -171,7 +173,7 @@ async function runs(args: string[], io: CliIo): Promise<number> {
 
 async function runsList(args: string[], io: CliIo): Promise<number> {
   const { values } = parseKnown(args, { port: { type: 'string' } });
-  const list = parseRunList(await new Client(io, values.port).get<unknown>('/runs'));
+  const list = parseRunList(await new Client(io, values).get<unknown>('/runs'));
   const rows = list.map((run) => [run.run_id, run.started_at, String(run.events), run.panes.join(',') || '-']);
   for (const line of table(['run_id', 'started_at', 'events', 'panes'], rows)) io.stdout(line);
   return 0;
@@ -183,7 +185,7 @@ async function runsEvents(args: string[], io: CliIo): Promise<number> {
   if (!runId) throw new UsageError('relay runs events needs a run id');
   const since = values.since === undefined ? undefined : nonNegativeInteger(values.since, '--since');
   const suffix = since === undefined ? '' : `?since=${since}`;
-  const raw = await new Client(io, values.port).get<unknown>(`/runs/${routeComponent(runId, 'run id')}/events${suffix}`);
+  const raw = await new Client(io, values).get<unknown>(`/runs/${routeComponent(runId, 'run id')}/events${suffix}`);
   if (!Array.isArray(raw)) throw new CommandError('response does not match Event[]');
   raw.forEach((value, index) => {
     const parsed = EventSchema.safeParse(value);
@@ -213,7 +215,7 @@ async function castInfoCommand(args: string[], io: CliIo): Promise<number> {
         const parsed = parseCastFile(target.file);
         return { header: parsed.header, duration: parsed.duration, events: parsed.events.length };
       })()
-    : await remoteCastInfo(target, values.port, io);
+    : await remoteCastInfo(target, values, io);
   printCastInfo(info, io);
   return 0;
 }
@@ -227,7 +229,7 @@ async function castScreen(args: string[], io: CliIo): Promise<number> {
   const target = castTarget(source, io.cwd);
   const lines = target.kind === 'file'
     ? await renderCastScreen(parseCastFile(target.file), time)
-    : validateResponse(ScreenSnapshot, await new Client(io, values.port).get<unknown>(
+    : validateResponse(ScreenSnapshot, await new Client(io, values).get<unknown>(
         `/runs/${routeComponent(target.run, 'run id')}/casts/${routeComponent(target.pane, 'pane id')}/screen?t=${time}`,
       ), 'ScreenSnapshot').lines;
   for (const line of lines) io.stdout(line);
@@ -263,7 +265,7 @@ async function pane(args: string[], io: CliIo): Promise<number> {
 
 async function paneList(args: string[], io: CliIo): Promise<number> {
   const { values } = parseKnown(args, { port: { type: 'string' } });
-  const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.panes);
+  const raw = await new Client(io, values).get<unknown>(ptyRoutes.panes);
   const list = parsePaneList(raw);
   const panes = list.items.map((item, index) => ({
     ...validateResponse(PaneInfo, item, `PaneInfo[] at index ${index}`),
@@ -292,7 +294,7 @@ async function paneGet(args: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
   const paneId = positionals[0];
   if (!paneId) throw new UsageError('relay pane get needs a pane id');
-  const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.pane(paneId));
+  const raw = await new Client(io, values).get<unknown>(ptyRoutes.pane(paneId));
   const info = validateResponse(PaneInfo, raw, 'PaneInfo');
   const fields: ReadonlyArray<keyof PaneInfoType> = [
     'pane_id', 'task_id', 'role', 'runtime', 'cwd', 'pid', 'alive', 'cols', 'rows',
@@ -317,7 +319,7 @@ async function paneRead(args: string[], io: CliIo): Promise<number> {
   if (values.source !== undefined) query.set('source', values.source);
   if (values.lines !== undefined) query.set('lines', String(positiveInteger(values.lines, '--lines', 5_000)));
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  const raw = await new Client(io, values.port).get<unknown>(`${ptyRoutes.screen(paneId)}${suffix}`);
+  const raw = await new Client(io, values).get<unknown>(`${ptyRoutes.screen(paneId)}${suffix}`);
   const snapshot = validateResponse(ScreenSnapshot, raw, 'ScreenSnapshot');
   for (const line of snapshot.lines) io.stdout(line);
   return 0;
@@ -339,18 +341,18 @@ async function paneInput(args: string[], io: CliIo): Promise<number> {
     ...(values.text !== undefined ? { text: values.text } : {}),
     ...(keys !== undefined ? { keys } : {}),
   }, 'PaneInputBody');
-  return sendPaneInput(paneId, body, values.port, io);
+  return sendPaneInput(paneId, body, values, io);
 }
 
 async function paneRun(args: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
   const [paneId, command] = positionals;
   if (!paneId || command === undefined) throw new UsageError('relay pane run needs a pane id and command');
-  return sendPaneInput(paneId, { text: command, keys: ['enter'] }, values.port, io);
+  return sendPaneInput(paneId, { text: command, keys: ['enter'] }, values, io);
 }
 
-async function sendPaneInput(paneId: string, body: PaneInputBody, port: string | undefined, io: CliIo): Promise<number> {
-  const raw = await new Client(io, port).post<unknown>(ptyRoutes.input(paneId), body);
+async function sendPaneInput(paneId: string, body: PaneInputBody, client: ClientOptions, io: CliIo): Promise<number> {
+  const raw = await new Client(io, client).post<unknown>(ptyRoutes.input(paneId), body);
   validateResponse(OkOutput, raw, '{ ok: true }');
   io.stdout('ok');
   return 0;
@@ -381,7 +383,7 @@ async function paneWaitOutput(args: string[], io: CliIo): Promise<number> {
     ...(timeout !== undefined ? { timeout_ms: timeout } : {}),
     ...(values.source !== undefined ? { source: values.source } : {}),
   }, 'WaitOutputBody');
-  const raw = await new Client(io, values.port).post<unknown>(ptyRoutes.waitOutput(paneId), body);
+  const raw = await new Client(io, values).post<unknown>(ptyRoutes.waitOutput(paneId), body);
   const result = validateResponse(WaitOutputResult, raw, 'WaitOutputResult');
   switch (result.status) {
     case 'matched':
@@ -400,7 +402,7 @@ async function paneReadinessCommand(args: string[], io: CliIo): Promise<number> 
   const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
   const paneId = positionals[0];
   if (!paneId) throw new UsageError('relay pane readiness needs a pane id');
-  const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.readiness(paneId));
+  const raw = await new Client(io, values).get<unknown>(ptyRoutes.readiness(paneId));
   const readiness = validateResponse(PaneReadiness, raw, 'PaneReadiness');
   io.stdout(`ready ${readiness.ready} (${readiness.source}, ${readiness.detail ?? '-'})`);
   return readiness.ready ? 0 : 3;
@@ -410,7 +412,7 @@ async function panePostAction(args: string[], action: 'kill' | 'focus', io: CliI
   const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
   const paneId = positionals[0];
   if (!paneId) throw new UsageError(`relay pane ${action} needs a pane id`);
-  const raw = await new Client(io, values.port).post<unknown>(`${ptyRoutes.pane(paneId)}/${action}`, {});
+  const raw = await new Client(io, values).post<unknown>(`${ptyRoutes.pane(paneId)}/${action}`, {});
   validateResponse(OkOutput, raw, '{ ok: true }');
   io.stdout('ok');
   return 0;
@@ -423,7 +425,7 @@ async function paneCast(args: string[], io: CliIo): Promise<number> {
   });
   const paneId = positionals[0];
   if (!paneId) throw new UsageError('relay pane cast needs a pane id');
-  const cast = await new Client(io, values.port).getText(ptyRoutes.cast(paneId));
+  const cast = await new Client(io, values).getText(ptyRoutes.cast(paneId));
   if (values.out === undefined) {
     io.write(cast);
     return 0;
@@ -460,7 +462,7 @@ async function up(args: string[], io: CliIo): Promise<number> {
     title,
     ...(values.host !== undefined ? { host: values.host } : {}),
   };
-  const client = new Client(io, values.port);
+  const client = new Client(io, values);
   const created = await client.post<{ mission_id: string }>(routes.missions, body);
   io.stdout(created.mission_id);
 
@@ -477,7 +479,7 @@ async function up(args: string[], io: CliIo): Promise<number> {
 
 async function status(args: string[], io: CliIo): Promise<number> {
   const { values } = parseKnown(args, { port: { type: 'string' } });
-  const state = await new Client(io, values.port).get<State>(routes.state);
+  const state = await new Client(io, values).get<State>(routes.state);
   for (const m of Object.values(state.missions)) {
     for (const q of m.open_questions ?? []) io.stdout(`${m.mission.id} ? ${q.id}: ${q.text}`);
   }
@@ -499,11 +501,11 @@ async function clarify(args: string[], io: CliIo): Promise<number> {
   });
   const body: ClarifyBody = { answers };
   if (taskId.startsWith('m-')) {
-    const result = await new Client(io, values.port).post<{ answered: number; open_questions: number }>(routes.missionClarify(taskId), body);
+    const result = await new Client(io, values).post<{ answered: number; open_questions: number }>(routes.missionClarify(taskId), body);
     io.stdout(`mission ${taskId}: ${result.answered} answered, ${result.open_questions} open`);
     return 0;
   }
-  const result = await new Client(io, values.port).post<{ contract_version: number }>(routes.clarify(taskId), body);
+  const result = await new Client(io, values).post<{ contract_version: number }>(routes.clarify(taskId), body);
   io.stdout(`contract v${result.contract_version}`);
   return 0;
 }
@@ -518,7 +520,7 @@ async function review(args: string[], io: CliIo): Promise<number> {
     status: verdict === 'pass' ? 'passed' : 'failed',
     ...(observed !== undefined ? { observed_failure: observed } : {}),
   };
-  await new Client(io, values.port).post(routes.review(taskId), body);
+  await new Client(io, values).post(routes.review(taskId), body);
   io.stdout(`${taskId} ${criterionId} ${body.status}`);
   return 0;
 }
@@ -527,7 +529,7 @@ async function reply(args: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
   const [taskId, message] = positionals;
   if (!taskId || !message) throw new UsageError('relay reply needs a task id and a message');
-  const result = await new Client(io, values.port).post<{ delivered: true; unread: number }>(routes.reply(taskId), { message });
+  const result = await new Client(io, values).post<{ delivered: true; unread: number }>(routes.reply(taskId), { message });
   io.stdout(`replied to ${taskId} (${result.unread} unread by the agent)`);
   return 0;
 }
@@ -537,7 +539,7 @@ async function cancel(args: string[], io: CliIo): Promise<number> {
   const [taskId, reason] = positionals;
   if (!taskId) throw new UsageError('relay cancel needs a task id');
   const body: CancelBody = reason !== undefined ? { reason } : {};
-  await new Client(io, values.port).post(routes.cancel(taskId), body);
+  await new Client(io, values).post(routes.cancel(taskId), body);
   io.stdout(`${taskId} canceled`);
   return 0;
 }
@@ -570,7 +572,7 @@ async function inbox(args: string[], io: CliIo): Promise<number> {
     replay: { type: 'string' },
     port: { type: 'string' },
   });
-  const { state } = await loadGraphSource(values.replay, values.port, io);
+  const { state } = await loadGraphSource(values.replay, values, io);
   const items = io.graph.buildGraph(state).inbox;
   if (items.length === 0) {
     io.stdout('inbox empty — nothing needs you');
@@ -592,7 +594,7 @@ async function explain(args: string[], io: CliIo): Promise<number> {
   });
   const object = positionals[0];
   if (!object) throw new UsageError('relay explain needs an object ref');
-  const { state, events } = await loadGraphSource(values.replay, values.port, io);
+  const { state, events } = await loadGraphSource(values.replay, values, io);
   const graph = io.graph.buildGraph(state);
   const valid = validGraphRefs(graph);
   if (valid.length === 0 && hasGraphRefSyntax(object)) {
@@ -619,7 +621,7 @@ async function story(args: string[], io: CliIo): Promise<number> {
     task: { type: 'string' },
     port: { type: 'string' },
   });
-  const { state, events } = await loadGraphSource(values.replay, values.port, io);
+  const { state, events } = await loadGraphSource(values.replay, values, io);
   const selected = values.task === undefined ? events : events.filter((event) => event.task_id === values.task);
   if (selected.length === 0) {
     io.stdout('story empty — nothing to show');
@@ -703,10 +705,10 @@ function parseRemoteCastInfo(value: unknown, index: number): RemoteCastInfo {
 
 async function remoteCastInfo(
   target: Extract<CastTarget, { kind: 'remote' }>,
-  port: string | undefined,
+  client: ClientOptions,
   io: CliIo,
 ): Promise<RemoteCastInfo> {
-  const raw = await new Client(io, port).get<unknown>(`/runs/${routeComponent(target.run, 'run id')}/casts`);
+  const raw = await new Client(io, client).get<unknown>(`/runs/${routeComponent(target.run, 'run id')}/casts`);
   if (!Array.isArray(raw)) throw new CommandError('response does not match CastInfo[]');
   const infos = raw.map(parseRemoteCastInfo);
   const found = infos.find((info) => info.pane_id === target.pane);
@@ -744,9 +746,12 @@ export function baseUrl(env: Record<string, string | undefined>, port?: string):
 
 type OptionSpec = Record<string, { type: 'string' | 'boolean'; short?: string }>;
 
+/** Accepted by every command: `--token` (session token) and `--repo` (where `.relay/session.token` lives). */
+const CONNECTION_OPTIONS = { token: { type: 'string' }, repo: { type: 'string' } } as const satisfies OptionSpec;
+
 function parseKnown<T extends OptionSpec>(args: string[], options: T) {
   try {
-    return parseArgs({ args, options, allowPositionals: true, strict: true });
+    return parseArgs({ args, options: { ...CONNECTION_OPTIONS, ...options }, allowPositionals: true, strict: true });
   } catch (err) {
     throw new UsageError(err instanceof Error ? err.message : String(err));
   }
@@ -768,12 +773,12 @@ function loadPlan(file: string): LoadPlanBody {
   return parsed.data;
 }
 
-async function loadGraphSource(replayFile: string | undefined, port: string | undefined, io: CliIo): Promise<{ state: State; events: Event[] }> {
+async function loadGraphSource(replayFile: string | undefined, connection: ClientOptions, io: CliIo): Promise<{ state: State; events: Event[] }> {
   if (replayFile !== undefined) {
     const events = loadReplayEvents(path.resolve(io.cwd, replayFile));
     return { state: replayEvents(events), events };
   }
-  const client = new Client(io, port);
+  const client = new Client(io, connection);
   const state = await client.get<State>(routes.state);
   const events = await client.get<Event[]>(`${routes.eventsLog}?since=0`);
   return { state, events };
@@ -923,10 +928,36 @@ function parsePaneList(value: unknown): { items: unknown[]; focusedPane?: string
   };
 }
 
+export interface ClientOptions {
+  port?: string;
+  token?: string;
+  repo?: string;
+}
+
+const SESSION_TOKEN_FILE = 'session.token';
+
+/**
+ * The daemon's session token (docs/security.md): `--token`, then `RELAY_TOKEN`, then `<relayDir>/session.token`
+ * where relayDir is `RELAY_DIR` or `<--repo | RELAY_REPO | cwd>/.relay`. Undefined when none is available.
+ */
+export function resolveSessionToken(io: Pick<CliIo, 'env' | 'cwd'>, options: ClientOptions = {}): string | undefined {
+  if (options.token) return options.token;
+  if (io.env.RELAY_TOKEN?.trim()) return io.env.RELAY_TOKEN.trim();
+  const relayDir = io.env.RELAY_DIR ? path.resolve(io.cwd, io.env.RELAY_DIR) : path.join(path.resolve(io.cwd, options.repo ?? io.env.RELAY_REPO ?? '.'), '.relay');
+  try {
+    const token = fs.readFileSync(path.join(relayDir, SESSION_TOKEN_FILE), 'utf8').trim();
+    return token || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 class Client {
   private readonly base: string;
-  constructor(private readonly io: CliIo, port?: string) {
-    this.base = baseUrl(io.env, port);
+  private readonly token: string | undefined;
+  constructor(private readonly io: CliIo, options: ClientOptions = {}) {
+    this.base = baseUrl(io.env, options.port);
+    this.token = resolveSessionToken(io, options);
   }
 
   async get<T>(route: string): Promise<T> {
@@ -961,14 +992,21 @@ class Client {
 
   private async requestTextWithUrl(route: string, init: RequestInit): Promise<{ text: string; url: string }> {
     const url = this.base + route;
+    const headers = new Headers(init.headers);
+    if (this.token !== undefined) headers.set('authorization', `Bearer ${this.token}`);
     let response: Response;
     try {
-      response = await this.io.fetch(url, init);
+      response = await this.io.fetch(url, { ...init, headers });
     } catch (err) {
       throw new CommandError(`cannot reach relayd at ${url}: ${err instanceof Error ? err.message : String(err)}`);
     }
     const text = await response.text();
-    if (!response.ok) throw new CommandError(`${init.method} ${url} → HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ''}`);
+    if (!response.ok) {
+      const hint = response.status === 401
+        ? ' (relayd requires its session token: pass --token, set RELAY_TOKEN, or run from the repo so <repo>/.relay/session.token is found)'
+        : '';
+      throw new CommandError(`${init.method} ${url} → HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ''}${hint}`);
+    }
     return { text, url };
   }
 }

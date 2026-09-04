@@ -905,3 +905,52 @@ describe('relay usage', () => {
     expect(help.out.join('\n')).toContain('relay story');
   });
 });
+
+describe('relay session token', () => {
+  function recordingFetch() {
+    const headers: Array<Record<string, string>> = [];
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      headers.push(Object.fromEntries(new Headers(init?.headers).entries()));
+      const body = String(input).endsWith('/state') ? initialState() : { panes: [] };
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof globalThis.fetch;
+    return { fetch, headers };
+  }
+
+  it('relay pane list --token x sends Authorization: Bearer x', async () => {
+    const io = capture();
+    const { fetch, headers } = recordingFetch();
+    expect(await run(['pane', 'list', '--token', 'x'], { ...io, fetch, env: {} })).toBe(0);
+    expect(headers[0]?.authorization).toBe('Bearer x');
+  });
+
+  it('RELAY_TOKEN in the environment adds the header on every request; --token overrides it', async () => {
+    const io = capture();
+    const { fetch, headers } = recordingFetch();
+    expect(await run(['pane', 'list'], { ...io, fetch, env: { RELAY_TOKEN: 'from-env' } })).toBe(0);
+    expect(await run(['status'], { ...io, fetch, env: { RELAY_TOKEN: 'from-env' } })).toBe(0);
+    expect(await run(['pane', 'list', '--token', 'flag'], { ...io, fetch, env: { RELAY_TOKEN: 'from-env' } })).toBe(0);
+    expect(headers.map((h) => h.authorization)).toEqual(['Bearer from-env', 'Bearer from-env', 'Bearer flag']);
+  });
+
+  it('falls back to <repo>/.relay/session.token (cwd, --repo or RELAY_DIR) and sends nothing when there is no token', async () => {
+    const io = capture();
+    const { fetch, headers } = recordingFetch();
+    const repo = tmpDir();
+    fs.mkdirSync(path.join(repo, '.relay'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.relay', 'session.token'), 'abc123\n');
+    expect(await run(['pane', 'list'], { ...io, fetch, env: {}, cwd: repo })).toBe(0);
+    expect(await run(['pane', 'list', '--repo', repo], { ...io, fetch, env: {}, cwd: tmpDir() })).toBe(0);
+    expect(await run(['pane', 'list'], { ...io, fetch, env: { RELAY_DIR: path.join(repo, '.relay') }, cwd: tmpDir() })).toBe(0);
+    expect(await run(['pane', 'list'], { ...io, fetch, env: {}, cwd: tmpDir() })).toBe(0);
+    expect(headers.map((h) => h.authorization)).toEqual(['Bearer abc123', 'Bearer abc123', 'Bearer abc123', undefined]);
+  });
+
+  it('reports a 401 with a hint about the token', async () => {
+    const io = capture();
+    const fetch = (async () => new Response(JSON.stringify({ error: 'missing session token' }), { status: 401 })) as typeof globalThis.fetch;
+    expect(await run(['pane', 'list'], { ...io, fetch, env: {}, cwd: tmpDir() })).toBe(1);
+    expect(io.err[0]).toContain('HTTP 401');
+    expect(io.err[0]).toContain('--token');
+  });
+});
