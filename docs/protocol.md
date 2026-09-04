@@ -44,6 +44,7 @@ Generated from `packages/protocol/src` by `scripts/gen-protocol-docs.mjs`. JSON 
 - `progress_reported`
 - `task_blocked`
 - `task_unblocked`
+- `blocker_replied`
 - `evidence_submitted`
 - `checks_started`
 - `check_passed`
@@ -81,6 +82,7 @@ Generated from `packages/protocol/src` by `scripts/gen-protocol-docs.mjs`. JSON 
 | `relay_report_blocker` | `{ reason, waiting_on? }` → ok |
 | `relay_submit_evidence` | `{ contract_version, claimed, summary }` → `{ attempt, checks_started }` |
 | `relay_await_verdict` | `{ attempt, timeout_s ≤ 60 }` → `verified | repair | pending | failed_budget | escalated` |
+| `relay_await_reply` |  |
 
 ### Planner
 

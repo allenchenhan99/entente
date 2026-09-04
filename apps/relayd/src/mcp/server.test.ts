@@ -186,6 +186,21 @@ describe('mcp repair path', () => {
     expect(r.ofType('task_failed_budget').map((e) => e.task_id)).toEqual(['t-b']);
   });
 
+  it('report_blocker → HTTP-side reply → await_reply delivers the message without unblocking', async () => {
+    const r = await listen();
+    const { planner_token } = r.orchestrator.createMission({ repo: '/repo', title: 'Add login' });
+    const planner = await connect(r.url, planner_token);
+    await call(planner, PLANNER_TOOLS.propose_task, { contract: sampleContract('t-a') });
+    const a = await connect(r.url, r.orchestrator.tokenFor('t-a'));
+    await call(a, RECIPIENT_TOOLS.respond_to_contract, accepted);
+    await call(a, RECIPIENT_TOOLS.report_blocker, { reason: 'which sender?', waiting_on: 'human' });
+    const waiting = call(a, RECIPIENT_TOOLS.await_reply, { timeout_s: 5 });
+    r.orchestrator.reply('t-a', 'use MemoryEmailSender', 'human');
+    expect((await waiting).data).toMatchObject({ status: 'replied', message: 'use MemoryEmailSender', replied_by: 'human' });
+    expect(r.orchestrator.taskView('t-a')!.runtime).toBe('blocked');
+    expect((await call(a, RECIPIENT_TOOLS.await_reply, { timeout_s: 1 })).data).toEqual({ status: 'pending' });
+  });
+
   it('report_blocker then any tool call unblocks', async () => {
     const r = await listen();
     const { planner_token } = r.orchestrator.createMission({ repo: '/repo', title: 'Add login' });

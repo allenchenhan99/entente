@@ -37,6 +37,8 @@ export const TaskView = z.object({
   worktree: z.object({ path: z.string(), branch: z.string() }).optional(),
   agent: z.object({ runtime: RuntimeKind, pane_id: z.string(), session_id: z.string() }).optional(),
   blocker: z.object({ reason: z.string(), waiting_on: z.string().optional(), since: z.string() }).optional(),
+  /** Replies sent to this task's blockers, oldest first. */
+  replies: z.array(z.object({ message: z.string(), replied_by: z.string(), at: z.string() })).optional(),
   /** Task ids this task waits on that are not yet completed. */
   blocked_on_dependencies: z.array(z.string()),
 

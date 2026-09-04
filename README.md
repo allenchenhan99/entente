@@ -66,6 +66,9 @@ npx tsx apps/cli/src/index.ts up "Add secure login to this application." \
 # when an agent asks for clarification / when a human_review criterion is pending:
 npx tsx apps/cli/src/index.ts clarify t-backend-auth Q1="email magic link" Q2="15 minutes, single use"
 npx tsx apps/cli/src/index.ts review  t-backend-auth AC-3 fail "replaying a used token returned 200"
+# when a planner asks mission-level questions / when an agent reports a blocker:
+npx tsx apps/cli/src/index.ts clarify m-60100b Q1="passwordless magic link" Q2="HttpOnly cookie"
+npx tsx apps/cli/src/index.ts reply   t-backend-auth "use MemoryEmailSender; credentials are not needed in dev"
 ```
 
 No agents, no API keys? Replay a recorded run:
@@ -82,7 +85,7 @@ task and a bootstrap prompt describing the lifecycle. The tools:
 | Recipient tools | Planner tools |
 |---|---|
 | `relay_get_contract` · `relay_respond_to_contract` · `relay_await_contract` | `relay_get_mission` · `relay_propose_task` · `relay_list_tasks` |
-| `relay_report_progress` · `relay_report_blocker` | `relay_revise_task` · `relay_answer_clarification` |
+| `relay_report_progress` · `relay_report_blocker` · `relay_await_reply` | `relay_revise_task` · `relay_answer_clarification` · `relay_ask_human` · `relay_await_answers` |
 | `relay_submit_evidence` · `relay_await_verdict` | |
 
 The same server serves Claude Code and Codex; adding a runtime means implementing `AgentRuntime`

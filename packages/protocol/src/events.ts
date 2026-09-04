@@ -44,6 +44,8 @@ export const EventSchemas = [
   ev('progress_reported', z.object({ message: z.string(), percent: z.number().min(0).max(100).optional() })),
   ev('task_blocked', z.object({ reason: z.string(), waiting_on: z.string().optional() })),
   ev('task_unblocked', z.object({})),
+  /** Human (or planner) → blocked agent: a free-text reply delivered through `relay_await_reply`. */
+  ev('blocker_replied', z.object({ message: z.string().min(1) })),
 
   ev('evidence_submitted', z.object({ submission: EvidenceSubmission })),
   ev('checks_started', z.object({ attempt: z.number().int() })),

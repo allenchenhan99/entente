@@ -11,6 +11,7 @@
  *   POST /tasks/:id/clarify      → ClarifyBody       → { contract_version }
  *   POST /tasks/:id/review       → ReviewBody        → { ok: true }
  *   POST /tasks/:id/cancel       → CancelBody        → { ok: true }
+ *   POST /tasks/:id/reply        → ReplyBody         → { delivered: true, unread } (human answers a blocked agent)
  *   GET  /health                 → { ok: true, version }
  */
 import { z } from 'zod';
@@ -42,6 +43,9 @@ export const ReviewBody = z.object({
 export type ReviewBody = z.infer<typeof ReviewBody>;
 
 export const CancelBody = z.object({ reason: z.string().optional() });
+
+export const ReplyBody = z.object({ message: z.string().min(1) });
+export type ReplyBody = z.infer<typeof ReplyBody>;
 export type CancelBody = z.infer<typeof CancelBody>;
 
 export const DEFAULT_PORT = 7420;
@@ -56,6 +60,7 @@ export const routes = {
   clarify: (taskId: string) => `/tasks/${taskId}/clarify`,
   review: (taskId: string) => `/tasks/${taskId}/review`,
   cancel: (taskId: string) => `/tasks/${taskId}/cancel`,
+  reply: (taskId: string) => `/tasks/${taskId}/reply`,
   mcp: '/mcp',
   health: '/health',
 } as const;

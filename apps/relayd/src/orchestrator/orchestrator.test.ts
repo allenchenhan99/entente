@@ -352,6 +352,25 @@ describe('human review', () => {
 });
 
 describe('blockers and runtime state', () => {
+  it('reply / awaitReply: the human answers a blocker and the agent receives it in order', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    expect(await r.orchestrator.awaitReply('t-a', 1)).toEqual({ status: 'none' });
+    r.orchestrator.reportBlocker('t-a', { reason: 'which email sender?', waiting_on: 'human' });
+    expect(await r.orchestrator.awaitReply('t-a', 1)).toEqual({ status: 'pending' });
+    const poll = r.orchestrator.awaitReply('t-a', 5);
+    expect(r.orchestrator.reply('t-a', 'use MemoryEmailSender', 'human')).toEqual({ delivered: true, unread: 1 });
+    expect(await poll).toMatchObject({ status: 'replied', message: 'use MemoryEmailSender', replied_by: 'human' });
+    expect(r.orchestrator.taskView('t-a')!.runtime).toBe('blocked'); // await_reply is not a heartbeat
+    expect(r.orchestrator.taskView('t-a')!.replies).toHaveLength(1);
+    r.orchestrator.reply('t-a', 'second', 'human');
+    expect(await r.orchestrator.awaitReply('t-a', 1)).toMatchObject({ status: 'replied', message: 'second' });
+    expect(r.ofType('blocker_replied')).toHaveLength(2);
+    r.orchestrator.reportProgress('t-a', { message: 'continuing' });
+    expect(await r.orchestrator.awaitReply('t-a', 1)).toEqual({ status: 'none' });
+  });
+
   it('report_blocker sets blocked; the next non-await call unblocks once', async () => {
     const r = createTestRelay();
     await spawnedTask(r);

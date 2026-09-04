@@ -1054,6 +1054,29 @@
             ],
             "additionalProperties": false
           },
+          "replies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "replied_by": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message",
+                "replied_by",
+                "at"
+              ],
+              "additionalProperties": false
+            }
+          },
           "blocked_on_dependencies": {
             "type": "array",
             "items": {

@@ -17,8 +17,9 @@ import type {
   CreateMissionBody, ReviewBody, EventInput, EventType,
   RespondInput, SubmitEvidenceInput, ReportProgressInput, ReportBlockerInput,
 } from '@relay/protocol';
-import type { AwaitAnswersOutput as AwaitAnswersOutputSchema } from '@relay/protocol';
+import type { AwaitAnswersOutput as AwaitAnswersOutputSchema, AwaitReplyOutput as AwaitReplyOutputSchema } from '@relay/protocol';
 type AwaitAnswersOutput = z.infer<typeof AwaitAnswersOutputSchema>;
+type AwaitReplyOutput = z.infer<typeof AwaitReplyOutputSchema>;
 import type {
   EventStore, WorktreeManager, WorktreeInfo, CheckRunner, RepairPolicy, TerminalHost, AgentRuntime, RepairDecision,
 } from '../ports.js';
@@ -104,6 +105,10 @@ export interface Orchestrator {
   awaitContract(taskId: string, sinceVersion: number, timeoutS: number, signal?: AbortSignal): Promise<AwaitContractOutput>;
   reportProgress(taskId: string, input: ReportProgressInputT): void;
   reportBlocker(taskId: string, input: ReportBlockerInputT): void;
+  /** Human/planner → agent: reply to the current blocker (delivered by awaitReply). */
+  reply(taskId: string, message: string, actor: Sender): { delivered: true; unread: number };
+  /** Long-poll for the next unread reply; `none` when the task has no outstanding blocker and no unread reply. */
+  awaitReply(taskId: string, timeoutS: number, signal?: AbortSignal): Promise<AwaitReplyOutput>;
   submitEvidence(taskId: string, input: SubmitEvidenceInputT): SubmitEvidenceOutput;
   awaitVerdict(taskId: string, attempt: number, timeoutS: number, signal?: AbortSignal): Promise<AwaitVerdictOutput>;
 
@@ -143,6 +148,8 @@ interface TaskRecord {
   paneId?: string;
   sessionId?: string;
   blocker?: { reason: string; waiting_on?: string; since: string };
+  replies: Array<{ message: string; replied_by: string; at: string }>;
+  repliesRead: number;
   attempt: number;
   attempts: EvidenceRecord[];
   submissions: EvidenceSubmission[];
@@ -219,6 +226,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     worktree: rec.worktree ? { path: rec.worktree.path, branch: rec.worktree.branch } : undefined,
     agent: rec.paneId ? { runtime: current(rec).runtime, pane_id: rec.paneId, session_id: rec.sessionId ?? '' } : undefined,
     blocker: rec.blocker,
+    replies: [...rec.replies],
     blocked_on_dependencies: depsUnmet(rec),
     attempt: rec.attempt,
     attempts: [...rec.attempts],
@@ -348,7 +356,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         id: contract.id, missionId, versions: [], lint: [], openQuestions: [],
         taskState: 'proposed', handoffState: 'proposed', runtimeState: 'unspawned',
         spawned: false, spawning: false, attempt: 0, attempts: [], submissions: [], verdicts: new Map(),
-        repairs: [], repairAckPending: false, escalated: false, proposedAt: clock(),
+        repairs: [], repairAckPending: false, escalated: false, proposedAt: clock(), replies: [], repliesRead: 0,
       };
       tasks.set(rec.id, rec);
       m.taskIds.push(rec.id);
@@ -498,6 +506,29 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     rec.blocker = { reason: input.reason, waiting_on: input.waiting_on, since: clock() };
     rec.runtimeState = 'blocked';
     emitTask(rec, agentActor(rec), 'task_blocked', input);
+  };
+
+  const reply: Orchestrator['reply'] = (taskId, message, actor) => {
+    const rec = mustTask(taskId);
+    if (rec.taskState === 'canceled' || rec.taskState === 'completed') throw conflict(`task ${taskId} is ${rec.taskState}`);
+    rec.replies.push({ message, replied_by: actor, at: clock() });
+    emitTask(rec, actor, 'blocker_replied', { message }); // emit() wakes the task's waiters
+    return { delivered: true, unread: rec.replies.length - rec.repliesRead };
+  };
+
+  const awaitReply: Orchestrator['awaitReply'] = async (taskId, timeoutS, signal) => {
+    const rec = mustTask(taskId);
+    const deadline = Date.now() + clampTimeout(timeoutS);
+    for (;;) {
+      if (rec.repliesRead < rec.replies.length) {
+        const next = rec.replies[rec.repliesRead++]!;
+        return { status: 'replied', message: next.message, replied_by: next.replied_by, at: next.at };
+      }
+      if (!rec.blocker || rec.taskState === 'canceled') return { status: 'none' };
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return { status: 'pending' };
+      if ((await waiters.wait(`task:${taskId}`, remaining, signal)) === 'aborted') return { status: 'pending' };
+    }
   };
 
   // ---------- verification pipeline ----------
@@ -798,7 +829,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       return rec ? toView(rec) : undefined;
     },
     proposeTask, reviseTask, clarify, review, cancel,
-    getContract, respond, awaitContract, reportProgress, reportBlocker, submitEvidence, awaitVerdict,
+    getContract, respond, awaitContract, reportProgress, reportBlocker, reply, awaitReply, submitEvidence, awaitVerdict,
     issueToken,
     resolveToken: (token) => tokens.get(token),
     tokenFor: (taskId) => tasks.get(taskId)?.token,

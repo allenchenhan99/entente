@@ -32,6 +32,7 @@ export const USAGE = `usage:
   relay clarify <task-id|mission-id> Q1="..." [Q2="..."] [--port N]
   relay review <task-id> <AC-id> pass|fail ["observed failure"] [--port N]
   relay cancel <task-id> ["reason"] [--port N]
+  relay reply <task-id> "message" [--port N]       answer a blocked agent
   relay replay <file.jsonl>
 
 Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).`;
@@ -55,6 +56,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
       case 'clarify': return await clarify(rest, full);
       case 'review': return await review(rest, full);
       case 'cancel': return await cancel(rest, full);
+      case 'reply': return await reply(rest, full);
       case 'replay': return replay(rest, full);
       case '-h': case '--help': case 'help':
         full.stdout(USAGE);
@@ -157,6 +159,15 @@ async function review(args: string[], io: CliIo): Promise<number> {
   };
   await new Client(io, values.port).post(routes.review(taskId), body);
   io.stdout(`${taskId} ${criterionId} ${body.status}`);
+  return 0;
+}
+
+async function reply(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const [taskId, message] = positionals;
+  if (!taskId || !message) throw new UsageError('relay reply needs a task id and a message');
+  const result = await new Client(io, values.port).post<{ delivered: true; unread: number }>(routes.reply(taskId), { message });
+  io.stdout(`replied to ${taskId} (${result.unread} unread by the agent)`);
   return 0;
 }
 

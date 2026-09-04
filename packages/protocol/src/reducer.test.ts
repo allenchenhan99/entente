@@ -59,6 +59,7 @@ describe('reducer', () => {
       log.add('work_started', {}, { task_id: BACKEND, actor: 'agent:backend' });
       log.add('progress_reported', { message: 'half way', percent: 50 }, { task_id: BACKEND, actor: 'agent:backend' });
       log.add('task_blocked', { reason: 'waiting on schema', waiting_on: 't-auth-schema' }, { task_id: BACKEND, actor: 'agent:backend' });
+      log.add('blocker_replied', { message: 'schema is on branch relay/t-auth-schema' }, { task_id: BACKEND, actor: 'human' });
       log.add('task_unblocked', {}, { task_id: BACKEND, actor: 'human' });
       log.add('evidence_submitted', { submission: { task_id: BACKEND, contract_version: 1, attempt: 1, claimed: { 'AC-1': { status: 'passed' } } } }, { task_id: BACKEND, actor: 'agent:backend' });
       log.add('checks_started', { attempt: 1 }, { task_id: BACKEND });
@@ -83,7 +84,7 @@ describe('reducer', () => {
 
       const seen = new Set<EventType>(log.events.map((e) => e.type));
       expect([...EVENT_TYPES].filter((t) => !seen.has(t))).toEqual([]);
-      expect(EVENT_TYPES).toHaveLength(35);
+      expect(EVENT_TYPES).toHaveLength(36);
 
       let state = initialState();
       for (const e of log.events) {
@@ -128,6 +129,7 @@ describe('reducer', () => {
         integration_conflict: { task_id: BACKEND, files: [] },
         mission_verified: {},
         mission_failed: { reason: 'r' },
+        blocker_replied: { message: 'use the fake sender' },
         mission_clarification_requested: { questions: [{ id: 'Q1', text: 'Which mechanism?', blocking: true }] },
         mission_clarification_answered: { answers: [{ question_id: 'Q1', answer: 'magic link', answered_by: 'human', at: 'x' }] },
       };
@@ -164,6 +166,16 @@ describe('reducer', () => {
   });
 
   describe('three layers', () => {
+    it('blocker_replied appends a reply (actor, message, time) and leaves the blocker in place', () => {
+      const log = acceptedBackend();
+      log.add('work_started', {}, { task_id: BACKEND, actor: 'agent:backend' });
+      log.add('task_blocked', { reason: 'need creds', waiting_on: 'human' }, { task_id: BACKEND, actor: 'agent:backend' });
+      const replied = log.add('blocker_replied', { message: 'creds are in .env.example' }, { task_id: BACKEND, actor: 'human' });
+      const t = replay(log.events).tasks[BACKEND]!;
+      expect(t.runtime).toBe('blocked');
+      expect(t.replies).toEqual([{ message: 'creds are in .env.example', replied_by: 'human', at: replied.ts }]);
+    });
+
     it('runtime is blocked while task_state is executing and handoff_state is accepted', () => {
       const log = acceptedBackend();
       log.add('work_started', {}, { task_id: BACKEND, actor: 'agent:backend' });

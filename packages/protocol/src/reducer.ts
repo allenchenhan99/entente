@@ -114,6 +114,8 @@ function taskTransition(task: TaskView, event: Event): TaskPatch | undefined {
       return { runtime: 'blocked', blocker: { reason: event.payload.reason, waiting_on: event.payload.waiting_on, since: ts }, last_seen_at: ts };
     case 'task_unblocked':
       return { runtime: 'working', blocker: undefined, last_seen_at: ts };
+    case 'blocker_replied':
+      return { replies: [...(task.replies ?? []), { message: event.payload.message, replied_by: event.actor, at: ts }] };
 
     case 'evidence_submitted':
       return {

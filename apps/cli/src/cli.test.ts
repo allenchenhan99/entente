@@ -207,6 +207,15 @@ describe('relay clarify / review / cancel', () => {
     expect(io.out).toEqual(['mission m-cd0a69: 1 answered, 0 open']);
   });
 
+  it('reply posts a message to /tasks/:id/reply', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ delivered: true, unread: 1 }));
+    const io = capture();
+    expect(await run(['reply', 't-backend', 'use the memory sender'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toMatchObject({ method: 'POST', url: 'http://127.0.0.1:7420/tasks/t-backend/reply', body: { message: 'use the memory sender' } });
+    expect(io.out).toEqual(['replied to t-backend (1 unread by the agent)']);
+    expect(await run(['reply', 't-backend'], { ...capture(), fetch, env: {} })).toBe(2);
+  });
+
   it('clarify rejects malformed answers', async () => {
     const { fetch, requests } = fakeFetch(() => ({}));
     const io = capture();

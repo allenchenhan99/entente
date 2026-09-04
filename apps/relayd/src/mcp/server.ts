@@ -12,7 +12,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   RECIPIENT_TOOLS, PLANNER_TOOLS, routes,
-  RespondInput, AwaitContractInput, ReportProgressInput, ReportBlockerInput, SubmitEvidenceInput, AwaitVerdictInput,
+  RespondInput, AwaitContractInput, ReportProgressInput, ReportBlockerInput, SubmitEvidenceInput, AwaitVerdictInput, AwaitReplyInput,
   ProposeTaskInput, ReviseTaskInput, AnswerClarificationInput, AskHumanInput, AwaitAnswersInput,
 } from '@relay/protocol';
 import type { Orchestrator, TokenSubject } from '../orchestrator/orchestrator.js';
@@ -74,6 +74,11 @@ export function buildMcpServer(orchestrator: Orchestrator, subject: TokenSubject
 
   server.registerTool(RECIPIENT_TOOLS.report_blocker, { description: 'Report that you are blocked, on what, and who you are waiting for.', inputSchema: ReportBlockerInput },
     (args) => asRecipient((taskId) => { orchestrator.reportBlocker(taskId, args); return ok({ ok: true }); }));
+
+  server.registerTool(RECIPIENT_TOOLS.await_reply, {
+    description: 'After relay_report_blocker: wait (up to timeout_s) for the human\'s reply. Returns pending on timeout (call again) or none when there is no outstanding blocker.',
+    inputSchema: AwaitReplyInput,
+  }, (args, extra) => asRecipient(async (taskId) => ok(await orchestrator.awaitReply(taskId, args.timeout_s, extra.signal))));
 
   server.registerTool(RECIPIENT_TOOLS.submit_evidence, {
     description: 'Submit your claimed status per criterion and a summary. relayd collects the diff and runs every check itself.',

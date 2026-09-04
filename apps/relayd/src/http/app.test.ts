@@ -116,6 +116,22 @@ describe('http', () => {
     expect((await app.request('/events/log?since=x')).status).toBe(400);
   });
 
+  it('POST /tasks/:id/reply delivers a message to a blocked agent', async () => {
+    const { app, orchestrator, ofType } = setup();
+    const { mission_id } = await createMission(app);
+    await app.request(`/missions/${mission_id}/plan`, json({ tasks: [sampleContract('t-a')] }));
+    orchestrator.respond('t-a', { contract_version: 1, decision: 'accepted', interpretation: ['a', 'b', 'c'], assumptions: [], risks: [], verification_plan: { 'AC-1': 'x', 'AC-2': 'y' }, questions: [] });
+    orchestrator.reportBlocker('t-a', { reason: 'need a decision', waiting_on: 'human' });
+    const bad = await app.request('/tasks/t-a/reply', json({ message: '' }));
+    expect(bad.status).toBe(400);
+    const ok = await app.request('/tasks/t-a/reply', json({ message: 'go with option B' }));
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ delivered: true, unread: 1 });
+    expect(await orchestrator.awaitReply('t-a', 1)).toMatchObject({ status: 'replied', message: 'go with option B' });
+    expect(ofType('blocker_replied')).toHaveLength(1);
+    expect((await app.request('/tasks/t-nope/reply', json({ message: 'x' }))).status).toBe(404);
+  });
+
   it('POST /tasks/:id/clarify, /review, /cancel behave per api.ts', async () => {
     const { app, orchestrator, ofType, host } = setup({ script: { 'AC-2': 'pending_human' } });
     const { mission_id } = await createMission(app);

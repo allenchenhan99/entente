@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { z } from 'zod';
-import { CreateMissionBody, LoadPlanBody, SpawnPlannerBody, ClarifyBody, ReviewBody, CancelBody, routes } from '@relay/protocol';
+import { CreateMissionBody, LoadPlanBody, SpawnPlannerBody, ClarifyBody, ReviewBody, CancelBody, ReplyBody, routes } from '@relay/protocol';
 import type { EventStore } from '../ports.js';
 import type { Orchestrator } from '../orchestrator/orchestrator.js';
 import { RelayError } from '../orchestrator/errors.js';
@@ -130,6 +130,13 @@ export function createApp(opts: AppOptions): Hono {
     const body = await parseBody(c, ClarifyBody);
     if (!body.ok) return body.res;
     return c.json(orchestrator.clarifyMission(missionId, body.data.answers, 'human'));
+  });
+
+  app.post('/tasks/:id/reply', async (c) => {
+    const taskId = c.req.param('id');
+    const body = await parseBody(c, ReplyBody);
+    if (!body.ok) return body.res;
+    return c.json(orchestrator.reply(taskId, body.data.message, 'human'));
   });
 
   app.post('/tasks/:id/clarify', async (c) => {

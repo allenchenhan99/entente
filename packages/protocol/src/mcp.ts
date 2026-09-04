@@ -13,6 +13,7 @@ export const RECIPIENT_TOOLS = {
   report_blocker: 'relay_report_blocker',
   submit_evidence: 'relay_submit_evidence',
   await_verdict: 'relay_await_verdict',
+  await_reply: 'relay_await_reply',
 } as const;
 
 export const PLANNER_TOOLS = {
@@ -63,6 +64,14 @@ export const AwaitVerdictOutput = z.discriminatedUnion('status', [
   z.object({ status: z.literal('pending'), pending_criteria: z.array(z.string()) }),
   z.object({ status: z.literal('failed_budget'), reason: z.string() }),
   z.object({ status: z.literal('escalated'), reason: z.string() }),
+]);
+
+/** Blocked agent ← human: the next unread reply to this task's blocker. */
+export const AwaitReplyInput = z.object({ timeout_s: z.number().int().min(1).max(AWAIT_TIMEOUT_MAX_S).default(30) });
+export const AwaitReplyOutput = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('replied'), message: z.string(), replied_by: z.string(), at: z.string() }),
+  z.object({ status: z.literal('pending') }),
+  z.object({ status: z.literal('none') }),
 ]);
 
 export const ProposeTaskInput = z.object({ contract: TaskContractInput });

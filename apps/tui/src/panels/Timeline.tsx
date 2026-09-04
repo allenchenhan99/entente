@@ -16,6 +16,7 @@ export function eventHint(event: Event): string {
     case 'clarification_answered': return `${event.payload.answers.length} answered`;
     case 'mission_clarification_requested': return `? ${event.payload.questions.length} for the human`;
     case 'mission_clarification_answered': return `${event.payload.answers.length} answered`;
+    case 'blocker_replied': return `↩ ${event.payload.message.slice(0, 40)}`;
     case 'evidence_submitted': return `#${event.payload.submission.attempt}`;
     case 'checks_started': return `#${event.payload.attempt}`;
     case 'check_passed': return `${event.payload.criterion_id} passed`;
