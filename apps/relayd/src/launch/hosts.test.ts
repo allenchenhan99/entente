@@ -2,7 +2,18 @@ import { describe, it, expect } from 'vitest';
 import { createTerminalHost } from './index.js';
 import { HerdrHost } from './hosts/herdr.js';
 import { TmuxHost, shellQuote } from './hosts/tmux.js';
-import { fakeExec } from './test-utils.js';
+import type { Exec, ExecOptions, ExecResult } from './exec.js';
+
+/** Fake executor: records every invocation and returns canned results (never starts a process). */
+function fakeExec(handler: (argv: string[], opts?: ExecOptions) => Partial<ExecResult> | undefined = () => undefined) {
+  const calls: { argv: string[]; opts?: ExecOptions }[] = [];
+  const exec: Exec = async (argv, opts) => {
+    calls.push({ argv, opts });
+    const r = handler(argv, opts) ?? {};
+    return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', exitCode: r.exitCode ?? 0 };
+  };
+  return { exec, calls };
+}
 
 const splitJson = JSON.stringify({ id: 'cli:pane:split', result: { pane: { pane_id: 'w1:p7', tab_id: 'w1:t1', workspace_id: 'w1' }, type: 'pane_info' } });
 
