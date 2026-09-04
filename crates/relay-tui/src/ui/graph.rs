@@ -180,8 +180,7 @@ fn plan_rows(graph: &Graph, width: usize) -> Rows {
     let columns = width >= COLUMN_LAYOUT_MIN_WIDTH;
     let mut node_rows = vec![0; graph.nodes.len()];
     let mut heading_rows = [0; 4];
-    let first_edge_row;
-    if columns {
+    let first_edge_row = if columns {
         // Ink layout: headings on row 0, nodes stacked per column from row 1.
         let mut counts = [0usize; 4];
         for (index, node) in graph.nodes.iter().enumerate() {
@@ -189,7 +188,7 @@ fn plan_rows(graph: &Graph, width: usize) -> Rows {
             counts[column] += 1;
             node_rows[index] = counts[column];
         }
-        first_edge_row = counts.iter().copied().max().unwrap_or(0) + 2;
+        counts.iter().copied().max().unwrap_or(0) + 2
     } else {
         // Narrow: one group per column (heading row, then its nodes), columns without nodes are skipped.
         let mut row = 0;
@@ -211,8 +210,8 @@ fn plan_rows(graph: &Graph, width: usize) -> Rows {
                 row += 1;
             }
         }
-        first_edge_row = row + 1;
-    }
+        row + 1
+    };
     Rows {
         node_rows,
         heading_rows,
