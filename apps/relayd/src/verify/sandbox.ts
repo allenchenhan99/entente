@@ -119,6 +119,21 @@ function gitDirs(cwd: string): string[] {
   }
 }
 
+/**
+ * relayd shares the repository's `node_modules` with each worktree through a symlink (git-worktrees.ts). Tools such
+ * as Vite write scratch files inside it (`node_modules/.vite-temp`), which resolve to the link target outside the
+ * worktree; allow that target so `vitest` can start under the sandbox.
+ */
+function linkedNodeModules(cwd: string): string[] {
+  const link = path.join(cwd, 'node_modules');
+  try {
+    if (!fs.lstatSync(link).isSymbolicLink()) return [];
+    return [fs.realpathSync(link)];
+  } catch {
+    return [];
+  }
+}
+
 function withRealpaths(dirs: string[]): string[] {
   return [...new Set(dirs.flatMap((dir) => [dir, realpathOrSelf(dir)]))];
 }
@@ -169,7 +184,7 @@ export function createCheckSandbox(options: CheckSandboxOptions): CheckSandbox {
     let argv = [SHELL, '-c', run.run];
     if (sandboxed) {
       const writable = withRealpaths([
-        run.cwd, ...(run.writable ?? []), home, tmpdir, '/tmp', '/var/tmp', ...gitDirs(run.cwd),
+        run.cwd, ...(run.writable ?? []), home, tmpdir, '/tmp', '/var/tmp', ...gitDirs(run.cwd), ...linkedNodeModules(run.cwd),
       ]);
       argv = [SANDBOX_EXEC, '-p', sandboxProfile(writable), ...argv];
     }

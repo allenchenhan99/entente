@@ -172,4 +172,23 @@ describe('sandbox network', () => {
     expect(homeDir.exitCode).not.toBe(0);
     expect(fs.existsSync(path.join(os.homedir(), 'relay-sandbox-must-not-exist'))).toBe(false);
   });
+
+  it('allows writes through the worktree\'s node_modules symlink (Vite writes node_modules/.vite-temp there)', async (ctx) => {
+    if (!sandboxExecAvailable()) return ctx.skip(`sandbox-exec not available on ${process.platform}`);
+    const relayDir = fs.mkdtempSync(path.join(process.cwd(), '.relay', 'sandbox-test-'));
+    tempDirs.push(relayDir);
+    const shared = path.join(relayDir, 'shared', 'node_modules'); // stands in for the main checkout's node_modules (outside the temp tree)
+    fs.mkdirSync(shared, { recursive: true });
+    const cwd = tempDir();
+    fs.symlinkSync(shared, path.join(cwd, 'node_modules'), 'dir');
+    const sandbox = createCheckSandbox({ relayDir, env: { ...daemonEnv, PATH: process.env.PATH ?? '/usr/bin:/bin' }, log: () => {} });
+    const result = await sandbox.runCheck({ run: 'mkdir -p node_modules/.vite-temp && touch node_modules/.vite-temp/x', cwd, timeoutMs: 10_000 });
+    expect(result.output).toBe('');
+    expect(result.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(shared, '.vite-temp', 'x'))).toBe(true);
+    // Only the link target is opened up, not its parent.
+    const parent = await sandbox.runCheck({ run: `touch "${path.dirname(shared)}/sibling"`, cwd, timeoutMs: 10_000 });
+    expect(parent.exitCode).not.toBe(0);
+    expect(fs.existsSync(path.join(path.dirname(shared), 'sibling'))).toBe(false);
+  });
 });
