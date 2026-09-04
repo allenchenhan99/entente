@@ -6,7 +6,11 @@
  * every other member of the port and `launch/index.ts` casts at the boundary.
  */
 import path from 'node:path';
-import type { PaneInfo, PaneReadiness, ScreenSnapshot, WaitOutputResult, PaneInputBody } from '@relay/protocol';
+import type { z } from 'zod';
+import type { PaneInfo, PaneReadiness, ScreenSnapshot, PaneInputBody } from '@relay/protocol';
+import type { WaitOutputResult as WaitOutputResultSchema } from '@relay/protocol';
+
+export type WaitOutputResult = z.infer<typeof WaitOutputResultSchema>;
 import type { SpawnOptions } from '../ports.js';
 import { Pane, runtimeOf, KILL_GRACE_MS } from './pane.js';
 import type { ScreenQuery } from './screen.js';

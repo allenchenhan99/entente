@@ -96,6 +96,8 @@ export class Pane {
   private exitedAt: string | undefined;
   private lastOutputAt: number | undefined;
   private killTimer: NodeJS.Timeout | undefined;
+  /** The most recent headless write; exit is published only after it has been applied. */
+  private pendingWrites: Promise<void> = Promise.resolve();
 
   constructor(opts: PaneOptions) {
     this.id = opts.paneId;
@@ -117,14 +119,16 @@ export class Pane {
     this.pty = nodePty.spawn(file, args, { name: 'xterm-256color', cols: this.cols, rows: this.rows, cwd: opts.cwd, env: opts.env });
 
     this.exited = new Promise<number>((resolve) => {
-      this.pty.onExit(({ exitCode }) => {
+      // node-pty can report the exit before the parser has applied the final chunk: publish exit only after
+      // every pending screen write, so `exit` never overtakes the last `output` and the final line is scannable.
+      this.pty.onExit(({ exitCode }) => void this.pendingWrites.then(() => {
         this.exitCode = exitCode;
         this.exitedAt = this.clock();
         if (this.killTimer) clearTimeout(this.killTimer);
         void this.recorder.close();
         for (const l of this.exitListeners) l(exitCode);
         resolve(exitCode);
-      });
+      }));
     });
     this.pty.onData((data) => this.handleOutput(data));
   }
@@ -136,10 +140,11 @@ export class Pane {
     // xterm parses asynchronously: publish the chunk (ring + listeners) only once the screen reflects it, so a
     // wait-output scan or a client joining between chunks never sees the ring ahead of the screen or twice.
     const bytes = Buffer.from(data, 'utf8');
-    this.term.write(data, () => {
+    this.pendingWrites = new Promise<void>((resolve) => this.term.write(data, () => {
       this.ring.push(bytes);
       for (const l of this.outputListeners) l(bytes);
-    });
+      resolve();
+    }));
   }
 
   get pid(): number {
