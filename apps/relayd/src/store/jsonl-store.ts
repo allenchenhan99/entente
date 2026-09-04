@@ -25,7 +25,8 @@ export function createJsonlStore(opts: JsonlStoreOptions): JsonlStore {
   const file = path.join(opts.dir, 'events.jsonl');
 
   const events: Event[] = [];
-  if (fs.existsSync(file)) {
+  if (!fs.existsSync(file)) fs.writeFileSync(file, '');
+  else {
     for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
       if (!line.trim()) continue;
       events.push(Event.parse(JSON.parse(line)));

@@ -56,6 +56,12 @@ describe('jsonl store', () => {
     expect(reopened.state().last_seq).toBe(4);
   });
 
+  it('creates an empty events.jsonl on open so the run is visible immediately', () => {
+    const dir = tmp();
+    createJsonlStore({ dir: path.join(dir, 'nested') });
+    expect(fs.readFileSync(path.join(dir, 'nested', 'events.jsonl'), 'utf8')).toBe('');
+  });
+
   it('subscribe fires synchronously after append with the event and fresh state', () => {
     const store = createJsonlStore({ dir: tmp() });
     const seen: number[] = [];
