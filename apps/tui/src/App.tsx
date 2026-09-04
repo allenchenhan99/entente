@@ -228,7 +228,8 @@ export function App(props: AppProps) {
     onDoubleSpeed: props.replayControls?.doubleSpeed,
   });
   const actionFooter = formatActions(actions);
-  const countFooter = graph.inbox.length > 0 ? `inbox:${graph.inbox.length}` : metricFooter(props.state);
+  // Both signals matter: what needs a human now (inbox) and the mission-level metrics.
+  const countFooter = graph.inbox.length > 0 ? `inbox:${graph.inbox.length}  ${metricFooter(props.state)}` : metricFooter(props.state);
 
   return (
     <Box flexDirection="column" width={width} height={height} overflow="hidden">
