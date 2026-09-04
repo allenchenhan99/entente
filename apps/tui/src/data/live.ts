@@ -74,10 +74,22 @@ export function useLiveState(url: string, options: LiveOptions = {}): LiveView {
           const snapshot = StateSchema.parse(await response.json());
           if (!active) return;
           if (haveSnapshot && snapshot.last_seq < lastSeq) setEvents([]);
+          const firstSnapshot = !haveSnapshot;
           lastSeq = snapshot.last_seq;
           haveSnapshot = true;
           setState(snapshot);
           setError(undefined);
+          // The snapshot carries no events; seed the ring with the recent backlog so stories and the
+          // timeline are populated immediately instead of only from this moment on.
+          if (firstSnapshot && snapshot.last_seq > 0) {
+            const logUrl = `${endpoint(url, routes.eventsLog)}?since=${Math.max(0, snapshot.last_seq - EVENT_RING_SIZE)}`;
+            const backlog = await fetcher(logUrl, { signal: abort.signal });
+            if (backlog.ok) {
+              const parsed = (await backlog.json() as unknown[]).map((e) => EventSchema.parse(e));
+              if (!active) return;
+              setEvents(parsed.slice(-EVENT_RING_SIZE));
+            }
+          }
         } catch (cause) {
           if (!active || abort.signal.aborted) return;
           setError(cause instanceof Error ? cause : new Error(String(cause)));

@@ -78,6 +78,7 @@ describe('live SSE', () => {
     const pending = new Promise<Response>((resolve) => { keepOpen = () => resolve(sseResponse('')); });
     const fakeFetch = vi.fn<FetchLike>()
       .mockResolvedValueOnce(new Response(JSON.stringify(oldSnapshot), { status: 200 }))
+      .mockResolvedValueOnce(new Response('[]', { status: 200 })) // backlog for the first snapshot
       .mockResolvedValueOnce(sseResponse(`id: 41\ndata: ${JSON.stringify({ ...event, seq: 41 })}\n\n`))
       .mockResolvedValueOnce(new Response(JSON.stringify(newSnapshot), { status: 200 }))
       .mockImplementationOnce(() => pending);
@@ -88,7 +89,8 @@ describe('live SSE', () => {
     }
     const view = render(<Probe />);
     await waitFor(() => (view.lastFrame() ?? '').includes('seq=2 events=0'));
-    expect(fakeFetch.mock.calls[3]?.[0]).toBe('http://relay.test/events?since=2');
+    expect(fakeFetch.mock.calls[1]?.[0]).toBe('http://relay.test/events/log?since=0');
+    expect(fakeFetch.mock.calls[4]?.[0]).toBe('http://relay.test/events?since=2');
 
     view.unmount();
     keepOpen?.();
@@ -106,5 +108,28 @@ describe('live SSE', () => {
 
     expect(view.lastFrame()).toContain('GET http://relay.test/state failed: 503');
     view.unmount();
+  });
+});
+
+describe('live backlog', () => {
+  it('seeds the event ring from /events/log after the first snapshot so stories are populated at once', async () => {
+    const mk = (seq: number) => ({ seq, ts: `2026-09-05T10:0${seq}:00+08:00`, mission_id: 'm-1', actor: 'relayd', type: 'mission_failed', payload: { reason: `r${seq}` } });
+    let keepOpen: (() => void) | undefined;
+    const pending = new Promise<Response>((resolve) => { keepOpen = () => resolve(sseResponse('')); });
+    const fakeFetch = vi.fn<FetchLike>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...initialState(), last_seq: 3 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([mk(1), mk(2), mk(3)]), { status: 200 }))
+      .mockImplementationOnce(() => pending);
+    function Probe() {
+      const live = useLiveState('http://relay.test/', { fetch: fakeFetch, reconnectDelayMs: 0 });
+      return <Text>{`events=${live.events.length} first=${live.events[0]?.seq ?? '-'}`}</Text>;
+    }
+    const view = render(<Probe />);
+    await waitFor(() => (view.lastFrame() ?? '').includes('events=3'));
+    expect(view.lastFrame()).toContain('first=1');
+    expect(fakeFetch.mock.calls[1]?.[0]).toBe('http://relay.test/events/log?since=0');
+    expect(fakeFetch.mock.calls[2]?.[0]).toBe('http://relay.test/events?since=3');
+    view.unmount();
+    keepOpen?.();
   });
 });
