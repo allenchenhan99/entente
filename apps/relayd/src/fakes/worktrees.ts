@@ -12,6 +12,7 @@ export interface FakeWorktrees extends WorktreeManager {
     create: Array<{ repoRoot: string; taskId: string; dependencyBranches: string[] }>;
     remove: string[];
     integrate: string[][];
+    commitAll: Array<{ worktreePath: string; message: string }>;
   };
   options: FakeWorktreeOptions;
 }
@@ -23,7 +24,7 @@ export const fakeWorktreeInfo = (taskId: string): WorktreeInfo => ({
 });
 
 export function fakeWorktrees(options: FakeWorktreeOptions = {}): FakeWorktrees {
-  const calls: FakeWorktrees['calls'] = { create: [], remove: [], integrate: [] };
+  const calls: FakeWorktrees['calls'] = { create: [], remove: [], integrate: [], commitAll: [] };
   return {
     calls,
     options,
@@ -36,6 +37,10 @@ export function fakeWorktrees(options: FakeWorktreeOptions = {}): FakeWorktrees 
     },
     async diff(worktreePath: string) {
       return { patchPath: `${worktreePath}.patch`, changedFiles: [] };
+    },
+    async commitAll(worktreePath: string, message: string) {
+      calls.commitAll.push({ worktreePath, message });
+      return { committed: true, sha: 'fake-sha' };
     },
     async integrate(_repoRoot: string, branches: string[]) {
       calls.integrate.push([...branches]);

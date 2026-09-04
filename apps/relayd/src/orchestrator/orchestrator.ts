@@ -475,6 +475,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         rec.activeRepair = undefined;
         rec.verdicts.set(attempt, { status: 'verified' });
         emitTask(rec, 'relayd', 'task_verified', { attempt });
+        if (rec.worktree) {
+          // Freeze the verified state into the task branch; integration merges branches, not working trees.
+          try {
+            await deps.worktrees.commitAll(rec.worktree.path, `relay: verified evidence attempt ${attempt} for ${rec.id}`);
+          } catch (error) {
+            log(`failed to commit verified worktree for ${rec.id}: ${String(error)}`);
+          }
+        }
         emitTask(rec, 'relayd', 'task_completed', {});
         await spawnDependants(rec.id, rec.missionId);
         await maybeIntegrate(rec.missionId);

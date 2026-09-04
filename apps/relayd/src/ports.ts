@@ -27,6 +27,11 @@ export interface WorktreeManager {
   diff(worktreePath: string, base: string): Promise<{ patchPath: string; changedFiles: string[] }>;
   /** Merges branches in order into relay/integration; returns conflict on first failure. */
   integrate(repoRoot: string, branches: string[]): Promise<{ branch: string; conflict?: { branch: string; files: string[] } }>;
+  /**
+   * Commits everything in the worktree (tracked and untracked) so the branch carries exactly the state that
+   * was verified. Agents do not always commit; integration must never merge less than what was checked.
+   */
+  commitAll(worktreePath: string, message: string): Promise<{ committed: boolean; sha?: string }>;
 }
 
 export interface CheckRunner {

@@ -189,7 +189,10 @@ describe('repair path', () => {
     r.checks.script = { 'AC-1': 'passed', 'AC-2': 'passed' };
     expect(r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'second' })).toEqual({ attempt: 2, checks_started: true });
     expect(await r.orchestrator.awaitVerdict('t-a', 2, 5)).toEqual({ status: 'verified' });
-    expect(r.types().slice(-4)).toEqual(['evidence_recorded', 'task_verified', 'task_completed', 'integration_started']);
+    await r.orchestrator.settled(); // task_completed follows the (async) worktree commit; integration then runs to the end
+    const types = r.types();
+    const recordedAt = types.lastIndexOf('evidence_recorded');
+    expect(types.slice(recordedAt, recordedAt + 4)).toEqual(['evidence_recorded', 'task_verified', 'task_completed', 'integration_started']);
     expect(r.orchestrator.getContract('t-a').active_repair).toBeUndefined();
     // the earlier verdict is still retrievable
     expect((await r.orchestrator.awaitVerdict('t-a', 1, 1)).status).toBe('repair');
@@ -269,6 +272,9 @@ describe('human review', () => {
     await r.orchestrator.review('t-a', { criterion_id: 'AC-2', status: 'passed' });
     expect(await poll).toEqual({ status: 'verified' });
     expect(r.ofType('task_completed')).toHaveLength(1);
+    // The verified working tree is frozen into the branch before completion, so integration merges exactly what was checked.
+    expect(r.worktrees.calls.commitAll).toEqual([{ worktreePath: '/tmp/fake/t-a', message: 'relay: verified evidence attempt 1 for t-a' }]);
+    expect(r.types().indexOf('task_verified')).toBeLessThan(r.types().indexOf('task_completed'));
   });
 });
 

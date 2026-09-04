@@ -135,6 +135,28 @@ describe('git worktree manager', () => {
     await expect(manager.create(repo, task('t-conflicted-create'), ['relay/conflicting-dependency'])).rejects.toThrow(/merge/);
   });
 
+  it('commitAll freezes tracked and untracked changes into the task branch so integrate merges them', async () => {
+    const repo = createRepo();
+    const manager = createWorktreeManager();
+    const info = await manager.create(repo, task('t-commit'), []);
+    fs.mkdirSync(path.join(info.path, 'public'), { recursive: true });
+    fs.writeFileSync(path.join(info.path, 'public', 'login.html'), '<form></form>\n');
+    fs.appendFileSync(path.join(info.path, 'README.md'), 'changed\n');
+
+    const first = await manager.commitAll(info.path, 'relay: verified evidence attempt 1 for t-commit');
+    expect(first.committed).toBe(true);
+    expect(first.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(git(repo, ['status', '--porcelain']).trim()).toBe('');
+    expect(git(repo, ['log', '-1', '--format=%s', 'relay/t-commit'])).toBe('relay: verified evidence attempt 1 for t-commit');
+
+    const again = await manager.commitAll(info.path, 'nothing');
+    expect(again).toEqual({ committed: false });
+
+    const integrated = await manager.integrate(repo, ['relay/t-commit']);
+    expect(integrated.conflict).toBeUndefined();
+    expect(git(repo, ['ls-tree', '-r', '--name-only', 'relay/integration'])).toContain('public/login.html');
+  });
+
   it('integrate merges branches in order and aborts a conflicting merge into a clean worktree', async () => {
     const repo = createRepo();
     createBranch(repo, 'relay/one', { 'one.txt': 'one\n', 'shared.txt': 'from one\n' });

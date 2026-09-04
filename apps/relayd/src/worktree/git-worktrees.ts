@@ -125,6 +125,15 @@ export class GitWorktreeManager implements WorktreeManager {
     }
   }
 
+  async commitAll(worktreePath: string, message: string): Promise<{ committed: boolean; sha?: string }> {
+    await this.git(['add', '-A'], worktreePath);
+    const status = await this.git(['status', '--porcelain'], worktreePath);
+    if (status.stdout.trim() === '') return { committed: false };
+    await this.git(['-c', 'user.name=relayd', '-c', 'user.email=relayd@localhost', 'commit', '-q', '-m', message], worktreePath);
+    const head = await this.git(['rev-parse', 'HEAD'], worktreePath);
+    return { committed: true, sha: head.stdout.trim() };
+  }
+
   async remove(repoRoot: string, taskId: string): Promise<void> {
     const worktreePath = path.join(repoRoot, '.relay', 'wt', taskId);
     await this.git(['worktree', 'remove', '--force', worktreePath], repoRoot);
