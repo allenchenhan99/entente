@@ -1,0 +1,191 @@
+{
+  "nodes": [
+    {
+      "id": "human",
+      "kind": "human",
+      "label": "human",
+      "column": 0,
+      "status": "attention",
+      "badge": "! 2"
+    },
+    {
+      "id": "planner",
+      "kind": "planner",
+      "label": "planner",
+      "column": 0,
+      "status": "done"
+    },
+    {
+      "id": "t-backend-auth",
+      "kind": "agent",
+      "label": "backend",
+      "task_id": "t-backend-auth",
+      "runtime": "idle",
+      "task_state": "proposed",
+      "handoff_state": "needs_clarification",
+      "column": 1,
+      "status": "attention",
+      "badge": "? 2"
+    },
+    {
+      "id": "t-frontend-login",
+      "kind": "agent",
+      "label": "frontend",
+      "task_id": "t-frontend-login",
+      "runtime": "working",
+      "task_state": "awaiting_verification",
+      "handoff_state": "evidence_submitted",
+      "column": 1,
+      "status": "working",
+      "badge": "a1"
+    },
+    {
+      "id": "t-e2e-tests",
+      "kind": "agent",
+      "label": "e2e",
+      "task_id": "t-e2e-tests",
+      "runtime": "unspawned",
+      "task_state": "pending",
+      "handoff_state": "draft",
+      "column": 1,
+      "status": "blocked",
+      "badge": "◐ blocked"
+    },
+    {
+      "id": "verifier",
+      "kind": "verifier",
+      "label": "verifier",
+      "column": 2,
+      "status": "working"
+    }
+  ],
+  "edges": [
+    {
+      "id": "contract:t-backend-auth",
+      "kind": "contract",
+      "from": "planner",
+      "to": "t-backend-auth",
+      "task_id": "t-backend-auth",
+      "label": "v1 ? 2",
+      "status": "attention",
+      "attention": true,
+      "version": 1
+    },
+    {
+      "id": "contract:t-frontend-login",
+      "kind": "contract",
+      "from": "planner",
+      "to": "t-frontend-login",
+      "task_id": "t-frontend-login",
+      "label": "v2 ✓",
+      "status": "done",
+      "attention": false,
+      "version": 2
+    },
+    {
+      "id": "question:t-backend-auth",
+      "kind": "question",
+      "from": "t-backend-auth",
+      "to": "human",
+      "task_id": "t-backend-auth",
+      "label": "? 2",
+      "status": "attention",
+      "attention": true
+    },
+    {
+      "id": "evidence:t-frontend-login",
+      "kind": "evidence",
+      "from": "t-frontend-login",
+      "to": "verifier",
+      "task_id": "t-frontend-login",
+      "label": "AC-3 ⏳",
+      "status": "attention",
+      "attention": true
+    },
+    {
+      "id": "dep:t-backend-auth->t-e2e-tests",
+      "kind": "dependency",
+      "from": "t-backend-auth",
+      "to": "t-e2e-tests",
+      "task_id": "t-e2e-tests",
+      "label": "waits",
+      "status": "blocked",
+      "attention": false
+    }
+  ],
+  "inbox": [
+    {
+      "id": "question:t-backend-auth",
+      "kind": "task_question",
+      "mission_id": "m-001",
+      "task_id": "t-backend-auth",
+      "title": "backend asks 2 questions (v1)",
+      "detail": [
+        "Q1 Which auth method?",
+        "Q2 Link expiry?"
+      ],
+      "since": "2026-09-05T10:05:00+08:00",
+      "ref": {
+        "kind": "edge",
+        "id": "contract:t-backend-auth"
+      },
+      "actions": [
+        {
+          "key": "a",
+          "label": "answer Q1",
+          "kind": "clarify",
+          "target": {
+            "task_id": "t-backend-auth",
+            "question_ids": [
+              "Q1",
+              "Q2"
+            ]
+          }
+        },
+        {
+          "key": "x",
+          "label": "cancel t-backend-auth",
+          "kind": "cancel",
+          "target": {
+            "task_id": "t-backend-auth"
+          }
+        }
+      ]
+    },
+    {
+      "id": "review:t-frontend-login:AC-3",
+      "kind": "human_review",
+      "mission_id": "m-001",
+      "task_id": "t-frontend-login",
+      "title": "frontend needs a human review of AC-3",
+      "detail": [
+        "AC-3: the login page is readable"
+      ],
+      "ref": {
+        "kind": "edge",
+        "id": "evidence:t-frontend-login"
+      },
+      "actions": [
+        {
+          "key": "p",
+          "label": "mark AC-3 passed",
+          "kind": "review",
+          "target": {
+            "task_id": "t-frontend-login",
+            "criterion_id": "AC-3"
+          }
+        },
+        {
+          "key": "f",
+          "label": "mark AC-3 failed",
+          "kind": "review",
+          "target": {
+            "task_id": "t-frontend-login",
+            "criterion_id": "AC-3"
+          }
+        }
+      ]
+    }
+  ],
+  "seq": 21
+}
