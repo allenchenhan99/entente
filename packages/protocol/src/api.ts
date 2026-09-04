@@ -63,4 +63,12 @@ export const routes = {
   reply: (taskId: string) => `/tasks/${taskId}/reply`,
   mcp: '/mcp',
   health: '/health',
+  /**
+   * Graph object model over HTTP (for clients that do not run the TypeScript reducer, e.g. the Rust relay-tui):
+   * `GET /graph` → Graph · `GET /graph/:kind/:id/describe` → ObjectDescription · `.../story?limit=` → { lines }
+   * · `.../actions` → ObjectAction[] · `GET /story?since=<seq>&limit=` → narrated events [{ seq, ts, task_id?, line }].
+   */
+  graph: '/graph',
+  graphObject: (kind: 'node' | 'edge' | 'inbox', id: string) => `/graph/${kind}/${encodeURIComponent(id)}`,
+  story: '/story',
 } as const;
