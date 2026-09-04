@@ -2,6 +2,7 @@
  * `describe(ref, graph, state)`: static facts about one object — contract facts for edges, role and the
  * three states for agent nodes, counts for the virtual nodes, the item itself for inbox entries.
  */
+import { clockLabel } from './story.js';
 import type { AcceptanceCriterion, CheckResult } from '../contract.js';
 import type { State, TaskView } from '../state.js';
 import type { Graph, GraphObjectRef, ObjectDescription } from './types.js';
@@ -90,7 +91,7 @@ function describeMissionQuestion(state: State, missionId: string | undefined): O
 
 function describeReply(task: TaskView): ObjectDescription {
   const answers = task.contract.clarifications.map((c) => `${c.question_id}: ${clip(c.answer, 200)}`);
-  const replies = (task.replies ?? []).map((r) => `${r.at.slice(11, 16)} ${r.replied_by === 'human' ? 'you' : r.replied_by}: ${clip(r.message, 200)}`);
+  const replies = (task.replies ?? []).map((r) => `${clockLabel(r.at)} ${r.replied_by === 'human' ? 'you' : r.replied_by}: ${clip(r.message, 200)}`);
   const parts = [answers.length > 0 ? plural(answers.length, 'answer') : '', replies.length > 0 ? plural(replies.length, 'reply', 'replies') : ''].filter(Boolean);
   return { title: `you → ${task.contract.recipient} (${parts.join(', ') || 'nothing yet'})`, lines: [...answers, ...replies] };
 }

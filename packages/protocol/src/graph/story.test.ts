@@ -1,3 +1,4 @@
+import { clockLabel } from './story.js';
 import { describe, it, expect } from 'vitest';
 import { buildGraph, storyFor } from './index.js';
 import { replay } from '../reducer.js';
@@ -21,7 +22,7 @@ describe('storyFor', () => {
     expect(story).toHaveLength(backendEvents.length);
     for (const [i, line] of story.entries()) {
       expect(line).toMatch(HHMM);
-      expect(line.slice(0, 5)).toBe(backendEvents[i]!.ts.slice(11, 16));
+      expect(line.slice(0, 5)).toBe(clockLabel(backendEvents[i]!.ts));
     }
     expect(story[0]).toMatch(/you propose t-backend-auth v1 to backend/);
     expect(story.some((l) => /spawns backend/.test(l))).toBe(true);

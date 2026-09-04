@@ -1,6 +1,6 @@
 /**
  * `storyFor(ref, graph, state, events)`: the narrated events that concern one object, oldest first,
- * each line prefixed with `HH:MM` taken from the event's `ts` (the offset the ts string carries).
+ * each line prefixed with `HH:MM` in the reader's local time (same clock as the CLI and TUI timelines).
  */
 import type { Event, EventType } from '../events.js';
 import type { State } from '../state.js';
@@ -70,5 +70,12 @@ export function storyFor(ref: GraphObjectRef, graph: Graph, state: State, events
   return [...events]
     .filter(pred)
     .sort((a, b) => a.seq - b.seq)
-    .map((e) => `${e.ts.slice(11, 16)} ${narrate(e, state)}`);
+    .map((e) => `${clockLabel(e.ts)} ${narrate(e, state)}`);
+}
+
+/** `HH:MM` in local time; falls back to the raw `HH:MM` slice when the string is not a parseable date. */
+export function clockLabel(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts.slice(11, 16);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
