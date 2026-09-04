@@ -81,6 +81,7 @@ export interface LauncherDependencies {
   stdout: (line: string) => void;
   stderr: (line: string) => void;
   signals: SignalController;
+  processKill: (pid: number, signal: NodeJS.Signals | 0) => boolean;
 }
 
 export interface HealthResult {
@@ -178,6 +179,7 @@ function dependencies(overrides: Partial<LauncherDependencies>): LauncherDepende
       on: (signal, listener) => { process.on(signal, listener); },
       off: (signal, listener) => { process.off(signal, listener); },
     },
+    processKill: overrides.processKill ?? ((pid, signal) => process.kill(pid, signal)),
   };
 }
 
@@ -361,12 +363,72 @@ async function up(options: LauncherOptions, deps: LauncherDependencies): Promise
   return runTui({ workspaceRoot: deps.workspaceRoot, url, token }, deps);
 }
 
-export async function status(_options: LauncherOptions, _deps: LauncherDependencies): Promise<number> {
-  throw new LauncherError('status is not implemented');
+export async function status(options: LauncherOptions, deps: LauncherDependencies): Promise<number> {
+  const health = await checkHealth(baseUrl(options.port), deps);
+  const pid = readPid(options.relayDir, deps.fs);
+  deps.stdout(
+    `relayd ${health.healthy ? 'healthy' : 'down'} version ${health.version ?? '-'} `
+    + `pid ${pid ?? '-'} relayDir ${options.relayDir}`,
+  );
+  return health.healthy ? 0 : 1;
 }
 
-export async function down(_options: LauncherOptions, _deps: LauncherDependencies): Promise<number> {
-  throw new LauncherError('down is not implemented');
+function readPid(relayDir: string, fileSystem: Pick<FileSystem, 'readFileSync'>): number | undefined {
+  const file = path.join(relayDir, 'relayd.pid');
+  let text: string;
+  try {
+    text = fileSystem.readFileSync(file, 'utf8').trim();
+  } catch {
+    return undefined;
+  }
+  const pid = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(pid) || pid < 1) {
+    throw new LauncherError(`invalid pid file ${file}`);
+  }
+  return pid;
+}
+
+function processIsAlive(pid: number, processKill: LauncherDependencies['processKill']): boolean {
+  try {
+    processKill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removePid(relayDir: string, fileSystem: Pick<FileSystem, 'existsSync' | 'unlinkSync'>): void {
+  const file = path.join(relayDir, 'relayd.pid');
+  if (fileSystem.existsSync(file)) fileSystem.unlinkSync(file);
+}
+
+export async function down(options: LauncherOptions, deps: LauncherDependencies): Promise<number> {
+  const pid = readPid(options.relayDir, deps.fs);
+  if (pid === undefined) throw new LauncherError(`relayd pid file not found at ${path.join(options.relayDir, 'relayd.pid')}`);
+
+  const alive = processIsAlive(pid, deps.processKill);
+  const health = await checkHealth(baseUrl(options.port), deps);
+  if (!alive) {
+    removePid(options.relayDir, deps.fs);
+    throw new LauncherError(`refusing to signal stale pid ${pid}`);
+  }
+  if (!health.healthy) {
+    removePid(options.relayDir, deps.fs);
+    throw new LauncherError(`refusing to signal pid ${pid} because relayd does not answer on port ${options.port}`);
+  }
+
+  deps.processKill(pid, 'SIGTERM');
+  const deadline = deps.now() + 5_000;
+  while (processIsAlive(pid, deps.processKill)) {
+    if (deps.now() >= deadline) {
+      removePid(options.relayDir, deps.fs);
+      throw new LauncherError(`pid ${pid} did not exit within 5 seconds`);
+    }
+    await deps.sleep(Math.min(100, deadline - deps.now()));
+  }
+  removePid(options.relayDir, deps.fs);
+  deps.stdout(`relayd stopped pid ${pid}`);
+  return 0;
 }
 
 export async function runLauncher(

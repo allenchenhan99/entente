@@ -290,3 +290,145 @@ describe('timeout and no-spawn', () => {
     expect(stderr).toHaveBeenCalledExactlyOnceWith('entente: port 8123 is busy, but the responder is not relayd');
   });
 });
+
+describe('status and down', () => {
+  it('status reports a healthy relayd with its version, pid, and relayDir', async () => {
+    const repo = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    fs.mkdirSync(relayDir);
+    fs.writeFileSync(path.join(relayDir, 'relayd.pid'), '7001\n');
+    const stdout = vi.fn();
+
+    const code = await runLauncher(['status'], {
+      cwd: repo,
+      fetch: vi.fn(async () => jsonResponse({ ok: true, version: '0.0.1' })),
+      stdout,
+      stderr: vi.fn(),
+    });
+
+    expect(code).toBe(0);
+    expect(stdout).toHaveBeenCalledExactlyOnceWith(`relayd healthy version 0.0.1 pid 7001 relayDir ${relayDir}`);
+  });
+
+  it('status reports an unhealthy relayd and exits one when no endpoint or pid exists', async () => {
+    const repo = temporaryDirectory();
+    const stdout = vi.fn();
+
+    const code = await runLauncher(['status'], {
+      cwd: repo,
+      fetch: vi.fn(async () => { throw new Error('ECONNREFUSED'); }),
+      stdout,
+      stderr: vi.fn(),
+    });
+
+    expect(code).toBe(1);
+    expect(stdout).toHaveBeenCalledExactlyOnceWith(`relayd down version - pid - relayDir ${path.join(repo, '.relay')}`);
+  });
+
+  it('down signals a live healthy pid, waits for exit, and removes the pid file', async () => {
+    const repo = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    const pidFile = path.join(relayDir, 'relayd.pid');
+    fs.mkdirSync(relayDir);
+    fs.writeFileSync(pidFile, '7001\n');
+    let alive = true;
+    const processKill = vi.fn((_pid: number, signal: NodeJS.Signals | 0) => {
+      if (signal === 'SIGTERM') alive = false;
+      if (signal === 0 && !alive) throw Object.assign(new Error('not found'), { code: 'ESRCH' });
+      return true;
+    });
+    const stdout = vi.fn();
+
+    const code = await runLauncher(['down'], {
+      cwd: repo,
+      fetch: vi.fn(async () => jsonResponse({ ok: true, version: '0.0.1' })),
+      processKill,
+      stdout,
+      stderr: vi.fn(),
+    });
+
+    expect(code).toBe(0);
+    expect(processKill).toHaveBeenCalledWith(7001, 'SIGTERM');
+    expect(fs.existsSync(pidFile)).toBe(false);
+    expect(stdout).toHaveBeenCalledExactlyOnceWith('relayd stopped pid 7001');
+  });
+
+  it('down refuses to signal a live pid when relayd no longer answers health', async () => {
+    const repo = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    const pidFile = path.join(relayDir, 'relayd.pid');
+    fs.mkdirSync(relayDir);
+    fs.writeFileSync(pidFile, '7001\n');
+    const processKill = vi.fn(() => true);
+    const stderr = vi.fn();
+
+    const code = await runLauncher(['down'], {
+      cwd: repo,
+      fetch: vi.fn(async () => { throw new Error('ECONNREFUSED'); }),
+      processKill,
+      stdout: vi.fn(),
+      stderr,
+    });
+
+    expect(code).toBe(1);
+    expect(processKill).toHaveBeenCalledWith(7001, 0);
+    expect(processKill).not.toHaveBeenCalledWith(7001, 'SIGTERM');
+    expect(fs.existsSync(pidFile)).toBe(false);
+    expect(stderr).toHaveBeenCalledExactlyOnceWith('entente: refusing to signal pid 7001 because relayd does not answer on port 7420');
+  });
+
+  it('down refuses to signal a dead pid even when a different relayd answers health', async () => {
+    const repo = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    const pidFile = path.join(relayDir, 'relayd.pid');
+    fs.mkdirSync(relayDir);
+    fs.writeFileSync(pidFile, '7001\n');
+    const processKill = vi.fn((_pid: number, signal: NodeJS.Signals | 0) => {
+      if (signal === 0) throw Object.assign(new Error('not found'), { code: 'ESRCH' });
+      return true;
+    });
+    const stderr = vi.fn();
+
+    const code = await runLauncher(['down'], {
+      cwd: repo,
+      fetch: vi.fn(async () => jsonResponse({ ok: true, version: '0.0.1' })),
+      processKill,
+      stdout: vi.fn(),
+      stderr,
+    });
+
+    expect(code).toBe(1);
+    expect(processKill).not.toHaveBeenCalledWith(7001, 'SIGTERM');
+    expect(fs.existsSync(pidFile)).toBe(false);
+    expect(stderr).toHaveBeenCalledExactlyOnceWith('entente: refusing to signal stale pid 7001');
+  });
+
+  it('down waits no more than five seconds and never escalates a stuck process', async () => {
+    const repo = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    const pidFile = path.join(relayDir, 'relayd.pid');
+    fs.mkdirSync(relayDir);
+    fs.writeFileSync(pidFile, '7001\n');
+    const processKill = vi.fn(() => true);
+    let clock = 0;
+    const sleep = vi.fn(async (milliseconds: number) => { clock += milliseconds; });
+    const stderr = vi.fn();
+
+    const code = await runLauncher(['down'], {
+      cwd: repo,
+      fetch: vi.fn(async () => jsonResponse({ ok: true, version: '0.0.1' })),
+      processKill,
+      now: () => clock,
+      sleep,
+      stdout: vi.fn(),
+      stderr,
+    });
+
+    expect(code).toBe(1);
+    expect(clock).toBe(5_000);
+    expect(processKill).toHaveBeenCalledWith(7001, 'SIGTERM');
+    expect(processKill.mock.calls.some(([, signal]) => signal === 'SIGKILL')).toBe(false);
+    expect(fs.existsSync(pidFile)).toBe(false);
+    expect(stderr).toHaveBeenCalledExactlyOnceWith('entente: pid 7001 did not exit within 5 seconds');
+  });
+});
