@@ -74,6 +74,37 @@ Runtime requirements: Node ≥ 22, `node-pty` (native module; `npm rebuild node-
 - AC-5 — `RELAY_HOST=relay npx tsx apps/relayd/src/index.ts` starts, `GET /panes` returns `[]`, and the existing orchestrator tests pass with `fakeHost` replaced by the relay host in one integration test that runs `relay up --plan examples/plan-secure-login.yaml` with `argv` overridden to a shell script (no LLM).
   check: `npx tsc -b && npx vitest run apps/relayd`
 
+### Metrics (efficiency instrumentation; `PaneTimings` / `HostMetrics` in `packages/protocol/src/pty.ts`)
+
+The host measures itself on its own monotonic clock (`performance.now()`, never the display `clock`) with no extra
+polling: every mark is taken inside code that already runs (spawn, `onData`, the prompt deliverer). The Rust
+`termd` must expose the same numbers so a RelayGraph-run agent can be compared with a bare `claude` / `codex`.
+
+Per pane (`PaneInfo.timings`, `relay pane get`, and `GET /metrics`), all in milliseconds, `undefined` = not reached yet:
+
+| number | measured from → to | how to read it |
+| --- | --- | --- |
+| `spawn_ms` | `spawn()` called → `node-pty` returned | process start cost (fork/exec, worktree cwd) |
+| `first_output_ms` | process started → first output byte | agent boot time before anything is drawn |
+| `readiness_ms` | first output → readiness detector said "ready" (prompt visible **and** quiet ≥ `quietMs`) | how long until the TUI could take input; includes the mandatory quiet window |
+| `prompt_write_ms` | ready → prompt pasted and `\r` written | host overhead between detecting readiness and typing (should be ~0) |
+| `prompt_accept_ms` | prompt written → accepted (agent visibly busy, or composer clear and screen moved on) | agent-side acceptance latency; includes every Enter retry |
+| `prompt_retries` | count | extra `\r` presses needed (Codex paste placeholder); `0` is the healthy value |
+| `render_p50_ms` / `render_p95_ms` | PTY chunk received → headless xterm applied it, nearest-rank percentiles over the last 512 chunks | screen-model latency; what `pane read` / readiness / wait-output lag behind the PTY |
+| `output_bytes` / `output_chunks` | running totals of every chunk (`Buffer.byteLength`) | throughput; bytes ÷ chunks is the average chunk size |
+
+A pane spawned **without** a prompt only ever has `spawn_ms`, `first_output_ms` and the render/throughput numbers.
+A failed prompt delivery leaves the readiness/prompt marks undefined and bumps the host-level `prompt_failures`.
+
+Host level (`GET /metrics` → `HostMetrics`, session token required like `/panes`): `host: 'relay'`, `uptime_ms`
+since the host object was constructed, `panes_spawned` (monotonic, exited panes included), `panes_alive`,
+`prompt_failures`, and `panes[]` with `pane_id`, `role`, `task_id` (when the spawner passed one) and `timings`.
+
+CLI: `relay pane metrics` prints one row per pane
+(`pane  role  ready(ms)  prompt→accept(ms)  retries  render p50/p95(ms)  bytes`, `-` where undefined);
+`relay pane metrics --json` prints the raw `HostMetrics` object. No export, persistence or roll-ups yet: a later
+package writes these next to the cast.
+
 ---
 
 ## WP-T2 · Task Contract: `web-terminal`
