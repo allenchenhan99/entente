@@ -23,6 +23,7 @@ export interface TestClient {
   frames_of<T extends PtyServerMessage['t']>(t: T, count?: number, timeoutMs?: number): Promise<Extract<PtyServerMessage, { t: T }>[]>;
   /** Concatenated decoded text of every `output` frame so far. */
   output(): string;
+  live(): string;
   send(msg: unknown): void;
   close(): Promise<void>;
 }
@@ -86,7 +87,11 @@ export async function startTestServer(host: RelayHost): Promise<TestServer> {
           waiters.add(check);
           check();
         }),
-        output: () => frames.filter((f): f is Extract<PtyServerMessage, { t: 'output' }> => f.t === 'output').map((f) => Buffer.from(f.data, 'base64').toString('utf8')).join(''),
+        // Everything the pane has shown this client: the scrollback replayed on connect plus live output.
+        // (On fast hosts the process may print before the socket connects, so the text arrives in `scrollback`.)
+        output: () => frames.filter((f): f is Extract<PtyServerMessage, { t: 'output' | 'scrollback' }> => f.t === 'output' || f.t === 'scrollback').map((f) => Buffer.from(f.data, 'base64').toString('utf8')).join(''),
+        /** Live `output` frames only (what arrived after the replayed scrollback). */
+        live: () => frames.filter((f): f is Extract<PtyServerMessage, { t: 'output' }> => f.t === 'output').map((f) => Buffer.from(f.data, 'base64').toString('utf8')).join(''),
         send: (msg) => ws.send(JSON.stringify(msg)),
         close: () => new Promise((resolve) => { ws.once('close', () => resolve()); ws.close(); }),
       };

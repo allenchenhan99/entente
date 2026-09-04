@@ -113,7 +113,7 @@ describe('pty clients and cast', () => {
     const [sl] = await late.frames_of('scrollback');
     expect(sl.data).toBe(pane.scrollback().toString('base64'));
     expect(Buffer.from(sl.data, 'base64').toString()).toContain('two x');
-    expect(late.output()).toBe('');
+    expect(late.live()).toBe('');
     late.send({ t: 'resize', cols: 100, rows: 30 });
     await until(() => pane.info().cols === 100);
     b.send({ t: 'input', data: b64('\r') });
@@ -127,7 +127,7 @@ describe('pty clients and cast', () => {
     const events = castRes.text.trimEnd().split('\n').map((l) => JSON.parse(l));
     expect(events[0]).toEqual({ version: 2, width: 120, height: 40, timestamp: expect.any(Number), title: 'backend' });
     const recorded = events.slice(1).filter((e) => e[1] === 'o').map((e) => e[2]).join('');
-    expect(recorded).toBe(Buffer.from(sa.data, 'base64').toString() + a.output());
+    expect(recorded).toBe(a.output()); // output() already includes the replayed scrollback
     expect(events.some((e) => e[1] === 'r' && e[2] === '100x30')).toBe(true);
     expect(events.slice(1).every((e) => typeof e[0] === 'number' && e[0] >= 0)).toBe(true);
     expect((await srv.json('GET', '/panes/relay:9/cast')).status).toBe(404);
