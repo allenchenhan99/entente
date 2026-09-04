@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORT, routes } from '@relay/protocol';
 
 export type LauncherCommand = 'up' | 'status' | 'down';
-export type LauncherHost = 'relay' | 'herdr' | 'tmux';
+export type LauncherHost = 'relay' | 'relayterm' | 'herdr' | 'tmux';
 
 export interface LauncherOptions {
   command: LauncherCommand;
@@ -91,11 +91,11 @@ export interface HealthResult {
 }
 
 export const USAGE = `usage:
-  entente [up] [--repo <path>] [--port N] [--host relay|herdr|tmux] [--dir <relayDir>] [--replay <file>] [--no-spawn]
+  entente [up] [--repo <path>] [--port N] [--host relay|relayterm|herdr|tmux] [--dir <relayDir>] [--replay <file>] [--no-spawn]
   entente status [--repo <path>] [--port N] [--dir <relayDir>]
   entente down [--repo <path>] [--port N] [--dir <relayDir>]`;
 
-const HOSTS: readonly LauncherHost[] = ['relay', 'herdr', 'tmux'];
+const HOSTS: readonly LauncherHost[] = ['relay', 'relayterm', 'herdr', 'tmux'];
 const HEALTH_TIMEOUT_MS = 1_000;
 const HEALTH_POLL_MS = 200;
 const HEALTH_DEADLINE_MS = 15_000;

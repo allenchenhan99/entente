@@ -67,7 +67,7 @@ export interface RestoreOptions {
   orchestrator: Orchestrator;
   runDir: string;
   relayDir: string;
-  /** Only `relay` (and the test `fake`) host panes can be respawned; tmux/herdr panes are marked exited. */
+  /** Only `relay`, `relayterm` (and the test `fake`) host panes can be respawned; tmux/herdr panes are marked exited. */
   hostKind: HostKind;
   prompt?: string;
   log?: (message: string) => void;
@@ -101,7 +101,7 @@ export async function restoreRun(opts: RestoreOptions): Promise<RestoreResult> {
   const workspace = readWorkspace(opts.runDir);
   if (!workspace) log(`no workspace.json in ${opts.runDir}; pane inventory derived from the event log`);
   const alive = (workspace?.panes ?? panesFromEvents(events, opts.relayDir)).filter((p) => p.alive);
-  const respawnable = opts.hostKind === 'relay' || opts.hostKind === 'fake';
+  const respawnable = opts.hostKind === 'relay' || opts.hostKind === 'relayterm' || opts.hostKind === 'fake';
 
   const result: RestoreResult = { missions, tasks, panes: alive.length, respawned: [], skipped: [], failed: [], resumed_checks: resumedChecks };
   const seen = new Set<string>();

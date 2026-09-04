@@ -71,7 +71,13 @@ async fn main() -> std::process::ExitCode {
         server.addr.ip(),
         server.addr.port()
     );
-    let _ = tokio::signal::ctrl_c().await;
+    // SIGINT (ctrl-c) or SIGTERM (relayd's `stop()`): both shut panes down gracefully.
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("install SIGTERM handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = term.recv() => {}
+    }
     tracing::info!("termd: shutting down");
     server
         .shutdown(Duration::from_millis(termd::pane::KILL_GRACE_MS))
