@@ -46,6 +46,36 @@ describe('herdr host', () => {
     expect(calls[2]!.argv).toEqual(['herdr', 'agent', 'prompt', 'backend', 'bootstrap prompt\nline two']);
   });
 
+  it('retries agent start while the new pane reports agent_pane_busy, then proceeds', async () => {
+    let busyLeft = 3;
+    const slept: number[] = [];
+    const { exec, calls } = fakeExec((argv) => {
+      if (argv[1] === 'pane' && argv[2] === 'split') return { stdout: splitJson };
+      if (argv[1] === 'agent' && argv[2] === 'start' && busyLeft-- > 0) {
+        return { exitCode: 1, stderr: '{"error":{"code":"agent_pane_busy","message":"agent target pane w1:p7 is not an available shell"}}' };
+      }
+      return { stdout: '{}' };
+    });
+    const host = createTerminalHost('herdr', { exec, env: { HERDR_PANE_ID: 'w1:p1' }, sleep: async (ms) => { slept.push(ms); } });
+    const { paneId } = await host.spawn(spawnOpts);
+    expect(paneId).toBe('w1:p7');
+    expect(slept).toEqual([500, 500, 500]);
+    expect(calls.filter((c) => c.argv[2] === 'start')).toHaveLength(4);
+    expect(calls[calls.length - 1]!.argv.slice(0, 3)).toEqual(['herdr', 'agent', 'prompt']);
+  });
+
+  it('gives up on agent_pane_busy after the configured retries and closes the pane', async () => {
+    const { exec, calls } = fakeExec((argv) => {
+      if (argv[1] === 'pane' && argv[2] === 'split') return { stdout: splitJson };
+      if (argv[1] === 'agent' && argv[2] === 'start') return { exitCode: 1, stderr: 'agent_pane_busy' };
+      return { stdout: '{}' };
+    });
+    const host = createTerminalHost('herdr', { exec, env: { HERDR_PANE_ID: 'w1:p1' }, sleep: async () => {}, paneReadyRetries: 2 });
+    await expect(host.spawn(spawnOpts)).rejects.toThrow(/agent start failed/);
+    expect(calls.filter((c) => c.argv[2] === 'start')).toHaveLength(3);
+    expect(calls[calls.length - 1]!.argv).toEqual(['herdr', 'pane', 'close', 'w1:p7']);
+  });
+
   it('closes the pane and throws when the prompt cannot be delivered', async () => {
     const { exec, calls } = fakeExec((argv) => {
       if (argv[1] === 'pane' && argv[2] === 'split') return { stdout: splitJson };

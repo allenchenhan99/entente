@@ -18,6 +18,10 @@ import { defaultExec, describeFailure, type Exec, type ExecDeps } from '../exec.
 export const HERDR_AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 
 export interface HerdrHostDeps extends ExecDeps {
+  /** Sleep used between `agent start` retries while the new pane's shell is still starting; injectable for tests. */
+  sleep?: (ms: number) => Promise<void>;
+  /** How many times to retry `agent start` on `agent_pane_busy` (500 ms apart). Default 20 (≈10 s). */
+  paneReadyRetries?: number;
   /** Environment to read the anchor pane from; defaults to `process.env`. */
   env?: Record<string, string | undefined>;
 }
@@ -32,14 +36,23 @@ export function herdrAgentKind(executable: string): HerdrAgentKind {
   throw new Error(`herdr host: cannot map runtime executable "${executable}" to a herdr agent kind (expected claude or codex)`);
 }
 
+function isPaneBusy(result: { stdout: string; stderr: string }): boolean {
+  return /agent_pane_busy/.test(result.stderr) || /agent_pane_busy/.test(result.stdout);
+}
+
 export class HerdrHost implements TerminalHost {
   readonly kind = 'herdr' as const;
   private readonly exec: Exec;
   private readonly env: Record<string, string | undefined>;
 
+  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly paneReadyRetries: number;
+
   constructor(deps: HerdrHostDeps = {}) {
     this.exec = deps.exec ?? defaultExec;
     this.env = deps.env ?? process.env;
+    this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.paneReadyRetries = deps.paneReadyRetries ?? 20;
   }
 
   private anchorPane(): string {
@@ -67,7 +80,13 @@ export class HerdrHost implements TerminalHost {
     if (!paneId) throw new Error(`herdr host: pane split returned no .result.pane.pane_id: ${split.stdout.trim()}`);
 
     const startArgv = ['herdr', 'agent', 'start', opts.name, '--kind', kind, '--pane', paneId, '--', ...agentArgs];
-    const start = await this.exec(startArgv);
+    // The pane's shell is still initialising right after the split; Herdr answers `agent_pane_busy` until the
+    // prompt is up, so retry that specific error with a short backoff instead of failing the spawn.
+    let start = await this.exec(startArgv);
+    for (let attempt = 0; start.exitCode !== 0 && isPaneBusy(start) && attempt < this.paneReadyRetries; attempt++) {
+      await this.sleep(500);
+      start = await this.exec(startArgv);
+    }
     if (start.exitCode !== 0) {
       // Do not leave an orphaned shell pane behind; best effort, the original error wins.
       await this.exec(['herdr', 'pane', 'close', paneId]).catch(() => undefined);
