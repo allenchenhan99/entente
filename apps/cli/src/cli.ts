@@ -1,7 +1,7 @@
 /**
  * `relay` — thin CLI over relayd's HTTP API (PRD §12.7, `@relay/protocol` api.ts).
  *
- *   relay up "<mission title>" [--repo <path>] [--plan plan.yaml] [--host herdr|tmux] [--port N]
+ *   relay up "<mission title>" [--repo <path>] [--plan plan.yaml | --planner claude-code|codex] [--host herdr|tmux] [--port N]
  *   relay status
  *   relay clarify <task-id> Q1="..." Q2="..."
  *   relay review <task-id> <AC-id> pass|fail ["observed failure"]
@@ -27,7 +27,7 @@ export interface CliIo {
 }
 
 export const USAGE = `usage:
-  relay up "<mission title>" [--repo <path>] [--plan plan.yaml] [--host herdr|tmux] [--port N]
+  relay up "<mission title>" [--repo <path>] [--plan plan.yaml | --planner claude-code|codex] [--host herdr|tmux] [--port N]
   relay status [--port N]
   relay clarify <task-id> Q1="..." [Q2="..."] [--port N]
   relay review <task-id> <AC-id> pass|fail ["observed failure"] [--port N]
@@ -78,11 +78,15 @@ async function up(args: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parseKnown(args, {
     repo: { type: 'string' },
     plan: { type: 'string' },
+    planner: { type: 'string' },
     host: { type: 'string' },
     port: { type: 'string' },
   });
   const title = positionals[0];
   if (!title) throw new UsageError('relay up needs a mission title');
+  if (values.planner !== undefined && values.planner !== 'claude-code' && values.planner !== 'codex') {
+    throw new UsageError(`--planner must be claude-code or codex, got ${values.planner}`);
+  }
   if (values.host !== undefined && values.host !== 'herdr' && values.host !== 'tmux') {
     throw new UsageError(`--host must be herdr or tmux, got ${values.host}`);
   }
@@ -100,6 +104,10 @@ async function up(args: string[], io: CliIo): Promise<number> {
   if (plan) {
     const loaded = await client.post<{ task_ids: string[] }>(routes.plan(created.mission_id), plan);
     io.stdout(`planned ${loaded.task_ids.length} task(s): ${loaded.task_ids.join(' ')}`);
+  }
+  if (values.planner !== undefined) {
+    const spawned = await client.post<{ pane_id: string }>(routes.planner(created.mission_id), { runtime: values.planner });
+    io.stdout(`planner (${values.planner}) spawned in pane ${spawned.pane_id}`);
   }
   return 0;
 }

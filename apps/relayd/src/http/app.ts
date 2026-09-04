@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { z } from 'zod';
-import { CreateMissionBody, LoadPlanBody, ClarifyBody, ReviewBody, CancelBody, routes } from '@relay/protocol';
+import { CreateMissionBody, LoadPlanBody, SpawnPlannerBody, ClarifyBody, ReviewBody, CancelBody, routes } from '@relay/protocol';
 import type { EventStore } from '../ports.js';
 import type { Orchestrator } from '../orchestrator/orchestrator.js';
 import { RelayError } from '../orchestrator/errors.js';
@@ -116,6 +116,13 @@ export function createApp(opts: AppOptions): Hono {
     }
     store.append({ mission_id: missionId, actor: 'human', type: 'tasks_planned', payload: { task_ids } });
     return c.json({ task_ids });
+  });
+
+  app.post('/missions/:id/planner', async (c) => {
+    const missionId = c.req.param('id');
+    const body = await parseBody(c, SpawnPlannerBody);
+    if (!body.ok) return body.res;
+    return c.json(await orchestrator.spawnPlanner(missionId, body.data.runtime));
   });
 
   app.post('/tasks/:id/clarify', async (c) => {

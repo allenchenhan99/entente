@@ -63,6 +63,19 @@ describe('http', () => {
     expect((await (await app.request('/state')).json()).last_seq).toBe(1);
   });
 
+  it('POST /missions/:id/planner spawns a planner agent and validates runtime and mission', async () => {
+    const { app, ofType } = setup();
+    const { mission_id } = await createMission(app);
+    const bad = await app.request(`/missions/${mission_id}/planner`, json({ runtime: 'gemini' }));
+    expect(bad.status).toBe(400);
+    const missing = await app.request('/missions/m-nope/planner', json({ runtime: 'codex' }));
+    expect(missing.status).toBe(404);
+    const ok = await app.request(`/missions/${mission_id}/planner`, json({ runtime: 'codex' }));
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ pane_id: expect.any(String) });
+    expect(ofType('agent_spawned')).toHaveLength(1);
+  });
+
   it('POST /missions/:id/plan loads 3 contracts, lints them and reports task ids', async () => {
     const { app, ofType, host } = setup();
     const { mission_id } = await createMission(app);

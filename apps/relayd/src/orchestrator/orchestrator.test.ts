@@ -17,6 +17,22 @@ describe('orchestrator missions', () => {
     expect(ev.payload).toMatchObject({ id: mission_id, repo: '/repo', title: 'Add login', integration_check: 'npx vitest run' });
   });
 
+  it('spawnPlanner launches a planner agent in the repo root with the mission token, once per mission', async () => {
+    const r = createTestRelay();
+    const { mission_id, planner_token } = r.orchestrator.createMission(mission);
+    const { pane_id } = await r.orchestrator.spawnPlanner(mission_id, 'claude-code');
+    expect(pane_id).toBeTruthy();
+    expect(r.host.calls.spawn[0]).toMatchObject({ name: 'planner', cwd: r.dir });
+    const launch = r.runtimes['claude-code'].calls[0]!;
+    expect(launch.spec).toMatchObject({ role: 'planner', token: planner_token, cwd: r.dir });
+    expect(launch.spec.contractSummary).toContain(mission.title);
+    const spawned = r.ofType('agent_spawned')[0];
+    expect(spawned.task_id).toBeUndefined();
+    expect(spawned.payload).toMatchObject({ runtime: 'claude-code', pane_id, cwd: r.dir });
+    await expect(r.orchestrator.spawnPlanner(mission_id, 'codex')).rejects.toThrow(/already has a planner/);
+    await expect(r.orchestrator.spawnPlanner('m-nope', 'codex')).rejects.toThrow(/not found/);
+  });
+
   it('proposeTask rejects an unknown mission', async () => {
     const r = createTestRelay();
     await expect(r.orchestrator.proposeTask('m-nope', sampleContract('t-a'), 'planner')).rejects.toThrow(/mission/);

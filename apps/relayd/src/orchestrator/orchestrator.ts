@@ -77,6 +77,8 @@ export interface MissionSummary {
 
 export interface Orchestrator {
   createMission(body: CreateMissionBody): { mission_id: string; planner_token: string };
+  /** Spawns an LLM planner agent (with the mission's planner token) in the repository root. */
+  spawnPlanner(missionId: string, runtime: RuntimeKind): Promise<{ pane_id: string }>;
   getMission(missionId: string): MissionSummary | undefined;
   listTasks(missionId?: string): TaskSummary[];
   taskView(taskId: string): TaskView | undefined;
@@ -108,6 +110,7 @@ interface MissionRecord {
   status: MissionStatus;
   taskIds: string[];
   plannerToken: string;
+  plannerPaneId?: string;
   integrationStarted: boolean;
 }
 
@@ -682,8 +685,32 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return { mission_id: id, planner_token: plannerToken };
   };
 
+  const spawnPlanner: Orchestrator['spawnPlanner'] = async (missionId, runtime) => {
+    const m = missions.get(missionId);
+    if (!m) throw new RelayError(404, `mission ${missionId} not found`);
+    if (m.plannerPaneId) throw new RelayError(409, `mission ${missionId} already has a planner in pane ${m.plannerPaneId}`);
+    const rt = deps.runtimes[runtime];
+    if (!rt) throw new RelayError(400, `no runtime registered for ${runtime}`);
+    const sessionId = randomUUID();
+    const configDir = path.join(deps.relayDir, 'agents', `planner-${missionId}`);
+    const summary = [
+      m.mission.title,
+      m.mission.success_definition ? `Success definition: ${m.mission.success_definition}` : '',
+      `Repository: ${deps.repoRoot}`,
+    ].filter(Boolean).join('\n');
+    const launch = await rt.prepare(
+      { taskId: `planner-${missionId}`, token: m.plannerToken, mcpUrl: deps.mcpUrl, sessionId, cwd: deps.repoRoot, role: 'planner', contractSummary: summary },
+      configDir,
+    );
+    const { paneId } = await deps.host.spawn({ name: 'planner', cwd: deps.repoRoot, argv: launch.argv, env: launch.env, prompt: launch.prompt });
+    m.plannerPaneId = paneId;
+    emit({ mission_id: missionId, actor: 'relayd', type: 'agent_spawned', payload: { runtime, pane_id: paneId, session_id: sessionId, cwd: deps.repoRoot } });
+    return { pane_id: paneId };
+  };
+
   return {
     createMission,
+    spawnPlanner,
     getMission: (id) => {
       const m = missions.get(id);
       return m ? { mission: m.mission, status: m.status, task_ids: [...m.taskIds] } : undefined;

@@ -6,13 +6,14 @@
  *   GET  /events/log?since=<seq> → Event[] (JSON, for replay/bootstrap)
  *   POST /missions               → CreateMissionBody → { mission_id }
  *   POST /missions/:id/plan      → LoadPlanBody      → { task_ids }   (planner fallback: hand-written contracts)
+ *   POST /missions/:id/planner   → SpawnPlannerBody  → { pane_id }    (spawn an LLM planner agent for the mission)
  *   POST /tasks/:id/clarify      → ClarifyBody       → { contract_version }
  *   POST /tasks/:id/review       → ReviewBody        → { ok: true }
  *   POST /tasks/:id/cancel       → CancelBody        → { ok: true }
  *   GET  /health                 → { ok: true, version }
  */
 import { z } from 'zod';
-import { TaskContractInput } from './contract.js';
+import { TaskContractInput, RuntimeKind } from './contract.js';
 
 export const CreateMissionBody = z.object({
   repo: z.string(),
@@ -25,6 +26,8 @@ export type CreateMissionBody = z.infer<typeof CreateMissionBody>;
 export const LoadPlanBody = z.object({ tasks: z.array(TaskContractInput) });
 export type LoadPlanBody = z.infer<typeof LoadPlanBody>;
 
+export const SpawnPlannerBody = z.object({ runtime: RuntimeKind });
+export type SpawnPlannerBody = z.infer<typeof SpawnPlannerBody>;
 export const ClarifyBody = z.object({
   answers: z.array(z.object({ question_id: z.string(), answer: z.string().min(1) })).min(1),
 });
@@ -47,6 +50,7 @@ export const routes = {
   eventsLog: '/events/log',
   missions: '/missions',
   plan: (missionId: string) => `/missions/${missionId}/plan`,
+  planner: (missionId: string) => `/missions/${missionId}/planner`,
   clarify: (taskId: string) => `/tasks/${taskId}/clarify`,
   review: (taskId: string) => `/tasks/${taskId}/review`,
   cancel: (taskId: string) => `/tasks/${taskId}/cancel`,

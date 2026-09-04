@@ -113,6 +113,19 @@ describe('relay up', () => {
     expect(io.out).toEqual(['m-42']);
   });
 
+  it('--planner spawns an LLM planner after creating the mission', async () => {
+    const { fetch, requests } = fakeFetch((url) => (url.endsWith('/planner') ? { pane_id: 'w1:p9' } : { mission_id: 'm-5' }));
+    const io = capture();
+    const code = await run(['up', 'Add secure login', '--repo', '/r', '--planner', 'claude-code'], { ...io, fetch, env: {} });
+    expect(code).toBe(0);
+    expect(requests.map((r) => [r.method, r.url, r.body])).toEqual([
+      ['POST', 'http://127.0.0.1:7420/missions', { repo: '/r', title: 'Add secure login' }],
+      ['POST', 'http://127.0.0.1:7420/missions/m-5/planner', { runtime: 'claude-code' }],
+    ]);
+    expect(io.out).toEqual(['m-5', 'planner (claude-code) spawned in pane w1:p9']);
+    expect(await run(['up', 'T', '--planner', 'gemini'], { ...capture(), fetch, env: {} })).toBe(2);
+  });
+
   it('defaults --repo to the cwd and forwards --host', async () => {
     const { fetch, requests } = fakeFetch(() => ({ mission_id: 'm-1' }));
     await run(['up', 'T', '--host', 'tmux'], { ...capture(), fetch, env: {}, cwd: '/here' });
