@@ -65,6 +65,8 @@ export interface SpawnOptions {
    * `herdr agent prompt` (multi-line CLI arguments are refused by `agent start`); tmux appends it to argv.
    */
   prompt?: string;
+  /** Task the pane will host (recipient panes); shown in PaneInfo / HostMetrics. */
+  taskId?: string;
 }
 
 export interface TerminalHost {

@@ -403,7 +403,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         { taskId, token, mcpUrl: deps.mcpUrl, sessionId, cwd: worktree.path, role: 'recipient', contractSummary: contract.goal },
         configDir,
       );
-      const { paneId } = await deps.host.spawn({ name: contract.recipient, cwd: worktree.path, argv: launch.argv, env: launch.env, prompt: launch.prompt });
+      const { paneId } = await deps.host.spawn({ name: contract.recipient, cwd: worktree.path, argv: launch.argv, env: launch.env, prompt: launch.prompt, taskId: contract.id });
       rec.paneId = paneId;
       rec.spawned = true;
       rec.runtimeState = 'idle';
@@ -1164,7 +1164,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         { taskId, token, mcpUrl: deps.mcpUrl, sessionId: rec.sessionId, cwd: rec.worktree.path, role: 'recipient', contractSummary: contract.goal },
         agentConfigDir(deps.relayDir, taskId),
       );
-      const { paneId } = await deps.host.spawn({ name: contract.recipient, cwd: rec.worktree.path, argv: launch.argv, env: launch.env, prompt: opts.prompt ?? launch.prompt });
+      const { paneId } = await deps.host.spawn({ name: contract.recipient, cwd: rec.worktree.path, argv: launch.argv, env: launch.env, prompt: opts.prompt ?? launch.prompt, taskId: contract.id });
       rec.paneId = paneId;
       rec.spawned = true;
       rec.runtimeState = 'idle';

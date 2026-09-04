@@ -25,7 +25,7 @@ export interface SessionAuth {
 
 export const SESSION_TOKEN_FILE = 'session.token';
 
-const ALWAYS_GUARDED = ['/panes', '/pty', '/runs'];
+const ALWAYS_GUARDED = ['/panes', '/pty', '/runs', '/metrics'];
 const GUARDED_WHEN_REQUIRED = ['/state', '/events', '/missions', '/tasks'];
 
 export function generateSessionToken(): string {
