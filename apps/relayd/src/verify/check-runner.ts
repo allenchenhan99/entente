@@ -1,6 +1,6 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { execa } from 'execa';
 import picomatch from 'picomatch';
 import type {
   AcceptanceCriterion,
@@ -12,10 +12,13 @@ import type {
 } from '@relay/protocol';
 import type { CheckRunner, EventStore, WorktreeInfo, WorktreeManager } from '../ports.js';
 import type { DiffOptions } from '../worktree/git-worktrees.js';
+import { createCheckSandbox, type DaemonEnv } from './sandbox.js';
 
 export interface CheckExecOptions {
   cwd: string;
   timeoutMs: number;
+  /** Directories besides the worktree the check may write to (the evidence dir). */
+  writable?: string[];
 }
 
 export interface CheckExecResult {
@@ -31,32 +34,30 @@ export type CheckExec = (argv: string[], options: CheckExecOptions) => Promise<C
 export interface CheckRunnerDeps {
   store: EventStore;
   worktrees: WorktreeManager;
+  /** Replaces the sandboxed `sh -c` executor (tests). */
   exec?: CheckExec;
   clock?: () => number;
+  /** Where the checks' scratch HOME lives (`<relayDir>/home`); defaults to the OS temp dir. */
+  relayDir?: string;
+  /** The daemon's environment, filtered through the sandbox allow-list. Defaults to `process.env`. */
+  env?: DaemonEnv;
+  log?: (message: string) => void;
 }
 
 interface WorktreeManagerWithDiffOptions extends WorktreeManager {
   diff(worktreePath: string, base: string, options?: DiffOptions): Promise<{ patchPath: string; changedFiles: string[] }>;
 }
 
-const defaultCheckExec: CheckExec = async (argv, options) => {
-  const [file, ...args] = argv;
-  if (!file) throw new Error('check runner: argv must not be empty');
-  const result = await execa(file, args, {
-    cwd: options.cwd,
-    timeout: options.timeoutMs,
-    all: true,
-    reject: false,
-    stripFinalNewline: false,
-  });
-  return {
-    stdout: typeof result.stdout === 'string' ? result.stdout : '',
-    stderr: typeof result.stderr === 'string' ? result.stderr : '',
-    all: typeof result.all === 'string' ? result.all : undefined,
-    exitCode: result.exitCode ?? -1,
-    timedOut: result.timedOut,
+/** The production executor: `sh -c <run>` inside the check sandbox (see sandbox.ts). */
+function sandboxedCheckExec(deps: CheckRunnerDeps): CheckExec {
+  const sandbox = createCheckSandbox({ relayDir: deps.relayDir ?? path.join(os.tmpdir(), 'relay'), env: deps.env, log: deps.log });
+  return async (argv, options) => {
+    const [shell, flag, run] = argv;
+    if (shell !== 'sh' || flag !== '-c' || run === undefined) throw new Error('check runner: expected argv ["sh", "-c", <run>]');
+    const result = await sandbox.runCheck({ run, cwd: options.cwd, timeoutMs: options.timeoutMs, writable: options.writable });
+    return { stdout: result.output, stderr: '', all: result.output, exitCode: result.exitCode, timedOut: result.timedOut };
   };
-};
+}
 
 function combinedOutput(result: CheckExecResult): string {
   if (result.all !== undefined) return result.all;
@@ -92,7 +93,7 @@ export class DeterministicCheckRunner implements CheckRunner {
   constructor(deps: CheckRunnerDeps) {
     this.store = deps.store;
     this.worktrees = deps.worktrees as WorktreeManagerWithDiffOptions;
-    this.exec = deps.exec ?? defaultCheckExec;
+    this.exec = deps.exec ?? sandboxedCheckExec(deps);
     this.clock = deps.clock ?? Date.now;
   }
 
@@ -109,6 +110,7 @@ export class DeterministicCheckRunner implements CheckRunner {
       execution = await this.exec(['sh', '-c', criterion.check.run], {
         cwd: worktreePath,
         timeoutMs: criterion.check.timeout_ms,
+        writable: [evidenceDir],
       });
     } catch (error) {
       execution = errorExecution(error);
