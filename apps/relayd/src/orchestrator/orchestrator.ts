@@ -364,8 +364,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   const reviseTask: Orchestrator['reviseTask'] = async (taskId, patch, actor) => {
     const rec = mustTask(taskId);
+    if (rec.taskState === 'completed' || rec.taskState === 'canceled') {
+      throw conflict(`task ${taskId} is ${rec.taskState}; a verified or canceled contract is immutable`);
+    }
     const base = current(rec);
-    const next = TaskContract.parse({ ...base, ...patch, id: base.id, mission_id: base.mission_id, version: base.version + 1, clarifications: base.clarifications });
+    // Only keys explicitly present in the patch change; undefined never overwrites.
+    const provided = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    const next = TaskContract.parse({ ...base, ...provided, id: base.id, mission_id: base.mission_id, version: base.version + 1, clarifications: base.clarifications });
     return { contract_version: await revise(rec, next, actor) };
   };
 

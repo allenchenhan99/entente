@@ -3,7 +3,7 @@
  * relayd identifies the caller by `Authorization: Bearer <task_token>`; the planner uses the mission token.
  */
 import { z } from 'zod';
-import { TaskContract, TaskContractInput, ContractResponse, EvidenceSubmission, RepairContract, Question, Clarification } from './contract.js';
+import { TaskContract, TaskContractInput, ContractResponse, EvidenceSubmission, RepairContract, Question, Clarification, AcceptanceCriterion, Budget } from './contract.js';
 
 export const RECIPIENT_TOOLS = {
   get_contract: 'relay_get_contract',
@@ -70,7 +70,26 @@ export const ProposeTaskOutput = z.discriminatedUnion('status', [
   z.object({ status: z.literal('proposed'), task_id: z.string(), version: z.number().int(), warnings: z.array(z.string()) }),
   z.object({ status: z.literal('lint_error'), task_id: z.string(), errors: z.array(z.string()), warnings: z.array(z.string()) }),
 ]);
-export const ReviseTaskInput = z.object({ task_id: z.string(), patch: TaskContractInput.partial() });
+/**
+ * A revision patch: only the keys present are changed. Deliberately NOT `TaskContractInput.partial()` —
+ * that would re-apply the schema defaults (`goal: ''`, `acceptance_criteria: []`) for every omitted key and
+ * wipe the contract on merge.
+ */
+export const TaskContractPatch = z.object({
+  recipient: TaskContract.shape.recipient.optional(),
+  runtime: TaskContract.shape.runtime.optional(),
+  goal: z.string().optional(),
+  inputs: z.array(z.string()).optional(),
+  constraints: z.array(z.string()).optional(),
+  non_goals: z.array(z.string()).optional(),
+  scope: z.object({ allowed_paths: z.array(z.string()) }).optional(),
+  acceptance_criteria: z.array(AcceptanceCriterion).optional(),
+  output: z.object({ type: z.enum(['code_change']), evidence_required: z.array(z.enum(['git_diff', 'changed_files', 'check_outputs'])) }).optional(),
+  dependencies: z.array(z.string()).optional(),
+  budget: Budget.optional(),
+});
+export type TaskContractPatch = z.infer<typeof TaskContractPatch>;
+export const ReviseTaskInput = z.object({ task_id: z.string(), patch: TaskContractPatch });
 /** Planner → human: mission-level questions that must be settled before decomposition. */
 export const AskHumanInput = z.object({ questions: z.array(Question).min(1) });
 export const AskHumanOutput = z.object({ status: z.literal('waiting'), open_questions: z.number().int() });

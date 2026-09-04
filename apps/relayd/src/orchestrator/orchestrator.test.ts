@@ -52,6 +52,26 @@ describe('orchestrator missions', () => {
     expect(r.orchestrator.getMission(mission_id)!.clarifications).toHaveLength(2);
   });
 
+  it('reviseTask changes only the provided keys and refuses to touch a completed contract', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    const before = r.orchestrator.getContract('t-a').contract;
+    const { contract_version } = await r.orchestrator.reviseTask('t-a', { constraints: [...before.constraints, 'Repo facts: no @types/node'] }, 'planner');
+    const after = r.orchestrator.getContract('t-a').contract;
+    expect(contract_version).toBe(2);
+    expect(after.goal).toBe(before.goal);
+    expect(after.acceptance_criteria).toEqual(before.acceptance_criteria);
+    expect(after.scope.allowed_paths).toEqual(before.scope.allowed_paths);
+    expect(after.constraints).toContain('Repo facts: no @types/node');
+    expect(r.ofType('lint_reported').at(-1)!.payload.results).toEqual([]);
+
+    r.orchestrator.respond('t-a', { ...accept, contract_version: 2 });
+    r.orchestrator.submitEvidence('t-a', { contract_version: 2, claimed: claimedAll, summary: 's' });
+    await r.orchestrator.settled();
+    expect(r.orchestrator.taskView('t-a')!.task_state).toBe('completed');
+    await expect(r.orchestrator.reviseTask('t-a', { constraints: ['late'] }, 'planner')).rejects.toThrow(/immutable/);
+  });
+
   it('proposeTask rejects an unknown mission', async () => {
     const r = createTestRelay();
     await expect(r.orchestrator.proposeTask('m-nope', sampleContract('t-a'), 'planner')).rejects.toThrow(/mission/);

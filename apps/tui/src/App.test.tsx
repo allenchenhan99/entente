@@ -103,8 +103,10 @@ describe('application shell', () => {
     const view = render(<TickProbe />);
     expect(view.lastFrame()).toBe('0');
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 150));
-    expect(view.lastFrame()).toBe('1');
+    // Timer-driven; under CI load the first tick can land late, so wait for it rather than for a fixed 150 ms.
+    const deadline = Date.now() + 2_000;
+    while (view.lastFrame() === '0' && Date.now() < deadline) await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    expect(Number(view.lastFrame())).toBeGreaterThanOrEqual(1);
     view.unmount();
   });
 });

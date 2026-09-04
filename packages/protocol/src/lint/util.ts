@@ -21,11 +21,13 @@ export const isSameOrAncestor = (a: string, b: string): boolean => a === b || b.
  * Deliberately small: contracts use simple prefix-style globs such as `src/auth/**` or `tests/*.test.ts`.
  */
 export function globMatches(glob: string, path: string): boolean {
+  // Placeholders keep later replacements from rewriting the regex fragments inserted by earlier ones.
   const escaped = glob
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
     .replace(/\*\*\//g, '\u0000')
-    .replace(/\*\*/g, '.*')
+    .replace(/\*\*/g, '\u0001')
     .replace(/\*/g, '[^/]*')
+    .replace(/\u0001/g, '.*')
     .replace(/\u0000/g, '(?:.*/)?');
   return new RegExp(`^${escaped}$`).test(path);
 }

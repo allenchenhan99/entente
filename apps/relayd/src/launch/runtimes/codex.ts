@@ -43,6 +43,8 @@ export interface CodexSandboxRoots {
   homeDir: string;
   /** The repository's common git dir (e.g. `<repo>/.git`), or undefined when it cannot be determined. */
   gitCommonDir?: string;
+  /** Real path of `<cwd>/node_modules` when it is a symlink out of the worktree (vitest writes `.vite-temp` there). */
+  nodeModulesDir?: string;
 }
 
 export function codexConfigToml(spec: Pick<LaunchSpec, 'mcpUrl' | 'cwd'>, roots?: CodexSandboxRoots): string {
@@ -58,6 +60,7 @@ export function codexConfigToml(spec: Pick<LaunchSpec, 'mcpUrl' | 'cwd'>, roots?
   if (roots) {
     const list = [roots.configDir, '/tmp', path.join(roots.homeDir, '.cache', 'codex-runtimes')];
     if (roots.gitCommonDir) list.push(roots.gitCommonDir);
+    if (roots.nodeModulesDir) list.push(roots.nodeModulesDir);
     toml +=
       '\n[sandbox_workspace_write]\n' +
       `writable_roots = [${list.map(tomlString).join(', ')}]\n` +
@@ -71,6 +74,18 @@ export function codexConfigToml(spec: Pick<LaunchSpec, 'mcpUrl' | 'cwd'>, roots?
  * Resolves the common git dir for `cwd` without spawning git: a linked worktree has a `.git` *file*
  * containing `gitdir: <repo>/.git/worktrees/<id>`; a normal checkout has a `.git` directory.
  */
+/** Resolves `<cwd>/node_modules` when it is a symlink (relayd links the repo's install into every worktree). */
+export async function linkedNodeModules(cwd: string): Promise<string | undefined> {
+  const link = path.join(cwd, 'node_modules');
+  try {
+    const stat = await fs.lstat(link);
+    if (!stat.isSymbolicLink()) return undefined;
+    return await fs.realpath(link);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function gitCommonDir(cwd: string): Promise<string | undefined> {
   const dotGit = path.join(cwd, '.git');
   try {
@@ -100,7 +115,9 @@ export class CodexRuntime implements AgentRuntime {
 
   async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
     await fs.mkdir(configDir, { recursive: true });
-    const roots: CodexSandboxRoots = { configDir, homeDir: this.homeDir, gitCommonDir: await gitCommonDir(spec.cwd) };
+    const roots: CodexSandboxRoots = {
+      configDir, homeDir: this.homeDir, gitCommonDir: await gitCommonDir(spec.cwd), nodeModulesDir: await linkedNodeModules(spec.cwd),
+    };
     await fs.writeFile(path.join(configDir, 'config.toml'), codexConfigToml(spec, roots), { mode: 0o600 });
     await this.copyAuth(configDir);
 

@@ -151,7 +151,23 @@ describe('codex runtime', () => {
     for (const root of [configDir, '/tmp', path.join(home, '.cache', 'codex-runtimes'), path.join(repo, '.git')]) {
       expect(line).toContain(`"${root}"`);
     }
+    expect(line).not.toContain('node_modules');
     expect(toml).toContain('[features]\napps = false\nbrowser_use = false\ncomputer_use = false\n');
+  });
+
+  it('adds the real node_modules directory to writable_roots when the worktree links it from outside', async () => {
+    const home = path.join(tmp, 'home4');
+    const repo = path.join(tmp, 'repo4');
+    fs.mkdirSync(path.join(repo, 'node_modules'), { recursive: true });
+    fs.mkdirSync(home, { recursive: true });
+    const cwd = path.join(repo, '.relay', 'wt', 't-y');
+    fs.mkdirSync(cwd, { recursive: true });
+    fs.symlinkSync(path.join(repo, 'node_modules'), path.join(cwd, 'node_modules'), 'dir');
+    const runtime = createRuntime('codex', { homeDir: home });
+    const configDir = path.join(tmp, 'codex-cfg4');
+    await runtime.prepare({ ...spec, cwd }, configDir);
+    const line = fs.readFileSync(path.join(configDir, 'config.toml'), 'utf8').split('\n').find((l) => l.startsWith('writable_roots = '))!;
+    expect(line).toContain(`"${fs.realpathSync(path.join(repo, 'node_modules'))}"`);
   });
 
   it('escapes quotes and backslashes in the cwd trust key', async () => {
