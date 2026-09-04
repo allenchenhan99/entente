@@ -16,7 +16,8 @@
     "build": "tsc -b",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false || tsc -b",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "postinstall": "node -e \"try{const fs=require('fs'),p=require('path'),d='node_modules/node-pty/prebuilds';for(const a of fs.readdirSync(d)){const f=p.join(d,a,'spawn-helper');if(fs.existsSync(f))fs.chmodSync(f,0o755)}}catch{}\""
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
