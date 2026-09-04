@@ -1,0 +1,13 @@
+# Local planning / assistant scaffolding — not part of the product
+docs/superpowers/
+docs/plans/
+.claude/
+CLAUDE.local.md
+
+# Runtime
+node_modules/
+dist/
+.relay/
+*.log
+.env
+.DS_Store
