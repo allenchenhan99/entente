@@ -1,163 +1,141 @@
-# TUI Work Package Evidence
+# cli-explain evidence
 
-Branch: `wp/tui`
+Branch: `wp/cli-explain`  
+Base: `b0c4d2e`
 
-Implementation commits:
-
-- `6009682` `docs(tui): plan RelayGraph terminal UI`
-- `1393f0e` `feat(tui): add state fixtures and graph canvas`
-- `8139cd7` `feat(tui): render animated handoff graph states`
-- `3c1a71a` `feat(tui): add mission tree and event timeline`
-- `70ab46f` `feat(tui): add protocol-backed replay data layer`
-- `1e9bd61` `feat(tui): stream live state over SSE`
-- `aa7ff4a` `feat(tui): add contract overlay and keyboard commands`
-- `fcff0dc` `feat(tui): compose responsive RelayGraph app`
-- `d298d2e` `feat(tui): add CLI and headless replay rendering`
-- `6dd6c4c` `fix(tui): stop evidence particle at verifier`
-- `e161a86` `fix(tui): support root-level TSX execution`
+The conservative implementation keeps the existing `relay replay` command unchanged, injects the frozen `GraphApi` through `CliIo`, and shares one source loader across `inbox`, `explain`, and `story`. Live mode always reads `GET /state` and `GET /events/log?since=0`; explainability replay mode validates the JSONL as protocol events and derives state with `replay` from `@relay/protocol` without fetching.
 
 ## AC-1
 
-Command: `npx vitest run apps/tui -t "canvas"`
+Command:
 
 ```text
-Test Files  1 passed | 9 skipped (10)
-Tests       5 passed | 33 skipped (38)
-exit_code=0
+npx vitest run apps/cli -t "inbox"
 ```
 
-Canvas coverage proves left/right/vertical clipping, bounded horizontal and vertical
-lines, horizontal-then-vertical arrows with `─`/`│`/corner/`▶`, styled ANSI output,
-and exact configured dimensions after ANSI removal.
+Trimmed output:
+
+```text
+Test Files  1 passed (1)
+Tests       3 passed | 25 skipped (28)
+exit code   0
+```
+
+Coverage includes two rendered inbox blocks with exact clarify/review commands, the required empty message, and a replay file whose injected fetch throws if called.
 
 ## AC-2
 
-Command: `npx vitest run apps/tui -t "graph states"`
+Command:
 
 ```text
-Test Files  1 passed | 9 skipped (10)
-Tests       6 passed | 32 skipped (38)
-exit_code=0
+npx vitest run apps/cli -t "explain"
 ```
 
-The three hand-written protocol `State` fixtures prove amber/pulsing `? 2`, accepted
-`v2 ✓`, dependency and blocked markers, the red `AC-2` verifier back-edge, verified
-edges for every happy task, shifted dotted phases, moving evidence, and a particle
-that stops rather than wraps at the verifier.
+Trimmed output:
+
+```text
+Test Files  1 passed (1)
+Tests       4 passed | 24 skipped (28)
+exit code   0
+```
+
+Coverage includes fake `describe` plus `storyFor` output, an unknown ref returning exit 2 with all valid refs, an empty placeholder graph, and invalid-ref behavior when that graph is empty.
 
 ## AC-3
 
-Command: `npx vitest run apps/tui -t "tree"`
+Command:
 
 ```text
-Test Files  1 passed | 9 skipped (10)
-Tests       3 passed | 35 skipped (38)
-exit_code=0
+npx vitest run apps/cli -t "story"
 ```
 
-The tree tests prove mission/lint summaries, independent runtime/task/handoff layers,
-the exact `◐ blocked on t-backend-auth` detail, clarification counts, worktree paths,
-and dim pre-acceptance worktree semantics.
+Trimmed output:
+
+```text
+Test Files  1 passed (1)
+Tests       3 passed | 25 skipped (28)
+exit code   0
+```
+
+The story test proves exact `task_id` filtering, delegates each retained event to the fake `narrate`, and checks the `HH:MM  ` prefix.
 
 ## AC-4
 
-Command: `npx vitest run apps/tui -t "timeline|replay"`
+Command:
 
 ```text
-Test Files  4 passed | 6 skipped (10)
-Tests       10 passed | 28 skipped (38)
-exit_code=0
+npx tsc -b && npx vitest run apps/cli
 ```
 
-The timeline shows its newest-last visible tail and typed hints. Replay tests load
-both merged `fixtures/events-happy.jsonl` and `fixtures/events-repair.jsonl` with the
-real protocol event parser/reducer. `step(+1)` advances cursor and `last_seq` together;
-`seek(0)` restores `initialState()`.
-
-## AC-5
-
-Command: `npx vitest run apps/tui -t "keys"`
+Trimmed output:
 
 ```text
-Test Files  1 passed | 9 skipped (10)
-Tests       3 passed | 35 skipped (38)
-exit_code=0
+Test Files  1 passed (1)
+Tests       28 passed (28)
+exit code   0
 ```
 
-With fetch and command execution injected through context, the tests prove `a` opens
-Questions and POSTs a `ClarifyBody.parse`-valid body, while `f` collects observed text
-and POSTs a failed `ReviewBody.parse`-valid body. Focus argv and cancel confirmation
-are also covered without invoking real Herdr/tmux processes.
+## Git diff and changed files
 
-## AC-6
-
-Command: `npx vitest run apps/tui -t "headless"`
+Command:
 
 ```text
-Test Files  1 passed | 9 skipped (10)
-Tests       4 passed | 34 skipped (38)
-exit_code=0
+git diff --check b0c4d2e..HEAD
+git diff --name-only b0c4d2e..HEAD
+git diff --stat b0c4d2e..HEAD
 ```
 
-The tests render two frames from the real repair fixture through
-`ink-testing-library`, require at least 20 lines per frame, reject ANSI escapes, and
-prove non-TTY auto-detection.
-
-Fresh source-runtime check:
+Trimmed output:
 
 ```text
-$ node --import tsx apps/tui/src/index.tsx --replay fixtures/events-repair.jsonl --frames 2 --no-tty
-exit_code=0
-rendered_lines=60
+apps/cli/src/cli.test.ts
+apps/cli/src/cli.ts
+ apps/cli/src/cli.test.ts | 232 ++++++++++++++++++++++++++++++++++++++++++++++-
+ apps/cli/src/cli.ts      | 187 +++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 416 insertions(+), 3 deletions(-)
 ```
 
-Fresh compiled-runtime check:
+`git diff --check` produced no output. The pre-existing unstaged `package-lock.json` change was not modified or staged.
+
+Commits:
 
 ```text
-$ node apps/tui/dist/index.js --replay fixtures/events-repair.jsonl --frames 2 --no-tty
-exit_code=0
-rendered_lines=60
+4df3522 fix(cli): distinguish empty graphs from invalid refs
+9793841 test(cli): cover explainability edge cases
+597cf67 feat(cli): narrate mission story
+9954c36 feat(cli): explain graph objects
+b140621 feat(cli): add explainability inbox command
 ```
 
-The exact `npx tsx ...` wrapper was also attempted. This managed shell rejects tsx's
-own pre-start Unix IPC socket with `listen EPERM`; it fails before loading the TUI.
-Both the same TSX loader invoked without its IPC wrapper and the compiled entry point
-pass, demonstrating that the application path itself exits cleanly.
+## Full repository verification
 
-## AC-7
-
-Command: `npx tsc -b && npx vitest run apps/tui`
+The exact contract-level command was run on the final tree:
 
 ```text
-Test Files  10 passed (10)
-Tests       38 passed (38)
-exit_code=0
+npx tsc -b && npx vitest run
 ```
 
-Required whole-repository gate: `npx tsc -b && npx vitest run`
+TypeScript completed and Vitest reported `28 passed` files / `255 passed` tests, plus eight failures in two Relayd suites that require opening sockets. The sandbox rejects the underlying operations before application behavior runs:
 
 ```text
-Test Files  18 passed (18)
-Tests       153 passed (153)
-exit_code=0
+apps/relayd/src/http/boot.test.ts
+Error: listen EPERM: operation not permitted .../tsx-501/*.pipe
+
+apps/relayd/src/mcp/server.test.ts
+Error: listen EPERM: operation not permitted 127.0.0.1
+
+Test Files  2 failed | 28 passed (30)
+Tests       8 failed | 255 passed (263)
+exit code   1
 ```
 
-## Diff and changed paths
+A direct Node `net.Server.listen(0, "127.0.0.1")` probe also returned `EPERM listen`, confirming an execution-sandbox restriction rather than a CLI regression. With only those two socket-bound suites excluded, the final tree passes all remaining repository tests:
 
-`git diff --check` exits 0. The branch audit against `origin/main` reports no changed
-implementation path outside `apps/tui/**`. `EVIDENCE.md` is the explicit root-level
-output required by the work contract. The working branch is `wp/tui`.
-
-Conservative interpretations used:
-
-- The frozen work contract and PRD are the approved design; no additional approval
-  round was introduced because the user required autonomous execution without
-  questions.
-- Replay timestamp speed uses `delay / speed`, so larger values play faster.
-- “Three layers per task” means runtime, task, and handoff state are all visible in
-  each task summary, with the second line reserved for worktree/dependency/question
-  context as specified by PRD §12.2.
-- Headless frames are deterministic snapshots distributed across the replay log;
-  this makes repair and terminal states visible in CI without wall-clock waits.
+```text
+npx vitest run --exclude apps/relayd/src/http/boot.test.ts --exclude apps/relayd/src/mcp/server.test.ts
+Test Files  28 passed (28)
+Tests       255 passed (255)
+exit code   0
+```
 
 STATUS: done
