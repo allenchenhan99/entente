@@ -22,6 +22,7 @@ import { parseCastFile, playCast, renderCastScreen } from './cast.js';
 import {
   DEFAULT_PORT,
   Event as EventSchema,
+  HostMetrics,
   LoadPlanBody,
   OkOutput,
   PaneId,
@@ -90,6 +91,7 @@ export const USAGE = `usage:
   relay pane kill <id> [--port N]
   relay pane focus <id> [--port N]
   relay pane cast <id> [--out file] [--port N]
+  relay pane metrics [--json] [--port N]
   relay runs list [--port N]
   relay runs events <run> [--since N] [--port N]
   relay cast info <file|run:pane> [--port N]
@@ -259,6 +261,7 @@ async function pane(args: string[], io: CliIo): Promise<number> {
     case 'kill': return panePostAction(rest, 'kill', io);
     case 'focus': return panePostAction(rest, 'focus', io);
     case 'cast': return paneCast(rest, io);
+    case 'metrics': return paneMetrics(rest, io);
     default: throw new UsageError(verb ? `unknown pane command: ${verb}` : 'relay pane needs a command');
   }
 }
@@ -415,6 +418,29 @@ async function panePostAction(args: string[], action: 'kill' | 'focus', io: CliI
   const raw = await new Client(io, values).post<unknown>(`${ptyRoutes.pane(paneId)}/${action}`, {});
   validateResponse(OkOutput, raw, '{ ok: true }');
   io.stdout('ok');
+  return 0;
+}
+
+/** `relay pane metrics [--json]`: one row per pane from `GET /metrics` (`-` where a number was not reached yet). */
+async function paneMetrics(args: string[], io: CliIo): Promise<number> {
+  const { values } = parseKnown(args, { port: { type: 'string' }, json: { type: 'boolean' } });
+  const raw = await new Client(io, values).get<unknown>(ptyRoutes.metrics);
+  const metrics = validateResponse(HostMetrics, raw, 'HostMetrics');
+  if (values.json) {
+    io.stdout(JSON.stringify(metrics, null, 2));
+    return 0;
+  }
+  const ms = (value: number | undefined): string => (value === undefined ? '-' : String(Math.round(value)));
+  const rows = metrics.panes.map(({ pane_id, role, timings: t }) => [
+    pane_id,
+    role,
+    ms(t.readiness_ms),
+    ms(t.prompt_accept_ms),
+    t.prompt_retries === undefined ? '-' : String(t.prompt_retries),
+    t.render_p50_ms === undefined || t.render_p95_ms === undefined ? '-' : `${t.render_p50_ms.toFixed(1)}/${t.render_p95_ms.toFixed(1)}`,
+    t.output_bytes === undefined ? '-' : String(t.output_bytes),
+  ]);
+  for (const line of table(['pane', 'role', 'ready(ms)', 'prompt→accept(ms)', 'retries', 'render p50/p95(ms)', 'bytes'], rows)) io.stdout(line);
   return 0;
 }
 

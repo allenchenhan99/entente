@@ -306,6 +306,53 @@ describe('relay pane kill and focus', () => {
   });
 });
 
+describe('relay pane metrics', () => {
+  const hostMetrics = () => ({
+    host: 'relay',
+    uptime_ms: 12345.6,
+    panes_spawned: 3,
+    panes_alive: 2,
+    prompt_failures: 1,
+    panes: [
+      {
+        pane_id: 'relay:7', role: 'backend', task_id: 't-backend',
+        timings: {
+          spawn_ms: 12.4, first_output_ms: 80.2, readiness_ms: 410.7, prompt_write_ms: 1.4, prompt_accept_ms: 305.9, prompt_retries: 1,
+          render_p50_ms: 0.8, render_p95_ms: 3.2, output_bytes: 20480, output_chunks: 37,
+        },
+      },
+      { pane_id: 'relay:8', role: 'planner', timings: { spawn_ms: 9.1, output_bytes: 0, output_chunks: 0 } },
+    ],
+  });
+
+  it('prints one row per pane with readiness, prompt latency, retries, render percentiles and bytes; - for undefined', async () => {
+    const { fetch, requests } = fakeFetch(() => hostMetrics());
+    const io = { ...capture(), cwd: tmpDir(), graph: fakeGraphApi(), sleep: async () => {} };
+    expect(await run(['pane', 'metrics', '--port', '7500'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests).toEqual([{ url: 'http://127.0.0.1:7500/metrics', method: 'GET', body: undefined }]);
+    expect(io.out).toEqual([
+      'pane     role     ready(ms)  prompt→accept(ms)  retries  render p50/p95(ms)  bytes',
+      'relay:7  backend  411        306                1        0.8/3.2             20480',
+      'relay:8  planner  -          -                  -        -                   0',
+    ]);
+  });
+
+  it('--json prints the HostMetrics object', async () => {
+    const { fetch } = fakeFetch(() => hostMetrics());
+    const io = { ...capture(), cwd: tmpDir(), graph: fakeGraphApi(), sleep: async () => {} };
+    expect(await run(['pane', 'metrics', '--json'], { ...io, fetch, env: {} })).toBe(0);
+    expect(JSON.parse(io.out.join('\n'))).toEqual(hostMetrics());
+  });
+
+  it('sends the session token and fails clearly when the body is not HostMetrics', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ host: 'relay', panes: 'nope' }));
+    const io = { ...capture(), cwd: tmpDir(), graph: fakeGraphApi(), sleep: async () => {} };
+    expect(await run(['pane', 'metrics', '--token', 'abc'], { ...io, fetch, env: {} })).toBe(1);
+    expect(io.err.join('\n')).toMatch(/HostMetrics/);
+    expect(requests[0]).toMatchObject({ url: 'http://127.0.0.1:7420/metrics', method: 'GET' });
+  });
+});
+
 describe('relay pane cast', () => {
   const cast = '{"version": 2, "width": 120, "height": 40}\n[0.1, "o", "hello\\r\\n"]\n';
 
