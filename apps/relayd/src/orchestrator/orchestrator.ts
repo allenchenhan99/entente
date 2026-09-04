@@ -55,6 +55,8 @@ export interface OrchestratorDeps {
   mcpUrl: string;
   clock?: () => string;
   log?: (message: string) => void;
+  /** Daemon restart: is a recorded worktree still on disk? Defaults to `fs.existsSync(path)`; tests inject. */
+  worktreeExists?: (worktree: WorktreeInfo) => boolean;
 }
 
 export interface TaskSummary {
@@ -134,6 +136,16 @@ export interface Orchestrator {
    */
   rehydrate(events: Event[]): { missions: number; tasks: number };
   /**
+   * Daemon restart, after `rehydrate`: every task whose latest evidence submission never got its
+   * `evidence_recorded` (the daemon died after `evidence_submitted` / `checks_started`) has that attempt re-run
+   * through the normal pipeline — same submission, same evidence dir — so the record and the verdict are produced
+   * and a resumed agent's `awaitVerdict` resolves. `checks_started` is not repeated for an attempt that already
+   * has one. A worktree that no longer exists is recorded as a failed attempt (`observed: 'worktree missing after
+   * restart'`) and handed to the repair policy. Returns the attempts that were re-run; the checks themselves run
+   * in the background (`settled()`).
+   */
+  resumeChecks(): Array<{ task_id: string; attempt: number }>;
+  /**
    * Daemon restart: reopens the agent of `taskId` (or `planner:<mission>`) in a fresh pane that resumes its
    * recorded session via `runtime.resume`. Emits `agent_exited` (reason `daemon restart`) for the old pane and
    * `agent_spawned` for the new one; a failed resume is recorded as `task_blocked` and rethrown.
@@ -183,6 +195,8 @@ interface TaskRecord {
   attempt: number;
   attempts: EvidenceRecord[];
   submissions: EvidenceSubmission[];
+  /** Attempts for which `checks_started` was emitted (this run or a recorded one): the pipeline is idempotent per attempt. */
+  checksStarted: Set<number>;
   verdicts: Map<number, AwaitVerdictOutput>;
   pendingRecord?: EvidenceRecord;
   repairs: RepairContract[];
@@ -199,6 +213,29 @@ interface TaskRecord {
 }
 
 const hex = (bytes: number) => randomBytes(bytes).toString('hex');
+const nonEmpty = (s: string | undefined): boolean => typeof s === 'string' && s.trim().length > 0;
+
+/**
+ * PRD §6.3 / §4 principle 1: an acceptance is only meaningful when the recipient restates the task and says how
+ * it will prove every criterion; a clarification needs questions; a rejection needs a reason. Pure: the caller
+ * reports the errors and lets the agent respond again.
+ */
+export function responseShapeErrors(contract: TaskContract, input: Omit<ContractResponse, 'task_id'>): string[] {
+  const errors: string[] = [];
+  if (input.decision === 'accepted') {
+    if (!input.interpretation.some(nonEmpty)) errors.push('accepted requires a non-empty interpretation (restate the task in your own words)');
+    const criteria = contract.acceptance_criteria.map((ac) => ac.id);
+    const missing = criteria.filter((id) => !nonEmpty(input.verification_plan[id]));
+    if (missing.length > 0) errors.push(`verification_plan is missing an entry for ${missing.join(', ')}`);
+    const unknown = Object.keys(input.verification_plan).filter((id) => !criteria.includes(id));
+    if (unknown.length > 0) errors.push(`verification_plan names unknown criteria ${unknown.join(', ')} (criteria: ${criteria.join(', ') || 'none'})`);
+  } else if (input.decision === 'needs_clarification') {
+    if (input.questions.length === 0) errors.push('needs_clarification requires at least one question');
+  } else if (!nonEmpty(input.reason)) {
+    errors.push('rejected requires a reason');
+  }
+  return errors;
+}
 export const INTEGRATION_BRANCH = 'relay/integration';
 /** Synthetic criterion for the mission-level integration check (`CriterionId` requires `AC-<n>`). */
 export const INTEGRATION_CRITERION = 'AC-0';
@@ -212,6 +249,7 @@ export const agentConfigDir = (relayDir: string, taskId: string): string =>
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const clock = deps.clock ?? (() => new Date().toISOString());
   const log = deps.log ?? (() => {});
+  const worktreeExists = deps.worktreeExists ?? ((wt: WorktreeInfo) => fs.existsSync(wt.path));
   const { store } = deps;
   const missions = new Map<string, MissionRecord>();
   const tasks = new Map<string, TaskRecord>();
@@ -245,6 +283,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return t;
   };
   const current = (rec: TaskRecord): TaskContract => rec.versions[rec.versions.length - 1];
+  const TERMINAL: ReadonlySet<TaskState> = new Set(['completed', 'canceled', 'failed']);
+  /** Responses and evidence must target the version the recipient actually read; one wording for both. */
+  const versionMismatch = (rec: TaskRecord, given: number): string | undefined =>
+    given === current(rec).version ? undefined : `contract_version v${given} is not the current contract of ${rec.id} (v${current(rec).version}); call relay_get_contract and respond to the current version`;
   const agentActor = (rec: TaskRecord) => `agent:${current(rec).recipient}` as const;
 
   const depsUnmet = (rec: TaskRecord): string[] =>
@@ -387,6 +429,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const m = mustMission(missionId);
     const existing = tasks.get(input.id);
     if (existing && existing.missionId !== missionId) throw conflict(`task ${input.id} belongs to mission ${existing.missionId}`);
+    // "Fix and re-propose" exists for one situation only: the contract never got past lint, so no agent has seen
+    // it. Anything else already has a reader (or a history) and must go through reviseTask, which keeps the
+    // version chain, clarifications and the recipient's re-response intact.
+    if (existing && !(!existing.spawned && !existing.spawning && hasLintErrors(existing.lint))) {
+      throw conflict(`task ${input.id} is ${existing.taskState}; use relay_revise_task`);
+    }
     const version = existing ? current(existing).version + 1 : 1;
     const contract = TaskContract.parse({
       ...input, mission_id: missionId, version, sender, clarifications: existing ? current(existing).clarifications : [],
@@ -397,7 +445,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       rec = {
         id: contract.id, missionId, versions: [], lint: [], openQuestions: [],
         taskState: 'proposed', handoffState: 'proposed', runtimeState: 'unspawned',
-        spawned: false, spawning: false, attempt: 0, attempts: [], submissions: [], verdicts: new Map(),
+        spawned: false, spawning: false, attempt: 0, attempts: [], submissions: [], checksStarted: new Set(), verdicts: new Map(),
         repairs: [], repairAckPending: false, escalated: false, proposedAt: clock(), replies: [], repliesRead: 0,
       };
       tasks.set(rec.id, rec);
@@ -532,10 +580,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     touch(rec);
     const contract = current(rec);
     const errors: string[] = [];
-    if (input.contract_version !== contract.version) errors.push(`contract_version ${input.contract_version} is not the current version ${contract.version}`);
+    const stale = versionMismatch(rec, input.contract_version);
+    if (stale) errors.push(stale);
     if (rec.taskState === 'canceled') errors.push('task is canceled');
     if (rec.handoffState !== 'proposed') errors.push(`contract v${contract.version} already has a response (${rec.handoffState})`);
     if (input.decision === 'accepted' && !rec.worktree) errors.push('task has no worktree yet (not spawned)');
+    errors.push(...responseShapeErrors(contract, input));
     if (errors.length > 0) return { status: 'invalid', errors };
     const response: ContractResponse = { ...input, task_id: taskId };
     rec.response = response;
@@ -708,9 +758,13 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   };
 
+  const attemptSettled = (rec: TaskRecord, attempt: number): boolean =>
+    rec.attempts.some((a) => a.attempt === attempt) || rec.verdicts.has(attempt) || rec.taskState === 'canceled';
+
   const runChecks = async (rec: TaskRecord, submission: EvidenceSubmission): Promise<void> => {
     // Let the tool call return before any check event is produced, even with synchronous runners.
     await new Promise<void>((resolve) => setImmediate(resolve));
+    if (attemptSettled(rec, submission.attempt)) return;
     const evidenceDir = path.join(deps.relayDir, 'evidence', rec.id);
     let record: EvidenceRecord;
     try {
@@ -723,18 +777,65 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       emitTask(rec, 'relayd', 'task_escalated', { reason, failed_criteria: [] });
       return;
     }
+    if (attemptSettled(rec, submission.attempt)) return; // decided elsewhere while the runner was busy (cancel, review)
     rec.attempts.push(record);
     emitTask(rec, 'relayd', 'evidence_recorded', { record });
     await applyDecision(rec, record, deps.repair.decide(toView(rec), record));
   };
 
+  /** PRD §9 step 1: `evidence_submitted` triggers `checks_started` — once per attempt — then the runner. */
+  const startChecks = (rec: TaskRecord, submission: EvidenceSubmission): void => {
+    if (!rec.checksStarted.has(submission.attempt)) {
+      rec.checksStarted.add(submission.attempt);
+      emitTask(rec, 'relayd', 'checks_started', { attempt: submission.attempt });
+    }
+    track(runChecks(rec, submission));
+  };
+
+  /** The worktree of an interrupted attempt is gone: nothing can be checked, so every criterion fails on record. */
+  const recordMissingWorktree = async (rec: TaskRecord, submission: EvidenceSubmission): Promise<void> => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (attemptSettled(rec, submission.attempt)) return;
+    const observed = 'worktree missing after restart';
+    const checks: EvidenceRecord['checks'] = {};
+    for (const ac of current(rec).acceptance_criteria) checks[ac.id] = { status: 'failed', observed };
+    const record: EvidenceRecord = {
+      task_id: rec.id, contract_version: submission.contract_version, attempt: submission.attempt, changed_files: [], checks,
+      self_report_mismatch: Object.keys(checks).filter((id) => submission.claimed[id]?.status === 'passed'),
+    };
+    rec.attempts.push(record);
+    emitTask(rec, 'relayd', 'evidence_recorded', { record });
+    await applyDecision(rec, record, deps.repair.decide(toView(rec), record));
+  };
+
+  const resumeChecks: Orchestrator['resumeChecks'] = () => {
+    const resumed: Array<{ task_id: string; attempt: number }> = [];
+    for (const rec of tasks.values()) {
+      if (TERMINAL.has(rec.taskState)) continue;
+      const submission = rec.submissions.at(-1);
+      if (!submission || attemptSettled(rec, submission.attempt)) continue;
+      resumed.push({ task_id: rec.id, attempt: submission.attempt });
+      if (!rec.worktree || !worktreeExists(rec.worktree)) {
+        log(`resuming checks for ${rec.id} attempt ${submission.attempt}: worktree missing, recording the attempt as failed`);
+        track(recordMissingWorktree(rec, submission));
+        continue;
+      }
+      log(`resuming checks for ${rec.id} attempt ${submission.attempt} (interrupted by the previous daemon)`);
+      startChecks(rec, submission);
+    }
+    return resumed;
+  };
+
   const submitEvidence: Orchestrator['submitEvidence'] = (taskId, input) => {
     const rec = mustTask(taskId);
-    touch(rec);
+    // Guards come before `touch` so a refused submission changes nothing: no heartbeat, no unblock event.
+    const stale = versionMismatch(rec, input.contract_version);
+    if (stale) throw conflict(stale);
     if (rec.taskState === 'canceled' || rec.taskState === 'completed' || rec.taskState === 'failed') {
       throw conflict(`task ${taskId} is ${rec.taskState}`);
     }
     if (!rec.worktree) throw conflict(`task ${taskId} has no worktree (not spawned)`);
+    touch(rec);
     const attempt = rec.attempt + 1;
     rec.attempt = attempt;
     const submission: EvidenceSubmission = { task_id: taskId, contract_version: input.contract_version, attempt, claimed: input.claimed, summary: input.summary };
@@ -747,8 +848,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     rec.runtimeState = 'done';
     const actor = agentActor(rec);
     emitTask(rec, actor, 'evidence_submitted', { submission });
-    emitTask(rec, 'relayd', 'checks_started', { attempt });
-    track(runChecks(rec, submission));
+    startChecks(rec, submission);
     return { attempt, checks_started: true };
   };
 
@@ -925,7 +1025,6 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   ].filter(Boolean).join('\n');
 
   // ---------- daemon restart ----------
-  const TERMINAL: ReadonlySet<TaskState> = new Set(['completed', 'canceled', 'failed']);
 
   const rehydrate: Orchestrator['rehydrate'] = (events) => {
     if (missions.size > 0 || tasks.size > 0) throw conflict('rehydrate requires an empty orchestrator');
@@ -950,7 +1049,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         // mid-await_reply); re-delivering one is cheaper than losing it. Everything older counts as read.
         repliesRead: v.blocker ? replies.filter((r) => r.at < v.blocker!.since).length : replies.length,
         attempt: v.attempt, attempts: v.attempts.map((a) => ({ ...a, checks: { ...a.checks }, self_report_mismatch: [...a.self_report_mismatch] })),
-        submissions: [], verdicts: new Map(), repairs: [...v.repairs], activeRepair: v.active_repair, repairAckPending: false, escalated: v.escalated,
+        submissions: [], checksStarted: new Set(), verdicts: new Map(), repairs: [...v.repairs], activeRepair: v.active_repair, repairAckPending: false, escalated: v.escalated,
         proposedAt: v.proposed_at, acceptedAt: v.accepted_at, startedAt: v.started_at, lastSeenAt: v.last_seen_at, completedAt: v.completed_at,
       });
     }
@@ -979,6 +1078,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           rec.submissions.push(ev.payload.submission);
           rec.repairAckPending = false;
           rec.pendingRecord = undefined;
+          break;
+        case 'checks_started':
+          rec.checksStarted.add(ev.payload.attempt);
           break;
         case 'evidence_recorded': {
           const record = rec.attempts.find((a) => a.attempt === ev.payload.record.attempt);
@@ -1134,7 +1236,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     },
     proposeTask, proposeSubtask, awaitTask, reviseTask, clarify, review, cancel,
     getContract, respond, awaitContract, reportProgress, reportBlocker, reply, awaitReply, submitEvidence, awaitVerdict,
-    rehydrate, respawn,
+    rehydrate, resumeChecks, respawn,
     issueToken,
     resolveToken: (token) => tokens.get(token),
     tokenFor: (taskId) => tasks.get(taskId)?.token,

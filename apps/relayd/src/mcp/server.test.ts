@@ -283,3 +283,40 @@ describe('recipient bootstrap prompt for agent networking', () => {
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThan(6 * 1024);
   });
 });
+
+describe('mcp accept guard', () => {
+  it('relay_respond_to_contract returns invalid naming the missing pieces, then work_started with a full plan', async () => {
+    const r = await listen();
+    const { planner_token } = r.orchestrator.createMission({ repo: '/repo', title: 'Add login' });
+    const planner = await connect(r.url, planner_token);
+    await call(planner, PLANNER_TOOLS.propose_task, { contract: sampleContract('t-a') });
+    const recipient = await connect(r.url, r.orchestrator.tokenFor('t-a'));
+    const empty = await call(recipient, RECIPIENT_TOOLS.respond_to_contract, { ...accepted, interpretation: [] });
+    expect(empty.isError).toBe(false);
+    expect(empty.data).toMatchObject({ status: 'invalid', errors: [expect.stringMatching(/interpretation/)] });
+    const partial = await call(recipient, RECIPIENT_TOOLS.respond_to_contract, { ...accepted, verification_plan: { 'AC-1': 'run tests' } });
+    expect(partial.data).toMatchObject({ status: 'invalid', errors: [expect.stringMatching(/AC-2/)] });
+    expect(r.types()).not.toContain('task_accepted');
+    const ok = await call(recipient, RECIPIENT_TOOLS.respond_to_contract, accepted);
+    expect(ok.data).toMatchObject({ status: 'work_started' });
+  });
+});
+
+describe('mcp evidence version guard', () => {
+  it('relay_submit_evidence with a stale contract_version surfaces the 409 message and starts no checks', async () => {
+    const r = await listen();
+    const { planner_token } = r.orchestrator.createMission({ repo: '/repo', title: 'Add login' });
+    const planner = await connect(r.url, planner_token);
+    await call(planner, PLANNER_TOOLS.propose_task, { contract: sampleContract('t-a') });
+    await call(planner, PLANNER_TOOLS.revise_task, { task_id: 't-a', patch: { goal: 'Implement t-a, carefully' } });
+    const recipient = await connect(r.url, r.orchestrator.tokenFor('t-a'));
+    expect((await call(recipient, RECIPIENT_TOOLS.respond_to_contract, { ...accepted, contract_version: 2 })).data).toMatchObject({ status: 'work_started' });
+    const stale = await call(recipient, RECIPIENT_TOOLS.submit_evidence, { contract_version: 1, claimed: claimedAll, summary: 'stale' });
+    expect(stale.isError).toBe(true);
+    expect(stale.text).toMatch(/v1/);
+    expect(stale.text).toMatch(/v2/);
+    expect(r.types()).not.toContain('evidence_submitted');
+    expect(r.types()).not.toContain('checks_started');
+    expect((await call(recipient, RECIPIENT_TOOLS.submit_evidence, { contract_version: 2, claimed: claimedAll, summary: 'fresh' })).data).toEqual({ attempt: 1, checks_started: true });
+  });
+});

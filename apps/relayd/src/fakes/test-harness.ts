@@ -37,6 +37,7 @@ export function createTestRelay(opts: TestRelayOptions = {}) {
   const orchestrator: Orchestrator = createOrchestrator({
     store, worktrees, checks, repair, host, runtimes,
     repoRoot: dir, relayDir: path.join(dir, '.relay'), mcpUrl: 'http://127.0.0.1:0/mcp', clock: opts.clock,
+    worktreeExists: (wt) => !worktrees.missing.has(wt.path),
   });
   const types = (): EventType[] => store.all().map((e) => e.type);
   const ofType = <T extends EventType>(type: T) =>

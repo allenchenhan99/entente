@@ -16,6 +16,8 @@ export interface FakeWorktrees extends WorktreeManager {
     mergeBranch: Array<{ worktreePath: string; branch: string }>;
   };
   options: FakeWorktreeOptions;
+  /** Worktree paths that "no longer exist on disk" (daemon restart tests); everything else is considered present. */
+  missing: Set<string>;
 }
 
 export const fakeWorktreeInfo = (taskId: string): WorktreeInfo => ({
@@ -29,6 +31,7 @@ export function fakeWorktrees(options: FakeWorktreeOptions = {}): FakeWorktrees 
   return {
     calls,
     options,
+    missing: new Set<string>(),
     async create(repoRoot: string, task: TaskContract, dependencyBranches: string[]) {
       calls.create.push({ repoRoot, taskId: task.id, dependencyBranches: [...dependencyBranches] });
       return fakeWorktreeInfo(task.id);
