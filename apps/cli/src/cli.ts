@@ -25,7 +25,10 @@ import {
   OkOutput,
   PaneInputBody,
   PaneInfo,
+  PaneReadiness,
   ScreenSnapshot,
+  WaitOutputBody,
+  WaitOutputResult,
   actionsFor,
   buildGraph,
   describe,
@@ -76,6 +79,8 @@ export const USAGE = `usage:
   relay pane read <id> [--source visible|recent] [--lines N] [--port N]
   relay pane input <id> [--text "…"] [--keys enter,esc,ctrl+c] [--port N]
   relay pane run <id> "<command>" [--port N]
+  relay pane wait-output <id> (--match "…" | --regex "…") [--timeout-ms N] [--source visible|recent] [--port N]
+  relay pane readiness <id> [--port N]
 
 Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).`;
 
@@ -131,6 +136,8 @@ async function pane(args: string[], io: CliIo): Promise<number> {
     case 'read': return paneRead(rest, io);
     case 'input': return paneInput(rest, io);
     case 'run': return paneRun(rest, io);
+    case 'wait-output': return paneWaitOutput(rest, io);
+    case 'readiness': return paneReadinessCommand(rest, io);
     default: throw new UsageError(verb ? `unknown pane command: ${verb}` : 'relay pane needs a command');
   }
 }
@@ -225,6 +232,56 @@ async function sendPaneInput(paneId: string, body: PaneInputBody, port: string |
   validateResponse(OkOutput, raw, '{ ok: true }');
   io.stdout('ok');
   return 0;
+}
+
+async function paneWaitOutput(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, {
+    match: { type: 'string' },
+    regex: { type: 'string' },
+    'timeout-ms': { type: 'string' },
+    source: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane wait-output needs a pane id');
+  if ((values.match === undefined) === (values.regex === undefined)) {
+    throw new UsageError('relay pane wait-output needs exactly one of --match or --regex');
+  }
+  if (values.source !== undefined && values.source !== 'visible' && values.source !== 'recent') {
+    throw new UsageError(`--source must be visible or recent, got ${values.source}`);
+  }
+  const timeout = values['timeout-ms'] === undefined
+    ? undefined
+    : positiveInteger(values['timeout-ms'], '--timeout-ms', 600_000);
+  const body = validateUsage(WaitOutputBody, {
+    ...(values.match !== undefined ? { match: values.match } : {}),
+    ...(values.regex !== undefined ? { regex: values.regex } : {}),
+    ...(timeout !== undefined ? { timeout_ms: timeout } : {}),
+    ...(values.source !== undefined ? { source: values.source } : {}),
+  }, 'WaitOutputBody');
+  const raw = await new Client(io, values.port).post<unknown>(ptyRoutes.waitOutput(paneId), body);
+  const result = validateResponse(WaitOutputResult, raw, 'WaitOutputResult');
+  switch (result.status) {
+    case 'matched':
+      io.stdout(`matched: ${result.line}`);
+      return 0;
+    case 'timeout':
+      io.stdout('timeout');
+      return 3;
+    case 'exited':
+      io.stdout(`exited ${result.code}`);
+      return 4;
+  }
+}
+
+async function paneReadinessCommand(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane readiness needs a pane id');
+  const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.readiness(paneId));
+  const readiness = validateResponse(PaneReadiness, raw, 'PaneReadiness');
+  io.stdout(`ready ${readiness.ready} (${readiness.source}, ${readiness.detail ?? '-'})`);
+  return readiness.ready ? 0 : 3;
 }
 
 async function up(args: string[], io: CliIo): Promise<number> {

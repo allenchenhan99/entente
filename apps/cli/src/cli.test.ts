@@ -194,6 +194,84 @@ describe('relay pane run', () => {
   });
 });
 
+describe('relay pane wait-output', () => {
+  it('prints a matched line and exits 0', async () => {
+    const { fetch, requests } = fakeFetch(() => ({
+      status: 'matched',
+      line: 'server ready on 7420',
+      at: '2026-09-04T08:01:00.000Z',
+    }));
+    const io = capture();
+
+    expect(await run([
+      'pane', 'wait-output', 'relay:7', '--match', 'ready', '--timeout-ms', '250', '--source', 'visible',
+    ], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toEqual({
+      url: 'http://127.0.0.1:7420/panes/relay:7/wait-output',
+      method: 'POST',
+      body: { match: 'ready', timeout_ms: 250, source: 'visible' },
+    });
+    expect(io.out).toEqual(['matched: server ready on 7420']);
+  });
+
+  it('maps timeout and exited results to exit codes 3 and 4', async () => {
+    const responses = [{ status: 'timeout' }, { status: 'exited', code: 137 }];
+    const { fetch, requests } = fakeFetch(() => responses.shift());
+    const timeoutIo = capture();
+    const exitedIo = capture();
+
+    expect(await run(['pane', 'wait-output', 'relay:7', '--regex', 'ready\\s+now'], { ...timeoutIo, fetch, env: {} })).toBe(3);
+    expect(await run(['pane', 'wait-output', 'relay:7', '--match', 'ready'], { ...exitedIo, fetch, env: {} })).toBe(4);
+    expect(requests.map((request) => request.body)).toEqual([
+      { regex: 'ready\\s+now', timeout_ms: 60_000, source: 'recent' },
+      { match: 'ready', timeout_ms: 60_000, source: 'recent' },
+    ]);
+    expect(timeoutIo.out).toEqual(['timeout']);
+    expect(exitedIo.out).toEqual(['exited 137']);
+  });
+
+  it('requires exactly one of match and regex before fetching', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ status: 'timeout' }));
+    const neither = capture();
+    const both = capture();
+
+    expect(await run(['pane', 'wait-output', 'relay:7'], { ...neither, fetch, env: {} })).toBe(2);
+    expect(await run(['pane', 'wait-output', 'relay:7', '--match', 'a', '--regex', 'b'], { ...both, fetch, env: {} })).toBe(2);
+    expect(requests).toHaveLength(0);
+    expect(neither.err.join('\n')).toContain('exactly one of --match or --regex');
+    expect(both.err.join('\n')).toContain('exactly one of --match or --regex');
+  });
+
+  it('fails clearly when the response does not match WaitOutputResult', async () => {
+    const { fetch } = fakeFetch(() => ({ status: 'matched', line: 'ready' }));
+    const io = capture();
+
+    expect(await run(['pane', 'wait-output', 'relay:7', '--match', 'ready'], { ...io, fetch, env: {} })).toBe(1);
+    expect(io.err.join('\n')).toContain('response does not match WaitOutputResult');
+  });
+});
+
+describe('relay pane readiness', () => {
+  it('prints readiness and exits 0 when ready or 3 otherwise', async () => {
+    const responses = [
+      { pane_id: 'relay:7', ready: true, source: 'declared', observed_at: '2026-09-04T08:00:00.000Z', detail: 'heartbeat fresh' },
+      { pane_id: 'relay:8', ready: false, source: 'screen', observed_at: '2026-09-04T08:00:01.000Z', detail: 'agent is working' },
+    ];
+    const { fetch, requests } = fakeFetch(() => responses.shift());
+    const readyIo = capture();
+    const busyIo = capture();
+
+    expect(await run(['pane', 'readiness', 'relay:7'], { ...readyIo, fetch, env: {} })).toBe(0);
+    expect(await run(['pane', 'readiness', 'relay:8', '--port', '7500'], { ...busyIo, fetch, env: {} })).toBe(3);
+    expect(requests.map((request) => request.url)).toEqual([
+      'http://127.0.0.1:7420/panes/relay:7/readiness',
+      'http://127.0.0.1:7500/panes/relay:8/readiness',
+    ]);
+    expect(readyIo.out).toEqual(['ready true (declared, heartbeat fresh)']);
+    expect(busyIo.out).toEqual(['ready false (screen, agent is working)']);
+  });
+});
+
 describe('relay inbox', () => {
   it('prints one block per item with the exact command to act', async () => {
     const graph: Graph = {
