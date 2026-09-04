@@ -1,6 +1,6 @@
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { happyState, midRepairState } from './__fixtures__/states.js';
 import { App, panelHeights } from './App.js';
@@ -10,8 +10,6 @@ import { useAnimationTick } from './tick.js';
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe('application shell', () => {
-  afterEach(() => vi.useRealTimers());
-
   it('allocates the available rows approximately 40/35/25 and expands timeline to full height', () => {
     expect(panelHeights(41, false)).toEqual({ tree: 16, graph: 14, timeline: 10 });
     expect(panelHeights(41, true)).toEqual({ tree: 0, graph: 0, timeline: 40 });
@@ -99,15 +97,14 @@ describe('application shell', () => {
   });
 
   it('advances animation ticks every 120 ms', async () => {
-    vi.useFakeTimers();
     function TickProbe() {
       return <Text>{useAnimationTick()}</Text>;
     }
     const view = render(<TickProbe />);
     expect(view.lastFrame()).toBe('0');
 
-    await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(120);
+    await new Promise<void>((resolve) => setTimeout(resolve, 150));
     expect(view.lastFrame()).toBe('1');
+    view.unmount();
   });
 });
