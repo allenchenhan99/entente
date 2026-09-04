@@ -298,3 +298,96 @@ describe('resume run id', () => {
     expect(() => resolveResumeEnv({ RELAY_RESUME: 'latest', RELAY_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'relay-')) })).toThrow(/no recorded run/);
   });
 });
+
+describe('check resume', () => {
+  const claimed = { 'AC-1': { status: 'passed' as const }, 'AC-2': { status: 'passed' as const } };
+  /** Run 1 dies right after `checks_started` (or, with `withChecksStarted: false`, right after `evidence_submitted`). */
+  async function interruptedRun(dir: string, over: Parameters<typeof sampleContract>[1] = {}, withChecksStarted = true) {
+    const r1 = createTestRelay({ dir });
+    const { mission_id } = r1.orchestrator.createMission(mission);
+    await r1.orchestrator.proposeTask(mission_id, sampleContract('t-a', over), 'planner');
+    r1.orchestrator.respond('t-a', accept(1));
+    const submission = { task_id: 't-a', contract_version: 1, attempt: 1, claimed, summary: 'done' };
+    r1.store.append({ mission_id, task_id: 't-a', actor: 'agent:a', type: 'evidence_submitted', payload: { submission } });
+    if (withChecksStarted) r1.store.append({ mission_id, task_id: 't-a', actor: 'relayd', type: 'checks_started', payload: { attempt: 1 } });
+    return { mission_id, seqBefore: r1.store.all().at(-1)!.seq };
+  }
+
+  it('re-runs the interrupted attempt through the normal pipeline: one evidence_recorded, no second checks_started, await_verdict resolves', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+    const { seqBefore } = await interruptedRun(dir);
+    const { r, runDir } = secondRun(dir);
+    const result = await restore(r, runDir);
+    expect(result.resumed_checks).toEqual([{ task_id: 't-a', attempt: 1 }]);
+    const poll = r.orchestrator.awaitVerdict('t-a', 1, 5);
+    await r.orchestrator.settled();
+    expect(await poll).toEqual({ status: 'verified' });
+    // Exactly one run for t-a (the mission-level integration check follows once t-a completes).
+    expect(r.checks.calls.filter((c) => c.taskId === 't-a')).toEqual([{ taskId: 't-a', attempt: 1, allowedPaths: ['src/t-a/**'] }]);
+    expect(r.orchestrator.getMission(r.store.all()[0].mission_id)!.status).toBe('verified');
+    const fresh = r.store.all().filter((e) => e.seq > seqBefore && e.task_id === 't-a').map((e) => e.type);
+    expect(fresh.filter((t) => t === 'checks_started')).toEqual([]);
+    expect(fresh.filter((t) => t === 'evidence_recorded')).toEqual(['evidence_recorded']);
+    expect(fresh).toContain('task_verified');
+    expect(r.store.all().filter((e) => e.type === 'checks_started' && e.task_id === 't-a')).toHaveLength(1);
+    const recorded = r.store.all().find((e) => e.type === 'evidence_recorded')!;
+    expect(recorded.payload).toMatchObject({ record: { task_id: 't-a', attempt: 1, contract_version: 1 } });
+    expect(r.orchestrator.taskView('t-a')!.task_state).toBe('completed');
+    expect(r.store.state().tasks['t-a'].task_state).toBe('completed');
+    expect(r.store.state().tasks['t-a'].attempts).toHaveLength(1);
+  });
+
+  it('a run that died between evidence_submitted and checks_started gets exactly one checks_started on resume', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+    const { seqBefore } = await interruptedRun(dir, {}, false);
+    const { r, runDir } = secondRun(dir);
+    const result = await restore(r, runDir);
+    expect(result.resumed_checks).toEqual([{ task_id: 't-a', attempt: 1 }]);
+    await r.orchestrator.settled();
+    const fresh = r.store.all().filter((e) => e.seq > seqBefore && e.task_id === 't-a').map((e) => e.type);
+    expect(fresh.filter((t) => t === 'checks_started' || t === 'evidence_recorded')).toEqual(['checks_started', 'evidence_recorded']);
+    expect(r.store.all().filter((e) => e.type === 'checks_started')).toHaveLength(1);
+    expect(await r.orchestrator.awaitVerdict('t-a', 1, 1)).toEqual({ status: 'verified' });
+  });
+
+  it('a missing worktree records the attempt as failed (observed: worktree missing after restart) and the repair policy decides', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+    await interruptedRun(dir);
+    const { r, runDir } = secondRun(dir);
+    (r.worktrees as { missing: Set<string> }).missing.add('/tmp/fake/t-a');
+    const result = await restore(r, runDir);
+    expect(result.resumed_checks).toEqual([{ task_id: 't-a', attempt: 1 }]);
+    await r.orchestrator.settled();
+    expect(r.checks.calls).toEqual([]);
+    const record = r.orchestrator.taskView('t-a')!.attempts[0]!;
+    expect(record.attempt).toBe(1);
+    expect(Object.values(record.checks).map((c) => [c.status, c.observed])).toEqual([['failed', 'worktree missing after restart'], ['failed', 'worktree missing after restart']]);
+    expect(record.self_report_mismatch).toEqual(['AC-1', 'AC-2']);
+    expect(await r.orchestrator.awaitVerdict('t-a', 1, 1)).toMatchObject({ status: 'repair', repair: { attempt: 2, failed_criteria: ['AC-1', 'AC-2'] } });
+    expect(r.types().filter((t) => t === 'evidence_recorded' || t === 'repair_requested')).toEqual(['evidence_recorded', 'repair_requested']);
+    expect(r.store.state().tasks['t-a'].handoff_state).toBe('retry_requested');
+  });
+
+  it('with no repair budget a missing worktree ends in failed_budget', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+    await interruptedRun(dir, { budget: { max_repairs: 0, stagnation_limit: 2 } });
+    const { r, runDir } = secondRun(dir);
+    (r.worktrees as { missing: Set<string> }).missing.add('/tmp/fake/t-a');
+    await restore(r, runDir);
+    await r.orchestrator.settled();
+    expect(await r.orchestrator.awaitVerdict('t-a', 1, 1)).toMatchObject({ status: 'failed_budget' });
+    expect(r.orchestrator.taskView('t-a')!.task_state).toBe('failed');
+    expect(r.store.state().tasks['t-a'].task_state).toBe('failed');
+  });
+
+  it('attempts that already have evidence_recorded (or a verdict) are not re-run; a second live submission still starts checks once', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+    const { runDir } = await firstRun(dir); // t-a: attempt 1 recorded, AC-3 pending human; t-b completed
+    const { r } = secondRun(dir);
+    const result = await restore(r, runDir);
+    expect(result.resumed_checks).toEqual([]);
+    await r.orchestrator.settled();
+    expect(r.checks.calls).toEqual([]);
+    expect(r.store.all().filter((e) => e.type === 'checks_started').map((e) => [e.task_id, e.payload.attempt])).toEqual([['t-a', 1], ['t-b', 1]]);
+  });
+});

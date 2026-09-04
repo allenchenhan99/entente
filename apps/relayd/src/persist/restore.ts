@@ -82,6 +82,8 @@ export interface RestoreResult {
   /** Alive panes deliberately not respawned (terminal task, finished mission, foreign host); marked exited. */
   skipped: string[];
   failed: Array<{ task_id: string; error: string }>;
+  /** Evidence attempts interrupted by the previous daemon (no `evidence_recorded`), re-run through the check pipeline. */
+  resumed_checks: Array<{ task_id: string; attempt: number }>;
 }
 
 const TERMINAL_TASK = new Set(['completed', 'canceled', 'failed']);
@@ -92,13 +94,16 @@ export async function restoreRun(opts: RestoreOptions): Promise<RestoreResult> {
   const { store, orchestrator } = opts;
   const events = store.all();
   const { missions, tasks } = orchestrator.rehydrate(events);
+  // Before the panes come back: an agent resumed into relay_await_verdict must find its verdict on the way.
+  const resumedChecks = orchestrator.resumeChecks();
+  for (const c of resumedChecks) log(`re-running interrupted checks for ${c.task_id} attempt ${c.attempt}`);
 
   const workspace = readWorkspace(opts.runDir);
   if (!workspace) log(`no workspace.json in ${opts.runDir}; pane inventory derived from the event log`);
   const alive = (workspace?.panes ?? panesFromEvents(events, opts.relayDir)).filter((p) => p.alive);
   const respawnable = opts.hostKind === 'relay' || opts.hostKind === 'fake';
 
-  const result: RestoreResult = { missions, tasks, panes: alive.length, respawned: [], skipped: [], failed: [] };
+  const result: RestoreResult = { missions, tasks, panes: alive.length, respawned: [], skipped: [], failed: [], resumed_checks: resumedChecks };
   const seen = new Set<string>();
 
   const missionOf = (pane: WorkspacePane): string | undefined =>
