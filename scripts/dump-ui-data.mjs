@@ -4,8 +4,9 @@
  *     node scripts/dump-ui-data.mjs [fixture]
  *
  * Reduces every prefix of the fixture through the protocol's own reducer and graph API, so the
- * prototype shows what relayd and the TUI would show — never a hand-written mock. Requires a built
- * protocol package (`npm run build -w @relay/protocol`) and Node >= 22.
+ * prototype shows what relayd and the TUI would show — never a hand-written mock. Pane scrollback
+ * comes from the daemon's own bootstrap prompt and MCP tool names for the same reason. Requires a
+ * built protocol package and relayd (`npm run build`) and Node >= 22.
  *
  * The prototype is the only artifact: this script rewrites its <script id="relay-data"> payload in
  * place and touches nothing else, so the page stays the single file to edit and to open.
@@ -18,8 +19,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixture = process.argv[2] ?? 'fixtures/events-live-5.jsonl';
 const target = path.join(root, 'docs/ui-prototype.html');
 
-const { Event, replay, buildGraph, describe, storyFor, actionsFor, narrate } =
+const { Event, replay, buildGraph, describe, storyFor, actionsFor, RECIPIENT_TOOLS: R } =
   await import(path.join(root, 'packages/protocol/dist/index.js'));
+const { bootstrapPrompt } = await import(path.join(root, 'apps/relayd/dist/launch/prompts.js'));
+const { CLAUDE_ALLOWED_TOOLS } = await import(path.join(root, 'apps/relayd/dist/launch/runtimes/claude-code.js'));
 
 const events = fs.readFileSync(path.join(root, fixture), 'utf8')
   .split('\n').filter((line) => line.trim()).map((line) => Event.parse(JSON.parse(line)));
@@ -57,107 +60,194 @@ function frame(cursor) {
   };
 }
 
-/** The agent conversation, rendered from event payloads — the right-hand pane's content. */
-function message(event) {
-  const p = event.payload ?? {};
-  const base = { seq: event.seq, ts: event.ts, task: event.task_id ?? null, kind: event.type };
-  const sys = (title, lines = []) => ({ ...base, side: 'system', author: event.actor, title, lines });
-  const human = (title, lines = []) => ({ ...base, side: 'human', author: 'you', title, lines });
-  const agent = (title, lines = []) =>
-    ({ ...base, side: 'agent', author: event.actor.replace('agent:', ''), title, lines });
+/* ─────────────────────────── pane buffers ───────────────────────────
+ * What each pane of the multiplexer shows. relayd drives an agent pane through MCP, so the pane's
+ * scrollback is reconstructible from the log: the argv the runtime actually spawns, the bootstrap
+ * prompt this repo generates, and the tool calls the lifecycle mandates in the order the events
+ * prove they happened. Every line here comes from an event — nothing is invented, but nothing is a
+ * capture either, so the UI labels it as reconstructed until Milestone 3 attaches the real PTY.
+ */
 
-  switch (event.type) {
-    case 'mission_created':
-      return sys('Mission created', [p.title, `repo ${p.repo}`, `integration check  ${p.integration_check}`]);
-    case 'tasks_planned':
-      return sys('Plan accepted', [`${p.task_ids.length} tasks: ${p.task_ids.join(', ')}`]);
-    case 'task_proposed':
-      return human(`Task contract v${p.contract.version} → ${p.contract.recipient}`, [
-        p.contract.goal,
-        `${p.contract.acceptance_criteria.length} acceptance criteria · scope ${p.contract.scope.allowed_paths.join(', ')}`,
-      ]);
-    case 'lint_reported':
-      return sys(
-        p.results.length ? `Communication-debt lint: ${p.results.length} finding(s)` : 'Communication-debt lint: clean',
-        p.results.map((r) => `${r.severity ?? 'error'} ${r.rule ?? r.code ?? ''} ${r.message ?? ''}`.trim()),
-      );
-    case 'worktree_created':
-      return sys('Worktree created', [`${p.branch} → ${p.path}`, `base ${String(p.base).slice(0, 12)}`]);
-    case 'agent_spawned':
-      return sys(`Spawned ${p.runtime}`, [`pane ${p.pane_id}`, `cwd ${p.cwd}`]);
-    case 'clarification_requested':
-      return agent('Needs clarification before starting',
-        p.response.questions.map((q) => `${q.id}${q.blocking ? ' (blocking)' : ''}  ${q.text}`));
-    case 'clarification_answered':
-      return human('Answered', p.answers.map((a) => `${a.question_id}  ${a.answer}`));
-    case 'contract_revised':
-      return sys(`Contract revised to v${p.contract.version}`,
-        ['Answers folded into the contract; the agent re-reads it before accepting.']);
-    case 'task_accepted':
-      return agent(`Accepted contract v${p.contract_version}`, [
-        ...p.response.interpretation.map((t) => `interpretation  ${t}`),
-        ...p.response.assumptions.map((t) => `assumption  ${t}`),
-        ...p.response.risks.map((t) => `risk  ${t}`),
-      ]);
-    case 'work_started':
-      return sys('Work started', []);
-    case 'progress_reported':
-      return agent(p.percent != null ? `Progress ${p.percent}%` : 'Progress', [p.message]);
-    case 'evidence_submitted':
-      return agent(`Evidence submitted (attempt ${p.submission.attempt})`, [
-        p.submission.summary,
-        ...Object.entries(p.submission.claimed).map(([id, c]) => `claims ${id} ${c.status}  ${c.note}`),
-      ]);
-    case 'checks_started':
-      return sys(`Verifying attempt ${p.attempt}`,
-        ['relayd runs the contract checks itself; the agent is not asked again.']);
-    case 'check_passed':
-      return sys(`${p.criterion_id} passed`, [`${p.result.duration_ms} ms · ${p.result.output_path}`]);
-    case 'check_failed':
-      return sys(`${p.criterion_id} FAILED`, [p.result.output_path ?? '']);
-    case 'evidence_recorded':
-      return sys('Evidence recorded', [
-        `changed  ${p.record.changed_files.join(', ')}`,
-        `diff  ${p.record.git_diff_path}`,
-        p.record.self_report_mismatch.length
-          ? `self-report mismatch  ${p.record.self_report_mismatch.join(', ')}`
-          : 'no self-report mismatch',
-      ]);
-    case 'task_verified':
-      return sys(`Task verified on attempt ${p.attempt}`,
-        ['Every criterion passed under relayd, not under the agent.']);
-    case 'task_completed':
-      return sys('Task complete', []);
-    case 'human_review_recorded':
-      return human(`Human review: ${p.criterion_id} ${p.status}`, [p.observed_failure ?? p.note ?? '']);
-    case 'repair_requested':
-      return sys(`Repair ${p.repair.id} requested`, [
-        `failed  ${p.repair.failed_criteria.join(', ')}`,
-        p.repair.requested_correction,
-        `${p.repair.remaining_repairs} repair(s) left in budget`,
-      ]);
-    case 'repair_accepted':
-      return agent(`Accepted repair ${p.repair_id}`, ['Scoped to the failed criterion only.']);
-    case 'task_blocked':
-      return agent('Blocked — asking you', [p.reason]);
-    case 'blocker_replied':
-      return human('Reply to blocker', [p.message]);
-    case 'task_unblocked':
-      return sys('Unblocked', []);
-    case 'integration_started':
-      return sys('Integration started', [`branch ${p.branch}`, `order  ${p.order.join(' → ')}`]);
-    case 'mission_verified':
-      return sys('Mission verified', ['The integration check passed on the merged branch.']);
-    default:
-      return sys(event.type.replace(/_/g, ' '), []);
+/** The prompt relayd hands the agent, rendered by the daemon's own code so it cannot drift. */
+function promptFor(contract, spawn) {
+  const ac = contract.acceptance_criteria
+    .map((c) => `  ${c.id}: ${c.condition} [${c.check.kind}${c.check.run ? `: ${c.check.run}` : ''}]`)
+    .join('\n');
+  return bootstrapPrompt({
+    role: 'recipient',
+    taskId: contract.id,
+    cwd: spawn.cwd,
+    sessionId: spawn.session_id,
+    mcpUrl: 'http://127.0.0.1:7420/mcp',
+    token: '<per-task bearer token>',
+    contractSummary: [
+      `goal: ${contract.goal}`,
+      `inputs: ${contract.inputs.join(', ')}`,
+      `constraints:\n${contract.constraints.map((c) => `  - ${c}`).join('\n')}`,
+      `non_goals: ${contract.non_goals.join('; ')}`,
+      `scope.allowed_paths: ${contract.scope.allowed_paths.join(', ')}`,
+      `acceptance_criteria:\n${ac}`,
+    ].join('\n'),
+  });
+}
+
+function paneBuffers() {
+  const out = [];                                        // { seq, pane, k, s }
+  const contracts = {};                                  // task id → newest contract
+  const spawn = {};
+  const push = (seq, pane, k, s) => out.push({ seq, pane, k, s });
+  const clock = (ts) => ts.slice(11, 19);
+
+  for (const e of events) {
+    const p = e.payload ?? {};
+    const task = e.task_id;
+    const log = (k, s) => push(e.seq, 'relayd', k, `${clock(e.ts)} ${s}`);
+
+    switch (e.type) {
+      case 'mission_created':
+        log('ok', `relayd 0.1.0 listening on http://127.0.0.1:7420 · mcp /mcp`);
+        log('out', `mission ${p.id} created  "${p.title}"`);
+        log('dim', `repo ${p.repo} · integration check \`${p.integration_check}\``);
+        break;
+      case 'tasks_planned':
+        log('out', `plan accepted: ${p.task_ids.join(', ')}`);
+        break;
+      case 'task_proposed':
+        contracts[task] = p.contract;
+        log('out', `task ${task} proposed v${p.contract.version} → ${p.contract.recipient} (${p.contract.runtime})`);
+        break;
+      case 'lint_reported':
+        log(p.results.length ? 'warn' : 'dim',
+          `lint ${task} v${p.contract_version} → ${p.results.length ? `${p.results.length} finding(s)` : 'clean'}`);
+        break;
+      case 'worktree_created':
+        log('dim', `worktree ${p.branch} at ${p.path}`);
+        break;
+      case 'agent_spawned': {
+        spawn[task] = p;
+        log('out', `spawned ${p.runtime} for ${task} in pane ${p.pane_id}`);
+        const c = contracts[task];
+        const argv = p.runtime === 'claude-code'
+          ? ['claude', '--session-id', p.session_id, '--mcp-config',
+             `${p.cwd}/../../agents/${task}/mcp.json`, '--dangerously-skip-permissions',
+             '--allowedTools', CLAUDE_ALLOWED_TOOLS.join(',')]
+          : ['codex', '-C', p.cwd, '-a', 'never', '-s', 'workspace-write'];
+        push(e.seq, task, 'cmd', `$ ${argv[0]} ${argv.slice(1).join(' ')}`);
+        push(e.seq, task, 'dim', `cwd ${p.cwd}`);
+        push(e.seq, task, 'ok', `● relay MCP connected · ${Object.keys(R).length} tools · bearer token per task`);
+        push(e.seq, task, 'prompt', promptFor(c, p));
+        break;
+      }
+      case 'clarification_requested':
+        push(e.seq, task, 'tool', `⏺ ${R.get_contract}()`);
+        push(e.seq, task, 'ret', `⎿ contract v${p.contract_version} · ${contracts[task].acceptance_criteria.length} acceptance criteria · worktree ready`);
+        push(e.seq, task, 'tool', `⏺ ${R.respond_to_contract}({ decision: "needs_clarification" })`);
+        for (const q of p.response.questions) {
+          push(e.seq, task, 'out', `  ${q.id}${q.blocking ? ' [blocking]' : ''}  ${q.text}`);
+        }
+        push(e.seq, task, 'ret', `⎿ recorded · ${p.response.questions.length} question(s) sent to the human`);
+        push(e.seq, task, 'tool', `⏺ ${R.await_contract}({ since_version: ${p.contract_version}, timeout_s: 60 })`);
+        push(e.seq, task, 'wait', `⎿ pending — no file is touched while waiting`);
+        break;
+      case 'clarification_answered':
+        log('out', `clarification answered for ${task}: ${p.answers.map((a) => a.question_id).join(', ')}`);
+        break;
+      case 'contract_revised':
+        contracts[task] = p.contract;
+        log('out', `contract ${task} → v${p.contract.version}`);
+        push(e.seq, task, 'ret', `⎿ revised → v${p.contract.version}`);
+        push(e.seq, task, 'tool', `⏺ ${R.get_contract}()`);
+        push(e.seq, task, 'ret', `⎿ contract v${p.contract.version}`);
+        break;
+      case 'task_accepted':
+        push(e.seq, task, 'tool', `⏺ ${R.respond_to_contract}({ decision: "accepted" })`);
+        for (const line of p.response.interpretation) push(e.seq, task, 'out', `  interpretation  ${line}`);
+        for (const line of p.response.assumptions) push(e.seq, task, 'dim', `  assumption  ${line}`);
+        for (const line of p.response.risks) push(e.seq, task, 'warn', `  risk  ${line}`);
+        push(e.seq, task, 'ret', `⎿ work_started · verification plan accepted for every criterion`);
+        break;
+      case 'work_started':
+        log('dim', `${task} work_started`);
+        break;
+      case 'progress_reported':
+        push(e.seq, task, 'tool', `⏺ ${R.report_progress}(${p.percent != null ? `{ percent: ${p.percent} }` : ''})`);
+        push(e.seq, task, 'out', `  ${p.message}`);
+        break;
+      case 'evidence_submitted':
+        push(e.seq, task, 'tool', `⏺ ${R.submit_evidence}({ attempt: ${p.submission.attempt} })`);
+        push(e.seq, task, 'out', `  ${p.submission.summary}`);
+        for (const [id, c] of Object.entries(p.submission.claimed)) {
+          push(e.seq, task, c.status === 'passed' ? 'ok' : 'warn', `  claims ${id} ${c.status} — ${c.note}`);
+        }
+        push(e.seq, task, 'tool', `⏺ ${R.await_verdict}({ attempt: ${p.submission.attempt}, timeout_s: 60 })`);
+        push(e.seq, task, 'wait', `⎿ pending — relayd runs the checks, not the agent`);
+        break;
+      case 'checks_started':
+        log('out', `verify ${task} attempt ${p.attempt} — running contract checks`);
+        break;
+      case 'check_passed':
+        log('ok', `  ${p.criterion_id} passed (${p.result.duration_ms} ms) → ${p.result.output_path}`);
+        break;
+      case 'check_failed':
+        log('err', `  ${p.criterion_id} FAILED → ${p.result?.output_path ?? 'no output'}`);
+        break;
+      case 'evidence_recorded':
+        log('dim', `evidence ${task} attempt ${p.record.attempt}: ${p.record.changed_files.join(', ')}`);
+        log(p.record.self_report_mismatch.length ? 'err' : 'dim',
+          p.record.self_report_mismatch.length
+            ? `  self-report mismatch: ${p.record.self_report_mismatch.join(', ')}`
+            : `  no self-report mismatch`);
+        break;
+      case 'task_verified':
+        log('ok', `${task} VERIFIED on attempt ${p.attempt}`);
+        push(e.seq, task, 'ret', `⎿ verified`);
+        push(e.seq, task, 'ok', `verified — stopping as the lifecycle requires`);
+        break;
+      case 'task_completed':
+        log('dim', `${task} completed`);
+        break;
+      case 'human_review_recorded':
+        log(p.status === 'failed' ? 'err' : 'ok',
+          `human review ${task} ${p.criterion_id} ${p.status}${p.observed_failure ? `: ${p.observed_failure}` : ''}`);
+        break;
+      case 'repair_requested':
+        log('warn', `repair ${p.repair.id} requested · failed ${p.repair.failed_criteria.join(', ')} · ${p.repair.remaining_repairs} left in budget`);
+        push(e.seq, task, 'ret', `⎿ repair ${p.repair.id} · failed ${p.repair.failed_criteria.join(', ')}`);
+        push(e.seq, task, 'warn', `  ${p.repair.observed_failure}`);
+        break;
+      case 'repair_accepted':
+        push(e.seq, task, 'tool', `⏺ ${R.get_contract}()`);
+        push(e.seq, task, 'ret', `⎿ repair contract ${p.repair_id} · fix only the failed criteria, leave unchanged_scope alone`);
+        break;
+      case 'task_blocked':
+        push(e.seq, task, 'tool', `⏺ ${R.report_blocker}()`);
+        push(e.seq, task, 'warn', `  ${p.reason}`);
+        push(e.seq, task, 'tool', `⏺ ${R.await_reply}({ timeout_s: 60 })`);
+        push(e.seq, task, 'wait', `⎿ pending — waiting on the human, up to 10 minutes`);
+        log('warn', `${task} blocked: ${p.reason.split('. ')[0]}.`);
+        break;
+      case 'blocker_replied':
+        push(e.seq, task, 'ret', `⎿ replied: ${p.message}`);
+        break;
+      case 'task_unblocked':
+        push(e.seq, task, 'dim', `resuming — the reply resolves the blocker without a code change`);
+        break;
+      case 'integration_started':
+        log('out', `integration on ${p.branch} · merge order ${p.order.join(' → ')}`);
+        break;
+      case 'mission_verified':
+        log('ok', `mission verified — integration check passed on the merged branch`);
+        break;
+      default:
+        break;
+    }
   }
+  return out;
 }
 
 const payload = JSON.stringify({
   source: fixture,
-  events: events.map((e) => ({ seq: e.seq, ts: e.ts, actor: e.actor, type: e.type, task_id: e.task_id ?? null })),
-  narration: events.map((e, i) => narrate(e, replay(events.slice(0, i + 1)))),
-  transcript: events.map(message),
+  pty: paneBuffers(),
   frames: Array.from({ length: events.length }, (_, i) => frame(i + 1)),
 });
 
