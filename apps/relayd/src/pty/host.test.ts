@@ -112,17 +112,19 @@ describe('relay host prompt delivery', () => {
     expect(readCapture(agent.capture).after).toBe('\x1b[200~multi\nline\x1b[201~\r');
   });
 
-  it('presses Enter once more when the last line has not changed after the retry delay', async () => {
+  it('presses Enter once more while the composer still holds the paste (Codex shows "[Pasted Content …]")', async () => {
     const { host, dir } = makeHost();
-    // Reply only on the second Enter: the first one is "swallowed" like a composer keeping the paste.
+    // Like Codex: the first Enter leaves the text in the composer and shows a paste placeholder above the
+    // footer; only the second Enter submits, after which the agent is visibly working.
     const capture = path.join(dir, 'capture.json');
     const file = path.join(dir, 'agent.js');
     fs.writeFileSync(file, `
       const fs = require('fs'); let enters = 0; let after = '';
       process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.setEncoding('utf8');
       process.stdin.on('data', (d) => { after += d; for (const ch of d) if (ch === '\\r') enters++; fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ after, enters }));
-        if (enters >= 2) process.stdout.write('\\r\\nworking\\r\\n'); });
-      setTimeout(() => process.stdout.write('> '), 100);
+        if (enters === 1) process.stdout.write('\\r\\n› [Pasted Content 5 chars]\\r\\n  gpt-5.6-sol default · ~/x\\r\\n');
+        if (enters >= 2) process.stdout.write('\\r\\n• Working (1s • esc to interrupt)\\r\\n'); });
+      setTimeout(() => process.stdout.write('› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'), 100);
       setTimeout(() => process.exit(0), 20000);
     `);
     const t0 = Date.now();

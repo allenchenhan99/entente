@@ -194,16 +194,25 @@ export class RelayHost {
     const before = pane.lastLine();
     pane.paste(prompt);
     pane.write('\r');
-    const writtenAt = Date.now();
-    let retried = false;
-    // Accepted = the last line changed (echo, or the agent started working). Codex keeps large pastes in its
-    // composer until Enter is pressed again, hence the single retry.
-    while (pane.lastLine() === before) {
+    let lastEnterAt = Date.now();
+    let retries = 0;
+    const prefix = prompt.slice(0, 24);
+    // The prompt is still sitting in the agent's composer when the screen shows a paste placeholder
+    // (Codex: `› [Pasted Content 2981 chars]`) or a composer line that still starts with our text.
+    const stillInComposer = () => pane.visibleLines().some((l) => /\[Pasted Content/.test(l) || ((/^[❯›>] /.test(l.trim()) || l.trim() === '›') && l.includes(prefix)));
+    // Accepted = the agent is visibly busy, or the screen moved on and the composer is clear.
+    const accepted = () => {
+      const r = pane.readiness();
+      if (!r.ready && r.detail?.startsWith('busy')) return true;
+      return !stillInComposer() && pane.lastLine() !== before;
+    };
+    while (!accepted()) {
       if (!pane.alive) throw fail(exitedWhy());
-      if (Date.now() > deadline) throw fail(`prompt not accepted within ${timeoutMs} ms (last line still ${JSON.stringify(before ?? '')})`);
-      if (!retried && Date.now() - writtenAt >= retryMs) {
+      if (Date.now() > deadline) throw fail(`prompt not accepted within ${timeoutMs} ms (last line: ${JSON.stringify(pane.lastLine() ?? '')})`);
+      if (stillInComposer() && retries < 3 && Date.now() - lastEnterAt >= retryMs) {
         pane.write('\r');
-        retried = true;
+        lastEnterAt = Date.now();
+        retries++;
       }
       await sleep(POLL_MS);
     }

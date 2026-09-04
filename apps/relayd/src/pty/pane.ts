@@ -181,6 +181,11 @@ export class Pane {
     return readScreen(this.term, this.id, query);
   }
 
+  /** The visible rows, top to bottom (trailing whitespace trimmed). */
+  visibleLines(): string[] {
+    return this.snapshot({ source: 'visible', lines: 0 }).lines;
+  }
+
   /** The last non-empty visible line (what prompt delivery watches). */
   lastLine(): string | undefined {
     return lastNonEmptyLine(this.snapshot({ source: 'visible', lines: 0 }).lines);
