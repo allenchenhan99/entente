@@ -54,3 +54,8 @@ replays both files and pins the expected end state and metrics.
   it fixed and re-proposed all three (v2), password-hashing and throttle ran in parallel, the routes task was
   spawned only after both completed with its worktree based on their merged branches, all 15 criteria were
   machine-checked, and the three branches were integrated and verified.
+- `events-live-4.jsonl` — planner-asks-first run (2026-09-04): the Claude Code planner raised six mission-level
+  questions (mechanism, session transport, surface, credentials, brute-force protection, dependencies) via
+  `relay_ask_human` before decomposing; the human answered with `relay clarify m-…`; the planner then proposed a
+  serial chain core → routes → login page (Codex), every contract passed lint first time, all 17 criteria were
+  machine-checked, and the three branches were integrated and verified.
