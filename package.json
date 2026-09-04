@@ -5,6 +5,9 @@
   "description": "RelayGraph: turn fuzzy natural-language handoffs between coding agents into confirmable, trackable, verifiable, retryable work contracts",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "entente": "bin/entente.mjs"
+  },
   "workspaces": [
     "packages/*",
     "apps/*"

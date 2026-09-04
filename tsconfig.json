@@ -4,6 +4,7 @@
     { "path": "packages/protocol" },
     { "path": "apps/relayd" },
     { "path": "apps/tui" },
-    { "path": "apps/cli" }
+    { "path": "apps/cli" },
+    { "path": "apps/launcher" }
   ]
 }
