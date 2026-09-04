@@ -5,7 +5,7 @@
  */
 import type { Event } from '../events.js';
 import type { State } from '../state.js';
-import { actorName, clip, plural, repairName, roleOf } from './common.js';
+import { actorName, clip, plural, recordSummary, repairName, roleOf, tally } from './common.js';
 
 const quote = (text: string): string => `"${clip(text)}"`;
 
@@ -122,9 +122,7 @@ export function narrate(event: Event, state: State): string {
     }
     case 'evidence_recorded': {
       const rec = event.payload.record;
-      const counts = tally(Object.values(rec.checks).map((c) => c.status));
-      const mismatch = rec.self_report_mismatch.length > 0 ? ` (self-report mismatch on ${rec.self_report_mismatch.join(', ')})` : '';
-      return `${who} record${s(who)} attempt ${rec.attempt}: ${counts}${mismatch}`;
+      return `${who} record${s(who)} attempt ${rec.attempt}: ${recordSummary(rec)}`;
     }
     case 'repair_requested': {
       const r = event.payload.repair;
@@ -151,14 +149,6 @@ export function narrate(event: Event, state: State): string {
 /** Third-person `s` for every actor except `you`. */
 const s = (who: string): string => (who === 'you' ? '' : 's');
 
-/** `2 passed, 1 failed, 1 pending review` from a list of statuses, skipping zero counts. */
-function tally(statuses: string[]): string {
-  const order: Array<[string, string]> = [['passed', 'passed'], ['failed', 'failed'], ['skipped', 'skipped'], ['pending_human', 'pending review'], ['error', 'errored']];
-  const counts = new Map<string, number>();
-  for (const st of statuses) counts.set(st, (counts.get(st) ?? 0) + 1);
-  const parts = order.filter(([k]) => counts.has(k)).map(([k, label]) => `${counts.get(k)} ${label}`);
-  return parts.length > 0 ? parts.join(', ') : 'nothing';
-}
 
 /** Fallback wording for a type this module does not know (only reachable if the event union grows). */
 const humanize = (type: string): string => type.replace(/_/g, ' ');

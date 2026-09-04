@@ -2,10 +2,10 @@
  * `describe(ref, graph, state)`: static facts about one object — contract facts for edges, role and the
  * three states for agent nodes, counts for the virtual nodes, the item itself for inbox entries.
  */
-import type { AcceptanceCriterion, CheckResult, EvidenceRecord } from '../contract.js';
+import type { AcceptanceCriterion, CheckResult } from '../contract.js';
 import type { State, TaskView } from '../state.js';
 import type { Graph, GraphObjectRef, ObjectDescription } from './types.js';
-import { HUMAN, PLANNER, VERIFIER, clip, latestRecord, plural, repairName, sortedMissions, sortedTasks } from './common.js';
+import { HUMAN, PLANNER, VERIFIER, clip, latestRecord, plural, recordSummary, repairName, sortedMissions, sortedTasks } from './common.js';
 
 const none = (ref: GraphObjectRef): ObjectDescription => ({ title: ref.id, lines: [] });
 
@@ -47,15 +47,6 @@ function versionsLine(task: TaskView): string {
   return `versions: ${chain}${n > 0 ? ` (${plural(n, 'clarification')})` : ''}`;
 }
 
-/** `2 passed, 1 failed, 1 pending review` for an evidence record. */
-function recordSummary(record: EvidenceRecord): string {
-  const counts = new Map<string, number>();
-  for (const r of Object.values(record.checks)) counts.set(r.status, (counts.get(r.status) ?? 0) + 1);
-  const order: Array<[string, string]> = [['passed', 'passed'], ['failed', 'failed'], ['pending_human', 'pending review'], ['error', 'errored']];
-  const parts = order.filter(([k]) => counts.has(k)).map(([k, label]) => `${counts.get(k)} ${label}`);
-  const mismatch = record.self_report_mismatch.length > 0 ? ` (self-report mismatch on ${record.self_report_mismatch.join(', ')})` : '';
-  return `${parts.length > 0 ? parts.join(', ') : 'no checks'}${mismatch}`;
-}
 
 // --- edges ---------------------------------------------------------------------------------------
 

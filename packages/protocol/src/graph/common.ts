@@ -93,3 +93,18 @@ export function repairName(id: string): string {
   const idx = id.lastIndexOf('/');
   return idx === -1 ? id : id.slice(idx + 1);
 }
+
+/** `2 passed, 1 failed, 1 pending review` from check / claim statuses, skipping zero counts. */
+export function tally(statuses: string[], empty = 'nothing'): string {
+  const order: Array<[string, string]> = [['passed', 'passed'], ['failed', 'failed'], ['skipped', 'skipped'], ['pending_human', 'pending review'], ['error', 'errored']];
+  const counts = new Map<string, number>();
+  for (const st of statuses) counts.set(st, (counts.get(st) ?? 0) + 1);
+  const parts = order.filter(([k]) => counts.has(k)).map(([k, label]) => `${counts.get(k)} ${label}`);
+  return parts.length > 0 ? parts.join(', ') : empty;
+}
+
+/** Summary of an evidence record: tallied checks plus any self-report mismatch. */
+export function recordSummary(record: EvidenceRecord): string {
+  const mismatch = record.self_report_mismatch.length > 0 ? ` (self-report mismatch on ${record.self_report_mismatch.join(', ')})` : '';
+  return `${tally(Object.values(record.checks).map((c) => c.status), 'no checks')}${mismatch}`;
+}
