@@ -148,6 +148,35 @@ package writes these next to the cast.
 
 ---
 
+## Graph over HTTP (`apps/relayd/src/http/graph.ts`, routes in `packages/protocol/src/api.ts`)
+
+Clients that do not run the TypeScript reducer (the Rust `relay-tui`, curl) get exactly what the Ink TUI computes
+locally from `@relay/protocol`'s graph module. Every endpoint is a pure read over the in-memory state (the event log
+is only read for stories); mutations still go through the existing `POST` routes and the graph is re-fetched after
+an SSE `/events` message. No SSE for the graph itself.
+
+| endpoint | response |
+|---|---|
+| `GET /graph` | `buildGraph(state)` as-is (`nodes`, `edges`, `inbox`) plus `seq` = last event seq, so a client can tell whether it is current. Empty store → empty graph, `seq: 0`. |
+| `GET /graph/:kind/:id/describe` | `describe(ref, graph, state)` → `{ title, lines }` |
+| `GET /graph/:kind/:id/actions` | `actionsFor(ref, graph, state)` → `ObjectAction[]` |
+| `GET /graph/:kind/:id/story?limit=N` | `{ ref, lines }`: the **last** N lines of `storyFor(ref, graph, state, events)` in seq order (`HH:MM` prefixed like the TUI). `limit` default 50, max 500 (larger values are clamped). |
+| `GET /story?since=<seq>&limit=N` | `{ items: [{ seq, ts, task_id?, actor, line }] }`: the narrated event log, `line = narrate(event, state)` with `state` the state **after** that event (one incremental replay over the log, the TUI timeline's lines). `since` is exclusive, default 0; `limit` default 200, max 2000 (clamped). |
+
+- `:kind` is `node`, `edge` or `inbox`; anything else → `400 { error }`. Ids are URL-decoded, so edge ids with `:`
+  (`contract:t-backend-auth`) and `->` (`dep:t-a->t-b`) are sent through `routes.graphObject(kind, id)`
+  (`encodeURIComponent`). An id that is not in the current graph → `404 { error: 'object not found' }`.
+- `since`/`limit` that are not a non-negative / positive integer → `400 { error }`.
+- Auth: the same as `/state` — open under `RELAY_AUTH=optional`, `Authorization: Bearer <session token>` required
+  under `RELAY_AUTH=required` (401 `{ error }` otherwise). `mountGraph(app, { store, auth })` applies the guard
+  itself because `apps/relayd/src/auth/token.ts` lists the guarded prefixes and does not know `/graph` / `/story`
+  (proposed diff in the graph-http hand-off notes).
+- Tests: `apps/relayd/src/http/graph.test.ts` replays `fixtures/events-live-1.jsonl` / `events-repair.jsonl`
+  through the JSONL store and asserts equality with the pure functions; one pinned test fixes the `/story` lines
+  of live-1 to what the Ink TUI shows.
+
+---
+
 ## Order of work and integration
 
 1. WP-T1 and WP-T2 start in parallel (the web app can be built entirely against fixtures and a fake WS).
