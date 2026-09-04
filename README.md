@@ -41,44 +41,31 @@ Built at the FUTUREMODE BUILDMODE Gen-AI Hackathon 2026. The full product design
 
 ## Quick start
 
-Requirements: Node ≥ 22, git, and a terminal host — [Herdr](https://herdr.dev) (run relayd inside a Herdr pane)
-or tmux (create a session named `relay` first). Agents: `claude` (Claude Code) and/or `codex` on your PATH, logged in.
+Requirements: Node ≥ 22 and git. Agents need `claude` (Claude Code) and/or `codex` on your PATH and logged in.
+The default `relay` terminal host needs no tmux or Herdr setup.
 
 ```bash
 npm install && npx tsc -b
 
-# 1. materialise the demo app as its own git repository
+# Materialise the demo app as its own git repository.
 bash demo-repo/scripts/init-demo.sh ~/entente-demo/app && (cd ~/entente-demo/app && npm install)
 
-# 2. start the daemon. RELAY_HOST=relay hosts the agents' terminals inside relayd itself (no tmux/Herdr needed);
-#    RELAY_HOST=herdr runs them as Herdr panes (start relayd inside a Herdr pane); RELAY_HOST=tmux uses a tmux session.
-RELAY_HOST=relay RELAY_REPO=~/entente-demo/app npx tsx apps/relayd/src/index.ts
-#    with the relay host, look at any agent from another shell:
-npx tsx apps/cli/src/index.ts pane list
-npx tsx apps/cli/src/index.ts pane read relay:1
+# Start or reuse relayd, wait for health, then hand this terminal to the TUI.
+entente --repo ~/entente-demo/app
 
-# 3. in another pane: the TUI
-npx tsx apps/tui/src/index.tsx --url http://127.0.0.1:7420
-
-# 4. in another pane: create the mission — either let a planner agent write the contracts…
-npx tsx apps/cli/src/index.ts up "Add secure login to this application." \
-  --repo ~/entente-demo/app --planner claude-code --host herdr
-#    …or load hand-written contracts (deliberately vague, so recipients must ask first)
-npx tsx apps/cli/src/index.ts up "Add secure login to this application." \
-  --repo ~/entente-demo/app --plan examples/plan-secure-login.yaml --host herdr
-
-# when an agent asks for clarification / when a human_review criterion is pending:
-npx tsx apps/cli/src/index.ts clarify t-backend-auth Q1="email magic link" Q2="15 minutes, single use"
-npx tsx apps/cli/src/index.ts review  t-backend-auth AC-3 fail "replaying a used token returned 200"
-# when a planner asks mission-level questions / when an agent reports a blocker:
-npx tsx apps/cli/src/index.ts clarify m-60100b Q1="passwordless magic link" Q2="HttpOnly cookie"
-npx tsx apps/cli/src/index.ts reply   t-backend-auth "use MemoryEmailSender; credentials are not needed in dev"
+# Inspect or stop that daemon from another terminal.
+entente status --repo ~/entente-demo/app
+entente down --repo ~/entente-demo/app
 ```
 
-No agents, no API keys? Replay a recorded run:
+`entente` defaults to `entente up`, port 7420, and the built-in `relay` host. Use `--host herdr` or
+`--host tmux` for an external terminal host, `--port N` for another port, and `--dir <relayDir>` to move
+`relayd.log`, `relayd.pid`, and `session.token`. Pass `--no-spawn` to require an already-running daemon.
+
+No agents, daemon, or API keys? Replay a recorded run directly:
 
 ```bash
-npx tsx apps/tui/src/index.tsx --replay fixtures/events-live-1.jsonl
+entente --replay fixtures/events-live-1.jsonl
 ```
 
 ## How an agent takes part

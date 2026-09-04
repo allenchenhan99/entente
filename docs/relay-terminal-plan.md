@@ -42,6 +42,13 @@ Frozen interfaces (do not change without updating both work packages):
 
 Runtime requirements: Node ≥ 22, `node-pty` (native module; `npm rebuild node-pty` after Node upgrades).
 
+## Launcher
+
+`entente` is the root-package entrypoint for the terminal base. It reuses a healthy relayd or starts one in
+the background, waits for `/health`, reads the daemon's session token, and runs the TUI in the foreground.
+`entente status` reports the endpoint, PID file, and relay directory; `entente down` safely terminates only a
+live PID paired with a healthy endpoint. `entente --replay <file>` opens the TUI without starting relayd.
+
 ---
 
 ## WP-T1 · Task Contract: `pty-host` — ✅ done (merged 2026-09-04; `apps/relayd/src/pty/`, `relay pane …` CLI)
