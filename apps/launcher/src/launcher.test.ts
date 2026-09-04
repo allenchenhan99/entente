@@ -57,7 +57,7 @@ describe('parseArgs', () => {
 
   it('parses every up flag and resolves filesystem paths', () => {
     expect(parseArgs([
-      'up', '--repo', 'project', '--port', '9001', '--host', 'herdr',
+      'up', '--repo', 'project', '--port', '9001', '--host', 'relayterm',
       '--dir', 'state', '--replay', 'fixtures/run.jsonl', '--no-spawn',
     ], cwd)).toEqual({
       command: 'up',
@@ -65,7 +65,7 @@ describe('parseArgs', () => {
       relayDir: path.join(cwd, 'state'),
       relayDirExplicit: true,
       port: 9001,
-      host: 'herdr',
+      host: 'relayterm',
       replay: 'fixtures/run.jsonl',
       noSpawn: true,
     });
@@ -215,7 +215,7 @@ describe('up', () => {
     const sleep = vi.fn(async (milliseconds: number) => { clock += milliseconds; });
 
     const code = await runLauncher([
-      '--repo', 'project', '--dir', 'state', '--port', '9444', '--host', 'tmux',
+      '--repo', 'project', '--dir', 'state', '--port', '9444', '--host', 'relay',
     ], {
       cwd,
       workspaceRoot,
@@ -242,7 +242,7 @@ describe('up', () => {
           RELAY_REPO: repo,
           RELAY_DIR: relayDir,
           RELAY_PORT: '9444',
-          RELAY_HOST: 'tmux',
+          RELAY_HOST: 'relay',
           RELAY_RESUME: 'latest',
         },
       }),

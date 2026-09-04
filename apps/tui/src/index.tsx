@@ -60,7 +60,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     speed: 1,
     frames: 1,
     noTty: false,
-    focusCmd: env.HERDR_ENV === '1' ? 'herdr' : 'tmux',
+    focusCmd: 'relay',
   };
   if (env.RELAY_TOKEN?.trim()) options.token = env.RELAY_TOKEN.trim();
 
@@ -94,8 +94,8 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     }
     if (option === '--focus-cmd') {
       const command = optionValue(argv, index, option);
-      if (command !== 'herdr' && command !== 'tmux' && command !== 'none') {
-        throw new Error('--focus-cmd must be herdr, tmux, or none');
+      if (command !== 'relay' && command !== 'none') {
+        throw new Error('--focus-cmd must be relay or none');
       }
       options.focusCmd = command;
       index += 1;

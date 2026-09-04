@@ -64,7 +64,7 @@ function secondRun(dir: string) {
   return { r, runDir };
 }
 
-const restore = (r: TestRelay, runDir: string, hostKind: 'fake' | 'relay' | 'tmux' | 'herdr' = 'fake') =>
+const restore = (r: TestRelay, runDir: string, hostKind: 'fake' | 'relay' | 'relayterm' = 'fake') =>
   restoreRun({ store: r.store, orchestrator: r.orchestrator, runDir, relayDir: path.join(r.dir, '.relay'), hostKind, log: () => {} });
 
 describe('rehydrate', () => {
@@ -232,22 +232,16 @@ describe('respawn', () => {
     expect(r.orchestrator.taskView('t-a')!.runtime).toBe('working');
   });
 
-  it('respawn skips panes that are not alive and marks every pane exited on tmux/herdr hosts', async () => {
+  it('respawn skips panes that are not alive', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
-    const { runDir, mission_id } = await firstRun(dir);
+    const { runDir } = await firstRun(dir);
     const ws = readWorkspace(runDir)!;
     writeWorkspace(runDir, { ...ws, panes: ws.panes.map((p) => (p.task_id === 't-a' ? { ...p, alive: false } : p)) });
 
     const { r } = secondRun(dir);
-    const seqBefore = r.store.all().at(-1)!.seq;
-    const result = await restore(r, runDir, 'tmux');
-    expect(result.respawned).toEqual([]);
-    expect(result.skipped).toEqual([`planner:${mission_id}`, 't-b', 't-c']);
-    expect(r.host.calls.spawn).toEqual([]);
-    const fresh = r.store.all().filter((e) => e.seq > seqBefore);
-    expect(fresh.map((e) => [e.type, e.task_id ?? 'planner'])).toEqual([['agent_exited', 'planner'], ['agent_exited', 't-b'], ['agent_exited', 't-c']]);
-    expect(fresh[2].payload).toMatchObject({ exit_reason: expect.stringContaining('tmux') });
-    expect(r.store.state().tasks['t-c'].runtime).toBe('exited');
+    const result = await restore(r, runDir);
+    expect(result.respawned).not.toContain('t-a');
+    expect(r.host.calls.spawn.map((c) => c.name)).not.toContain('a');
   });
 
   it('respawn falls back to the event log when workspace.json is missing and does not respawn a planner of a finished mission', async () => {

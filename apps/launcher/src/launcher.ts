@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORT, routes } from '@relay/protocol';
 
 export type LauncherCommand = 'up' | 'status' | 'down';
-export type LauncherHost = 'relay' | 'relayterm' | 'herdr' | 'tmux';
+export type LauncherHost = 'relay' | 'relayterm';
 /** Which client takes over the terminal: the Rust `relay-tui` (crates/relay-tui) or the Ink TUI (apps/tui). */
 export type LauncherTui = 'rust' | 'ink';
 
@@ -97,14 +97,14 @@ export interface HealthResult {
 }
 
 export const USAGE = `usage:
-  entente [up] [--repo <path>] [--port N] [--host relay|relayterm|herdr|tmux] [--tui rust|ink] [--dir <relayDir>] [--replay <file|dir>] [--no-spawn]
+  entente [up] [--repo <path>] [--port N] [--host relay|relayterm] [--tui rust|ink] [--dir <relayDir>] [--replay <file|dir>] [--no-spawn]
   entente status [--repo <path>] [--port N] [--dir <relayDir>]
   entente down [--repo <path>] [--port N] [--dir <relayDir>]
 
 --host defaults to relayterm when a termd binary is found (RELAY_TERMD, target/release, target/debug), else relay.
 --tui defaults to rust when a relay-tui binary is found (RELAY_TUI, target/release, target/debug), else ink.`;
 
-const HOSTS: readonly LauncherHost[] = ['relay', 'relayterm', 'herdr', 'tmux'];
+const HOSTS: readonly LauncherHost[] = ['relay', 'relayterm'];
 const TUIS: readonly LauncherTui[] = ['rust', 'ink'];
 const HEALTH_TIMEOUT_MS = 1_000;
 const HEALTH_POLL_MS = 200;

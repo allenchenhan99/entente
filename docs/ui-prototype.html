@@ -413,7 +413,7 @@
     <div class="inbox" id="inbox" role="listbox" aria-label="Items needing a human"></div>
   </aside>
 
-  <!-- right: the selected agent's conversation, the way Herdr shows a session -->
+  <!-- right: the selected agent's conversation (session view) -->
   <main class="main">
     <div class="mux" id="mux" role="tablist" aria-label="Panes"></div>
     <div class="grid" id="grid"></div>
@@ -479,7 +479,7 @@
 
   // ── graph: vertical tiers, fixed positions ──────────────────────────────
   // The protocol's `column` becomes a tier flowing top-to-bottom, so the network fits
-  // the sidebar where Herdr lists agents. Nothing is force-directed: positions must stay
+  // an agent sidebar. Nothing is force-directed: positions must stay
   // stable while events arrive, or the picture moves under the pointer.
   const TIERS = ['you / planner', 'agents', 'verifier'];
   const R_AGENT = 28, R_ROLE = 19;            // agents are the big discs; roles the small ones

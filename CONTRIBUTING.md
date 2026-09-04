@@ -1,7 +1,7 @@
 # Contributing
 
 Everything you need runs offline: tests use temporary git repositories and a fake process executor, and the
-TUI can replay recorded runs, so you do not need Claude Code, Codex, Herdr or any API key to work on most of
+TUI can replay recorded runs, so you do not need Claude Code, Codex or any API key to work on most of
 the code.
 
 ```bash
@@ -35,7 +35,7 @@ npx tsx apps/tui/src/index.tsx --replay fixtures/events-live-1.jsonl   # see the
 ## Running it for real
 
 See the README quick start. Known runtime requirements we discovered the hard way (all handled in
-`apps/relayd/src/launch/`): Herdr refuses multi-line agent arguments (prompt goes through `agent prompt`);
+`apps/relayd/src/launch/`): the initial prompt is pasted once the pane is ready (large pastes may need an extra Enter);
 Claude Code needs the worktree pre-trusted in `~/.claude.json`; Codex needs `default_tools_approval_mode =
 "approve"` for the relay MCP server and `writable_roots` covering its own home and runtime cache under the
 workspace-write sandbox.

@@ -1,7 +1,7 @@
 /**
  * `relay` — thin CLI over relayd's HTTP API (PRD §12.7, `@relay/protocol` api.ts).
  *
- *   relay up "<mission title>" [--repo <path>] [--plan plan.yaml | --planner claude-code|codex] [--host herdr|tmux] [--port N]
+ *   relay up "<mission title>" [--repo <path>] [--plan plan.yaml | --planner claude-code|codex] [--port N]
  *   relay status
  *   relay clarify <task-id> Q1="..." Q2="..."
  *   relay review <task-id> <AC-id> pass|fail ["observed failure"]
@@ -71,7 +71,7 @@ export interface CliIo {
 }
 
 export const USAGE = `usage:
-  relay up "<mission title>" [--repo <path>] [--plan plan.yaml | --planner claude-code|codex] [--host herdr|tmux] [--port N]
+  relay up "<mission title>" [--repo <path>] [--plan plan.yaml | --planner claude-code|codex] [--port N]
   relay status [--port N]
   relay clarify <task-id|mission-id> Q1="..." [Q2="..."] [--port N]
   relay review <task-id> <AC-id> pass|fail ["observed failure"] [--port N]
@@ -470,7 +470,6 @@ async function up(args: string[], io: CliIo): Promise<number> {
     repo: { type: 'string' },
     plan: { type: 'string' },
     planner: { type: 'string' },
-    host: { type: 'string' },
     port: { type: 'string' },
   });
   const title = positionals[0];
@@ -478,15 +477,11 @@ async function up(args: string[], io: CliIo): Promise<number> {
   if (values.planner !== undefined && values.planner !== 'claude-code' && values.planner !== 'codex') {
     throw new UsageError(`--planner must be claude-code or codex, got ${values.planner}`);
   }
-  if (values.host !== undefined && values.host !== 'herdr' && values.host !== 'tmux') {
-    throw new UsageError(`--host must be herdr or tmux, got ${values.host}`);
-  }
   const plan = values.plan !== undefined ? loadPlan(path.resolve(io.cwd, values.plan)) : undefined;
 
-  const body: CreateMissionBody & { host?: string } = {
+  const body: CreateMissionBody = {
     repo: path.resolve(io.cwd, values.repo ?? '.'),
     title,
-    ...(values.host !== undefined ? { host: values.host } : {}),
   };
   const client = new Client(io, values);
   const created = await client.post<{ mission_id: string }>(routes.missions, body);

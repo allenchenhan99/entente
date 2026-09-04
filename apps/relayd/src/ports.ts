@@ -61,8 +61,8 @@ export interface SpawnOptions {
   argv: string[];             // command line without the initial prompt, argv[0] is the executable
   env: Record<string, string>;
   /**
-   * Initial prompt to deliver once the agent is interactive. Hosts choose the delivery: Herdr uses
-   * `herdr agent prompt` (multi-line CLI arguments are refused by `agent start`); tmux appends it to argv.
+   * Initial prompt to deliver once the agent is interactive. The host waits for readiness (screen model),
+   * pastes it (bracketed paste when enabled) and presses Enter, retrying while the composer still holds it.
    */
   prompt?: string;
   /** Task the pane will host (recipient panes); shown in PaneInfo / HostMetrics. */
@@ -70,7 +70,7 @@ export interface SpawnOptions {
 }
 
 export interface TerminalHost {
-  readonly kind: 'tmux' | 'herdr' | 'relay' | 'relayterm';
+  readonly kind: 'relay' | 'relayterm';
   spawn(opts: SpawnOptions): Promise<{ paneId: string }>;
   focus(paneId: string): Promise<void>;
   isAlive(paneId: string): Promise<boolean>;

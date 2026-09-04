@@ -43,7 +43,7 @@ export interface ClaudeCodeRuntimeDeps {
  * `~/.claude.json`, migrating to `skipDangerousModePermissionPrompt` in `~/.claude/settings.json`.
  *
  * Unaccepted, the agent stops on the dialog with "No, exit" preselected, the bootstrap prompt's Enter
- * chooses it, Claude exits, and the host only sees Herdr's `agent_not_found` ~45 s later. Detecting it
+ * chooses it, Claude exits, and the host only sees the pane die. Detecting it
  * up front turns that into an actionable error. relayd does NOT accept it silently: unlike the
  * worktree-scoped trust flag, this one applies to every future `claude` run by this user, so it stays a
  * human decision unless `RELAY_ACCEPT_CLAUDE_BYPASS=1` opts in.

@@ -815,10 +815,10 @@ describe('relay up', () => {
     expect(await run(['up', 'T', '--planner', 'gemini'], { ...capture(), fetch, env: {} })).toBe(2);
   });
 
-  it('defaults --repo to the cwd and forwards --host', async () => {
+  it('defaults --repo to the cwd', async () => {
     const { fetch, requests } = fakeFetch(() => ({ mission_id: 'm-1' }));
-    await run(['up', 'T', '--host', 'tmux'], { ...capture(), fetch, env: {}, cwd: '/here' });
-    expect(requests[0]!.body).toEqual({ repo: '/here', title: 'T', host: 'tmux' });
+    await run(['up', 'T'], { ...capture(), fetch, env: {}, cwd: '/here' });
+    expect(requests[0]!.body).toEqual({ repo: '/here', title: 'T' });
   });
 
   it('loads a YAML plan and posts it to /missions/:id/plan', async () => {

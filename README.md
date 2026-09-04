@@ -5,9 +5,9 @@
 > Agent frameworks tell you whether an agent is running.
 > RelayGraph tells you whether agents actually understand each other.
 
-RelayGraph is a coordination control plane that sits *above* coding-agent runtimes (Claude Code, Codex) and
-terminal hosts (tmux, [Herdr](https://herdr.dev)). It does not replace them. It makes every handoff between
-agents an explicit **Task Contract** with a lifecycle:
+RelayGraph is a coordination control plane for coding agents (Claude Code, Codex) with its own terminal base:
+agents keep their runtimes, RelayGraph hosts their terminals and makes every handoff between them an explicit
+**Task Contract** with a lifecycle:
 
 ```
 proposed ──▶ needs_clarification ──▶ revised ──▶ accepted ──▶ evidence_submitted ──▶ verified
@@ -32,7 +32,7 @@ Built at the FUTUREMODE BUILDMODE Gen-AI Hackathon 2026. The full product design
 | Package | What it does |
 |---|---|
 | `packages/protocol` | zod schemas for contracts, events, state; the state reducer; the communication-debt linter |
-| `apps/relayd` | the daemon: JSONL event store, HTTP + SSE API, **MCP server the agents talk to**, git worktree manager, check runner, repair policy, agent launcher (Herdr / tmux hosts, Claude Code / Codex runtimes) |
+| `apps/relayd` | the daemon: JSONL event store, HTTP + SSE API, **MCP server the agents talk to**, git worktree manager, check runner, repair policy, agent launcher (`relay` / `relayterm` hosts, Claude Code / Codex runtimes) |
 | `apps/tui` | Ink terminal UI: mission tree, animated handoff graph, event timeline, contract overlay, live (SSE) and replay modes |
 | `apps/cli` | `relay up / status / clarify / review / cancel / replay` |
 | `demo-repo` | a small Hono app with a user model and session store and **no authentication** — the target of the demo mission |
@@ -42,7 +42,7 @@ Built at the FUTUREMODE BUILDMODE Gen-AI Hackathon 2026. The full product design
 ## Quick start
 
 Requirements: Node ≥ 22 and git. Agents need `claude` (Claude Code) and/or `codex` on your PATH and logged in.
-No tmux or Herdr needed: RelayGraph hosts the agent terminals itself. With a Rust toolchain, `cargo build`
+RelayGraph hosts the agent terminals itself; no external multiplexer is needed. With a Rust toolchain, `cargo build`
 produces the native terminal base (`termd` + `relay-tui`) and `entente` uses it automatically; without it the
 TypeScript host and the Ink TUI run instead.
 
@@ -63,8 +63,8 @@ entente down --repo ~/entente-demo/app
 
 `entente` defaults to `entente up` on port 7420. `--host` defaults to `relayterm` when a `termd` binary is
 found (`RELAY_TERMD`, `target/release`, `target/debug`) and to the TypeScript `relay` host otherwise; `--tui`
-defaults to `rust` when `relay-tui` is built (`RELAY_TUI` overrides) and to `ink` otherwise. Use `--host herdr`
-or `--host tmux` for an external terminal host, `--port N` for another port, and `--dir <relayDir>` to move
+defaults to `rust` when `relay-tui` is built (`RELAY_TUI` overrides) and to `ink` otherwise. Use `--port N` for
+another port and `--dir <relayDir>` to move
 `relayd.log`, `relayd.pid`, and `session.token`. Pass `--no-spawn` to require an already-running daemon.
 `--replay` takes an event log (Ink) or a relay-tui fixture directory (Rust).
 
@@ -74,7 +74,6 @@ Terminal hosts (`RELAY_HOST` for a hand-started `relayd`):
 | --- | --- |
 | `relay` (default) | relayd itself (node-pty); `/panes*`, `/pty/:id`, `/metrics` served in-process |
 | `relayterm` | the Rust `termd` (`cargo build -p termd`, or `RELAY_TERMD=<binary>`); relayd spawns it and proxies the same routes to it |
-| `herdr` / `tmux` | an external terminal host; no pane routes |
 
 No agents, daemon, or API keys? Replay a recorded run directly:
 
@@ -161,7 +160,7 @@ node scripts/dump-graph-fixture.mjs fixtures/events-live-1.jsonl live-1   # rege
 
 This project was built by running its own protocol: six work packages, each a Task Contract with
 `allowed_paths` and machine-checked acceptance criteria, executed in parallel by Claude Code and Codex agents
-in git worktrees managed through Herdr, then merged. The integration bugs found while doing that (prompt
+in git worktrees, then merged. The integration bugs found while doing that (prompt
 delivery, folder trust, MCP approval, sandbox roots) are documented in the commit history.
 
 ## License

@@ -86,7 +86,7 @@ describe('fakes', () => {
 
   it('fakeHost records spawns and kills', async () => {
     const host = fakeHost();
-    expect(host.kind).toBe('tmux');
+    expect(host.kind).toBe('relay');
     const { paneId } = await host.spawn({ name: 'backend', cwd: '/w', argv: ['x'], env: {} });
     expect(host.calls.spawn).toHaveLength(1);
     expect(await host.isAlive(paneId)).toBe(true);

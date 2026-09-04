@@ -67,7 +67,6 @@ export interface RestoreOptions {
   orchestrator: Orchestrator;
   runDir: string;
   relayDir: string;
-  /** Only `relay`, `relayterm` (and the test `fake`) host panes can be respawned; tmux/herdr panes are marked exited. */
   hostKind: HostKind;
   prompt?: string;
   log?: (message: string) => void;
@@ -101,7 +100,6 @@ export async function restoreRun(opts: RestoreOptions): Promise<RestoreResult> {
   const workspace = readWorkspace(opts.runDir);
   if (!workspace) log(`no workspace.json in ${opts.runDir}; pane inventory derived from the event log`);
   const alive = (workspace?.panes ?? panesFromEvents(events, opts.relayDir)).filter((p) => p.alive);
-  const respawnable = opts.hostKind === 'relay' || opts.hostKind === 'relayterm' || opts.hostKind === 'fake';
 
   const result: RestoreResult = { missions, tasks, panes: alive.length, respawned: [], skipped: [], failed: [], resumed_checks: resumedChecks };
   const seen = new Set<string>();
@@ -126,11 +124,6 @@ export async function restoreRun(opts: RestoreOptions): Promise<RestoreResult> {
   };
 
   for (const pane of alive) {
-    if (!respawnable) {
-      markExited(pane, `daemon restart: ${opts.hostKind} panes are not resumed`);
-      result.skipped.push(pane.task_id);
-      continue;
-    }
     if (seen.has(pane.task_id) || !resumable(pane)) {
       markExited(pane, 'daemon restart');
       if (!seen.has(pane.task_id)) result.skipped.push(pane.task_id);

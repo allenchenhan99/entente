@@ -9,7 +9,7 @@ export interface FakeHost extends TerminalHost {
 export function fakeHost(): FakeHost {
   let n = 0;
   const host: FakeHost = {
-    kind: 'tmux',
+    kind: 'relay',
     calls: { spawn: [], kill: [], focus: [] },
     alive: new Set(),
     async spawn(opts) {

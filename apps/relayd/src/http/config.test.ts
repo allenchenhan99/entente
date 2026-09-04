@@ -7,7 +7,7 @@ describe('config', () => {
     expect(c.port).toBe(7420);
     expect(c.repoRoot).toBe(process.cwd());
     expect(c.relayDir).toBe(`${process.cwd()}/.relay`);
-    expect(c.host).toBe('tmux');
+    expect(c.host).toBe('relay');
     expect(c.runId).toMatch(/^run-/);
   });
   it('reads env overrides', () => {

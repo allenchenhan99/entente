@@ -5,7 +5,7 @@ import { parseAuthMode, type AuthMode } from './auth/token.js';
 
 export const RELAYD_VERSION = '0.0.1';
 
-export type HostKind = 'tmux' | 'herdr' | 'relay' | 'relayterm' | 'fake';
+export type HostKind = 'relay' | 'relayterm' | 'fake';
 
 export interface RelaydConfig {
   port: number;
@@ -20,14 +20,14 @@ export interface RelaydConfig {
   authMode: AuthMode;
 }
 
-const HOSTS: HostKind[] = ['tmux', 'herdr', 'relay', 'relayterm', 'fake'];
+const HOSTS: HostKind[] = ['relay', 'relayterm', 'fake'];
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): RelaydConfig {
   const repoRoot = path.resolve(env.RELAY_REPO ?? process.cwd());
   const relayDir = env.RELAY_DIR ? path.resolve(env.RELAY_DIR) : path.join(repoRoot, '.relay');
   const port = env.RELAY_PORT === undefined ? DEFAULT_PORT : Number(env.RELAY_PORT);
   if (!Number.isInteger(port) || port < 0) throw new Error(`RELAY_PORT must be a non-negative integer, got ${env.RELAY_PORT}`);
-  const host = (env.RELAY_HOST ?? 'tmux') as HostKind;
+  const host = (env.RELAY_HOST ?? 'relay') as HostKind;
   if (!HOSTS.includes(host)) throw new Error(`RELAY_HOST must be one of ${HOSTS.join('|')}, got ${env.RELAY_HOST}`);
   const runId = env.RELAY_RUN_ID ?? `run-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   const authMode = parseAuthMode(env.RELAY_AUTH);

@@ -148,7 +148,7 @@ export type PaneTimings = z.infer<typeof PaneTimings>;
 
 /** `GET /metrics`: host-level counters plus every pane's timings; the basis for the "vs bare CLI" comparison. */
 export const HostMetrics = z.object({
-  host: z.enum(['relay', 'herdr', 'tmux', 'relayterm', 'fake']),
+  host: z.enum(['relay', 'relayterm', 'fake']),
   uptime_ms: z.number().nonnegative(),
   panes_spawned: z.number().int().nonnegative(),
   panes_alive: z.number().int().nonnegative(),

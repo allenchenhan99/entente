@@ -7,15 +7,14 @@ import { parseCliArgs, renderHeadlessFrames, runCli, type OutputStream } from '.
 const repairFixture = fileURLToPath(new URL('../../../fixtures/events-repair.jsonl', import.meta.url));
 
 describe('headless CLI', () => {
-  it('parses defaults and chooses focus command from HERDR_ENV', () => {
+  it('parses defaults', () => {
     expect(parseCliArgs([], {})).toEqual({
       url: 'http://127.0.0.1:7420',
       speed: 1,
       frames: 1,
       noTty: false,
-      focusCmd: 'tmux',
+      focusCmd: 'relay',
     });
-    expect(parseCliArgs([], { HERDR_ENV: '1' }).focusCmd).toBe('herdr');
   });
 
   it('parses every supported flag and rejects invalid values', () => {

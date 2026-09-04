@@ -1,6 +1,6 @@
 import { CancelBody, ClarifyBody, ReplyBody, ReviewBody, routes } from '@relay/protocol';
 
-import type { CommandExecutor, FetchLike } from './context.js';
+import type { FetchLike } from './context.js';
 
 function commandUrl(baseUrl: string, route: string): string {
   return `${baseUrl.replace(/\/+$/, '')}${route}`;
@@ -67,15 +67,10 @@ export async function postCancel(options: { fetch: FetchLike; url: string; taskI
   await postJson(options.fetch, commandUrl(options.url, routes.cancel(options.taskId)), CancelBody.parse({}));
 }
 
-export type FocusCommand = 'herdr' | 'tmux' | 'none';
+/** `relay` = ask relayd to focus the pane (`POST /panes/:id/focus`, honoured by relay-tui and the web app); `none` = never. */
+export type FocusCommand = 'relay' | 'none';
 
-export function focusArgv(command: FocusCommand, paneId: string): string[] | undefined {
-  if (command === 'herdr') return ['herdr', 'agent', 'focus', paneId];
-  if (command === 'tmux') return ['tmux', 'select-pane', '-t', paneId];
-  return undefined;
-}
-
-export async function focusPane(execute: CommandExecutor, command: FocusCommand, paneId: string): Promise<void> {
-  const argv = focusArgv(command, paneId);
-  if (argv) await execute(argv);
+export async function focusPane(options: { fetch: FetchLike; url: string; command: FocusCommand; paneId: string }): Promise<void> {
+  if (options.command === 'none') return;
+  await postJson(options.fetch, commandUrl(options.url, `/panes/${options.paneId}/focus`), {});
 }

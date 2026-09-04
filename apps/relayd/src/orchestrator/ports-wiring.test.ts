@@ -21,11 +21,11 @@ describe('ports wiring', () => {
   it('uses real factories where their modules exist and fakes elsewhere', async () => {
     const importer = async (spec: string) =>
       spec.includes('launch') ? launchModule : spec.includes('verify') ? verifyModule : spec.includes('worktree') ? worktreeModule : undefined;
-    const cfg = loadConfig({ RELAY_HOST: 'herdr', RELAY_REPO: '/r' });
+    const cfg = loadConfig({ RELAY_HOST: 'relayterm', RELAY_REPO: '/r' });
     const s = store();
     const ports = await resolvePorts(cfg, s, () => {}, importer);
-    expect(ports.host.kind).toBe('herdr');
-    expect((ports.host as unknown as { deps: unknown }).deps).toEqual({});
+    expect(ports.host.kind).toBe('relayterm');
+    expect((ports.host as unknown as { deps: { relayDir?: string; runId?: string } }).deps).toMatchObject({ relayDir: expect.any(String), runId: expect.any(String) });
     expect(ports.runtimes['claude-code'].kind).toBe('claude-code');
     expect(ports.runtimes.codex.kind).toBe('codex');
     const checkDeps = (ports.checks as unknown as { deps: { repoRoot: string; worktrees: unknown; store: unknown } }).deps;
@@ -39,16 +39,16 @@ describe('ports wiring', () => {
   it('RELAY_HOST=fake forces the fake host and runtimes even when the launch module exists', async () => {
     const importer = async (spec: string) => (spec.includes('launch') ? launchModule : undefined);
     const ports = await resolvePorts(loadConfig({ RELAY_HOST: 'fake' }), store(), () => {}, importer);
-    expect(ports.host.kind).toBe('tmux');
+    expect(ports.host.kind).toBe('relay');
     expect(ports.fakes).toEqual(['worktrees', 'checks', 'repair', 'host', 'runtime:claude-code', 'runtime:codex']);
   });
 
   it('a factory that throws falls back to the fake instead of crashing boot', async () => {
-    const importer = async (spec: string) => (spec.includes('launch') ? { createTerminalHost: () => { throw new Error('no tmux'); }, createRuntime: launchModule.createRuntime } : undefined);
+    const importer = async (spec: string) => (spec.includes('launch') ? { createTerminalHost: () => { throw new Error('no termd'); }, createRuntime: launchModule.createRuntime } : undefined);
     const logs: string[] = [];
-    const ports = await resolvePorts(loadConfig({ RELAY_HOST: 'tmux' }), store(), (m) => logs.push(m), importer);
+    const ports = await resolvePorts(loadConfig({ RELAY_HOST: 'relayterm' }), store(), (m) => logs.push(m), importer);
     expect(ports.fakes).toContain('host');
     expect(ports.fakes).not.toContain('runtime:codex');
-    expect(logs.join('\n')).toMatch(/no tmux/);
+    expect(logs.join('\n')).toMatch(/no termd/);
   });
 });

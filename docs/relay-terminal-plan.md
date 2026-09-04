@@ -6,8 +6,7 @@
 
 ## Why we build our own host
 
-tmux keeps panes alive, cmux adds a sidebar and notifications on macOS, Herdr adds lifecycle detection in the
-terminal. All three are terminal multiplexers first: they arrange *terminals*, and learn about agents by
+Existing agent terminals are terminal multiplexers first: they arrange *terminals*, and learn about agents by
 watching the screen. RelayGraph already knows more than any of them — every agent's contract, state,
 questions and evidence come from the agents themselves through MCP. A host that is driven by that knowledge
 can do what none of them can:
@@ -17,7 +16,7 @@ can do what none of them can:
 - record every pane and replay it against the event log in the same window;
 - make the layout **data** (a `LayoutPreset`) so it can be customised per team without forking the app.
 
-Herdr and tmux stay supported as external `TerminalHost`s. The new host is a third implementation, `relay`.
+The hosts are `relay` (in-process, TypeScript) and `relayterm` (the Rust `termd`).
 
 ## Architecture
 
@@ -276,6 +275,6 @@ with real terminal panes inside the layout. It talks only HTTP / SSE / WS to rel
 
 ## Definition of done for Phase 2
 
-- The demo (PRD §14) runs entirely inside Relay Terminal: no tmux, no Herdr, no separate CLI.
+- The demo (PRD §14) runs entirely inside Relay Terminal: no external multiplexer, no separate CLI.
 - A recorded run replays in the same window with panes and events in sync.
 - A second layout preset (e.g. "review": verifier column wide, agents small) is loadable without code changes.
