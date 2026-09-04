@@ -50,6 +50,7 @@ describe('live SSE', () => {
     const fakeFetch = vi.fn<FetchLike>()
       .mockResolvedValueOnce(new Response(JSON.stringify(initialState()), { status: 200 }))
       .mockResolvedValueOnce(sseResponse(body))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...initialState(), last_seq: 205 }), { status: 200 }))
       .mockImplementationOnce(() => pending);
 
     function Probe() {
@@ -61,8 +62,33 @@ describe('live SSE', () => {
 
     expect(fakeFetch.mock.calls[0]?.[0]).toBe('http://relay.test/state');
     expect(fakeFetch.mock.calls[1]?.[0]).toBe('http://relay.test/events?since=0');
-    expect(fakeFetch.mock.calls[2]?.[0]).toBe('http://relay.test/events?since=205');
+    expect(fakeFetch.mock.calls[2]?.[0]).toBe('http://relay.test/state');
+    expect(fakeFetch.mock.calls[3]?.[0]).toBe('http://relay.test/events?since=205');
     expect(view.lastFrame()).toContain('205 events=200');
+
+    view.unmount();
+    keepOpen?.();
+  });
+
+  it('replaces stale state and clears the ring when the daemon restarted with a new event log', async () => {
+    const event = { seq: 1, ts: '2026-09-05T10:00:00+08:00', mission_id: 'm-old', actor: 'relayd', type: 'mission_failed', payload: { reason: 'old run' } };
+    const oldSnapshot = { ...initialState(), last_seq: 40 };
+    const newSnapshot = { ...initialState(), last_seq: 2 };
+    let keepOpen: (() => void) | undefined;
+    const pending = new Promise<Response>((resolve) => { keepOpen = () => resolve(sseResponse('')); });
+    const fakeFetch = vi.fn<FetchLike>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(oldSnapshot), { status: 200 }))
+      .mockResolvedValueOnce(sseResponse(`id: 41\ndata: ${JSON.stringify({ ...event, seq: 41 })}\n\n`))
+      .mockResolvedValueOnce(new Response(JSON.stringify(newSnapshot), { status: 200 }))
+      .mockImplementationOnce(() => pending);
+
+    function Probe() {
+      const live = useLiveState('http://relay.test/', { fetch: fakeFetch, reconnectDelayMs: 0 });
+      return <Text>{`seq=${live.state.last_seq} events=${live.events.length}`}</Text>;
+    }
+    const view = render(<Probe />);
+    await waitFor(() => (view.lastFrame() ?? '').includes('seq=2 events=0'));
+    expect(fakeFetch.mock.calls[3]?.[0]).toBe('http://relay.test/events?since=2');
 
     view.unmount();
     keepOpen?.();

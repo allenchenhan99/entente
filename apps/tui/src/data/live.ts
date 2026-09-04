@@ -63,25 +63,28 @@ export function useLiveState(url: string, options: LiveOptions = {}): LiveView {
 
     const run = async () => {
       let lastSeq = 0;
+      let haveSnapshot = false;
       while (active && !abort.signal.aborted) {
+        // Always start from a fresh snapshot. relayd numbers events per run, so after a daemon restart the
+        // server's last_seq is *smaller* than ours; the snapshot then replaces the stale state and ring.
         try {
           const stateUrl = endpoint(url, routes.state);
           const response = await fetcher(stateUrl, { signal: abort.signal });
           if (!response.ok) throw responseError('GET', stateUrl, response);
           const snapshot = StateSchema.parse(await response.json());
-          lastSeq = snapshot.last_seq;
           if (!active) return;
+          if (haveSnapshot && snapshot.last_seq < lastSeq) setEvents([]);
+          lastSeq = snapshot.last_seq;
+          haveSnapshot = true;
           setState(snapshot);
           setError(undefined);
-          break;
         } catch (cause) {
           if (!active || abort.signal.aborted) return;
           setError(cause instanceof Error ? cause : new Error(String(cause)));
           await delay(reconnectDelayMs, abort.signal);
+          continue;
         }
-      }
 
-      while (active && !abort.signal.aborted) {
         const eventsUrl = `${endpoint(url, routes.events)}?since=${lastSeq}`;
         try {
           const response = await fetcher(eventsUrl, {
