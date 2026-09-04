@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { initialState, replay } from '@relay/protocol';
+import { initialState, replay, type GraphObjectRef } from '@relay/protocol';
 import { render as renderInk } from 'ink';
 import { render as renderForTest } from 'ink-testing-library';
 import React from 'react';
@@ -18,6 +18,7 @@ export interface CliOptions {
   frames: number;
   noTty: boolean;
   focusCmd: FocusCommand;
+  selected?: GraphObjectRef;
 }
 
 export interface OutputStream {
@@ -42,6 +43,12 @@ function positiveNumber(value: string, option: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${option} must be a positive number`);
   return parsed;
+}
+
+function graphObjectRef(value: string): GraphObjectRef {
+  const match = /^(node|edge|inbox):([^:]+)$/.exec(value);
+  if (!match) throw new Error('--select must be node:<id>, edge:<id>, or inbox:<id>');
+  return { kind: match[1] as GraphObjectRef['kind'], id: match[2]! };
 }
 
 export function parseCliArgs(argv: string[], env: Record<string, string | undefined> = process.env): CliOptions {
@@ -90,6 +97,11 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
       index += 1;
       continue;
     }
+    if (option === '--select') {
+      options.selected = graphObjectRef(optionValue(argv, index, option));
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown option: ${option}`);
   }
   return options;
@@ -123,6 +135,8 @@ export function renderHeadlessFrames(options: CliOptions, dimensions: HeadlessDi
           focusCmd={options.focusCmd}
           width={dimensions.width}
           height={dimensions.height}
+          initialSelectedRef={options.selected}
+          inspectSelected={options.selected !== undefined}
         />
       </DependenciesProvider>,
     );
@@ -155,6 +169,7 @@ export async function runCli(
         speed={options.speed}
         focusCmd={options.focusCmd}
         startInReplay={options.replayFile !== undefined}
+        initialSelectedRef={options.selected}
       />
     </DependenciesProvider>,
     { stdout: stdout as NodeJS.WriteStream },

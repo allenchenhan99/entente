@@ -39,6 +39,20 @@ describe('headless CLI', () => {
     expect(() => parseCliArgs(['--wat'], {})).toThrow('Unknown option');
   });
 
+  it.each([
+    ['node:planner', { kind: 'node', id: 'planner' }],
+    ['edge:contract-backend', { kind: 'edge', id: 'contract-backend' }],
+    ['inbox:question-1', { kind: 'inbox', id: 'question-1' }],
+  ] as const)('parses --select %s as a GraphObjectRef', (value, selected) => {
+    expect(parseCliArgs(['--select', value], {}).selected).toEqual(selected);
+  });
+
+  it('rejects malformed --select references', () => {
+    expect(() => parseCliArgs(['--select', 'task:backend'], {})).toThrow('--select');
+    expect(() => parseCliArgs(['--select', 'node:'], {})).toThrow('--select');
+    expect(() => parseCliArgs(['--select', 'node:backend:extra'], {})).toThrow('--select');
+  });
+
   it('renders deterministic repair replay frames as plain text with at least 20 lines', () => {
     const options = parseCliArgs(['--replay', repairFixture, '--frames', '2', '--no-tty'], {});
     const frames = renderHeadlessFrames(options, { width: 100, height: 30 });
