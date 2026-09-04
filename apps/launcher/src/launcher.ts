@@ -36,7 +36,11 @@ interface RawArgs {
 }
 
 export class UsageError extends Error {}
-export class LauncherError extends Error {}
+export class LauncherError extends Error {
+  constructor(message: string, readonly details: string[] = []) {
+    super(message);
+  }
+}
 
 export interface ChildProcessLike {
   pid?: number;
@@ -277,6 +281,15 @@ export async function readToken(
   }
 }
 
+function lastLogLines(fileSystem: Pick<FileSystem, 'readFileSync'>, relayDir: string): string[] {
+  try {
+    const log = fileSystem.readFileSync(path.join(relayDir, 'relayd.log'), 'utf8').trimEnd();
+    return log ? log.split('\n').slice(-20) : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface RunTuiOptions {
   workspaceRoot: string;
   url?: string;
@@ -335,7 +348,14 @@ async function up(options: LauncherOptions, deps: LauncherDependencies): Promise
     if (initialHealth.responded) throw new LauncherError(`port ${options.port} is busy, but the responder is not relayd`);
     if (options.noSpawn) throw new LauncherError('relayd is not running; remove --no-spawn to start it');
     spawnRelayd({ ...options, workspaceRoot: deps.workspaceRoot }, deps);
-    await waitForHealth(url, deps);
+    try {
+      await waitForHealth(url, deps);
+    } catch (error) {
+      throw new LauncherError(
+        error instanceof Error ? error.message : String(error),
+        lastLogLines(deps.fs, options.relayDir),
+      );
+    }
   }
   const token = await readToken(options.relayDir, deps);
   return runTui({ workspaceRoot: deps.workspaceRoot, url, token }, deps);
@@ -365,6 +385,9 @@ export async function runLauncher(
     return await down(options, deps);
   } catch (error) {
     deps.stderr(`entente: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof LauncherError) {
+      for (const line of error.details) deps.stderr(line);
+    }
     return 1;
   }
 }

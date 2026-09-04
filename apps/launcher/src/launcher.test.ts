@@ -216,3 +216,77 @@ describe('up', () => {
     ], expect.objectContaining({ detached: false, stdio: 'inherit' }));
   });
 });
+
+describe('timeout and no-spawn', () => {
+  it('timeout prints only the last 20 relayd log lines and never starts the TUI', async () => {
+    const repo = temporaryDirectory();
+    const workspaceRoot = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    fs.mkdirSync(relayDir);
+    fs.writeFileSync(
+      path.join(relayDir, 'relayd.log'),
+      `${Array.from({ length: 25 }, (_, index) => `log-${index + 1}`).join('\n')}\n`,
+    );
+    const daemon = childProcess(7001);
+    const spawn = vi.fn(() => daemon) as unknown as SpawnFunction;
+    const fetch = vi.fn(async () => { throw new Error('ECONNREFUSED'); });
+    let clock = 0;
+    const sleep = vi.fn(async (milliseconds: number) => { clock += milliseconds; });
+    const stderr = vi.fn();
+
+    const code = await runLauncher([], {
+      cwd: repo,
+      workspaceRoot,
+      fetch,
+      spawn,
+      now: () => clock,
+      sleep,
+      stdout: vi.fn(),
+      stderr,
+    });
+
+    expect(code).toBe(1);
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(spawn.mock.calls[0]?.[2].detached).toBe(true);
+    expect(stderr.mock.calls.map(([line]) => line)).toEqual([
+      'entente: relayd did not become healthy within 15 seconds',
+      ...Array.from({ length: 20 }, (_, index) => `log-${index + 6}`),
+    ]);
+  });
+
+  it('no-spawn exits with a one-line hint when no daemon answers', async () => {
+    const stderr = vi.fn();
+    const spawn = vi.fn() as unknown as SpawnFunction;
+
+    const code = await runLauncher(['--no-spawn'], {
+      cwd: temporaryDirectory(),
+      workspaceRoot: temporaryDirectory(),
+      fetch: vi.fn(async () => { throw new Error('ECONNREFUSED'); }),
+      spawn,
+      stdout: vi.fn(),
+      stderr,
+    });
+
+    expect(code).toBe(1);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(stderr).toHaveBeenCalledExactlyOnceWith('entente: relayd is not running; remove --no-spawn to start it');
+  });
+
+  it('no-spawn refuses a port answered by something other than relayd', async () => {
+    const stderr = vi.fn();
+    const spawn = vi.fn() as unknown as SpawnFunction;
+
+    const code = await runLauncher(['--no-spawn', '--port', '8123'], {
+      cwd: temporaryDirectory(),
+      workspaceRoot: temporaryDirectory(),
+      fetch: vi.fn(async () => new Response('hello', { status: 200 })),
+      spawn,
+      stdout: vi.fn(),
+      stderr,
+    });
+
+    expect(code).toBe(1);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(stderr).toHaveBeenCalledExactlyOnceWith('entente: port 8123 is busy, but the responder is not relayd');
+  });
+});
