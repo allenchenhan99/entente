@@ -81,6 +81,9 @@ export const USAGE = `usage:
   relay pane run <id> "<command>" [--port N]
   relay pane wait-output <id> (--match "…" | --regex "…") [--timeout-ms N] [--source visible|recent] [--port N]
   relay pane readiness <id> [--port N]
+  relay pane kill <id> [--port N]
+  relay pane focus <id> [--port N]
+  relay pane cast <id> [--out file] [--port N]
 
 Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).`;
 
@@ -138,6 +141,9 @@ async function pane(args: string[], io: CliIo): Promise<number> {
     case 'run': return paneRun(rest, io);
     case 'wait-output': return paneWaitOutput(rest, io);
     case 'readiness': return paneReadinessCommand(rest, io);
+    case 'kill': return panePostAction(rest, 'kill', io);
+    case 'focus': return panePostAction(rest, 'focus', io);
+    case 'cast': return paneCast(rest, io);
     default: throw new UsageError(verb ? `unknown pane command: ${verb}` : 'relay pane needs a command');
   }
 }
@@ -282,6 +288,37 @@ async function paneReadinessCommand(args: string[], io: CliIo): Promise<number> 
   const readiness = validateResponse(PaneReadiness, raw, 'PaneReadiness');
   io.stdout(`ready ${readiness.ready} (${readiness.source}, ${readiness.detail ?? '-'})`);
   return readiness.ready ? 0 : 3;
+}
+
+async function panePostAction(args: string[], action: 'kill' | 'focus', io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError(`relay pane ${action} needs a pane id`);
+  const raw = await new Client(io, values.port).post<unknown>(`${ptyRoutes.pane(paneId)}/${action}`, {});
+  validateResponse(OkOutput, raw, '{ ok: true }');
+  io.stdout('ok');
+  return 0;
+}
+
+async function paneCast(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, {
+    out: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane cast needs a pane id');
+  const cast = await new Client(io, values.port).getText(ptyRoutes.cast(paneId));
+  if (values.out === undefined) {
+    io.stdout(cast);
+    return 0;
+  }
+  const output = path.resolve(io.cwd, values.out);
+  try {
+    fs.writeFileSync(output, cast);
+  } catch (err) {
+    throw new CommandError(`cannot write ${output}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return 0;
 }
 
 async function up(args: string[], io: CliIo): Promise<number> {
@@ -669,7 +706,25 @@ class Client {
     });
   }
 
+  async getText(route: string): Promise<string> {
+    return this.requestText(route, { method: 'GET' });
+  }
+
   private async request<T>(route: string, init: RequestInit): Promise<T> {
+    const { text, url } = await this.requestTextWithUrl(route, init);
+    if (!text) return undefined as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new CommandError(`${init.method} ${url}: response is not JSON`);
+    }
+  }
+
+  private async requestText(route: string, init: RequestInit): Promise<string> {
+    return (await this.requestTextWithUrl(route, init)).text;
+  }
+
+  private async requestTextWithUrl(route: string, init: RequestInit): Promise<{ text: string; url: string }> {
     const url = this.base + route;
     let response: Response;
     try {
@@ -679,11 +734,6 @@ class Client {
     }
     const text = await response.text();
     if (!response.ok) throw new CommandError(`${init.method} ${url} → HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ''}`);
-    if (!text) return undefined as T;
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      throw new CommandError(`${init.method} ${url}: response is not JSON`);
-    }
+    return { text, url };
   }
 }

@@ -272,6 +272,54 @@ describe('relay pane readiness', () => {
   });
 });
 
+describe('relay pane kill and focus', () => {
+  it('posts to the documented routes and prints ok', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ ok: true }));
+    const killIo = capture();
+    const focusIo = capture();
+
+    expect(await run(['pane', 'kill', 'relay:7'], { ...killIo, fetch, env: {} })).toBe(0);
+    expect(await run(['pane', 'focus', 'relay:8', '--port', '7500'], { ...focusIo, fetch, env: {} })).toBe(0);
+    expect(requests).toEqual([
+      { url: 'http://127.0.0.1:7420/panes/relay:7/kill', method: 'POST', body: {} },
+      { url: 'http://127.0.0.1:7500/panes/relay:8/focus', method: 'POST', body: {} },
+    ]);
+    expect(killIo.out).toEqual(['ok']);
+    expect(focusIo.out).toEqual(['ok']);
+  });
+
+  it('validates the ok response', async () => {
+    const { fetch } = fakeFetch(() => ({ ok: false }));
+    const io = capture();
+
+    expect(await run(['pane', 'kill', 'relay:7'], { ...io, fetch, env: {} })).toBe(1);
+    expect(io.err.join('\n')).toContain('response does not match { ok: true }');
+  });
+});
+
+describe('relay pane cast', () => {
+  const cast = '{"version": 2, "width": 120, "height": 40}\n[0.1, "o", "hello\\r\\n"]\n';
+
+  it('gets the cast and writes it to stdout', async () => {
+    const { fetch, requests } = fakeFetch(() => new Response(cast, { status: 200 }));
+    const io = capture();
+
+    expect(await run(['pane', 'cast', 'relay:7'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toMatchObject({ url: 'http://127.0.0.1:7420/panes/relay:7/cast', method: 'GET' });
+    expect(io.out).toEqual([cast]);
+  });
+
+  it('writes --out relative to the CLI cwd without printing the cast', async () => {
+    const dir = tmpDir();
+    const { fetch } = fakeFetch(() => new Response(cast, { status: 200 }));
+    const io = capture();
+
+    expect(await run(['pane', 'cast', 'relay:7', '--out', 'session.cast'], { ...io, fetch, env: {}, cwd: dir })).toBe(0);
+    expect(fs.readFileSync(path.join(dir, 'session.cast'), 'utf8')).toBe(cast);
+    expect(io.out).toEqual([]);
+  });
+});
+
 describe('relay inbox', () => {
   it('prints one block per item with the exact command to act', async () => {
     const graph: Graph = {
