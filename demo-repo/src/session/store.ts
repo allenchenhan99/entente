@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 export interface Session {
   id: string;
   userId: string;
@@ -19,7 +17,7 @@ export class SessionStore {
     }
 
     const session: Session = {
-      id: randomUUID(),
+      id: globalThis.crypto.randomUUID(),
       userId,
       expiresAt: this.now() + ttlMs,
     };
