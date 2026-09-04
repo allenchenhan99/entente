@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { parse as parseYaml } from 'yaml';
+import { parseCastFile, playCast, renderCastScreen } from './cast.js';
 import {
   DEFAULT_PORT,
   Event as EventSchema,
@@ -64,6 +65,8 @@ export interface CliIo {
   env: Record<string, string | undefined>;
   cwd: string;
   graph: GraphApi;
+  /** Timer used by cast playback; injectable so tests do not wait. */
+  sleep: (milliseconds: number) => Promise<void>;
 }
 
 export const USAGE = `usage:
@@ -87,6 +90,11 @@ export const USAGE = `usage:
   relay pane kill <id> [--port N]
   relay pane focus <id> [--port N]
   relay pane cast <id> [--out file] [--port N]
+  relay runs list [--port N]
+  relay runs events <run> [--since N] [--port N]
+  relay cast info <file|run:pane> [--port N]
+  relay cast screen <file|run:pane> --t <seconds> [--port N]
+  relay cast play <file> [--speed x]
 
 Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).`;
 
@@ -102,6 +110,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
     env: io.env ?? process.env,
     cwd: io.cwd ?? process.cwd(),
     graph: io.graph ?? defaultGraphApi,
+    sleep: io.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
   };
   const [command, ...rest] = argv;
   try {
@@ -117,6 +126,8 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
       case 'explain': return await explain(rest, full);
       case 'story': return await story(rest, full);
       case 'pane': return await pane(rest, full);
+      case 'runs': return await runs(rest, full);
+      case 'cast': return await cast(rest, full);
       case '-h': case '--help': case 'help':
         full.stdout(USAGE);
         return 0;
@@ -134,6 +145,104 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
 }
 
 // ---------------------------------------------------------------- commands
+
+interface RunInfo {
+  run_id: string;
+  started_at: string;
+  events: number;
+  panes: string[];
+}
+
+interface RemoteCastInfo {
+  pane_id: string;
+  header: { version: 2; width: number; height: number; timestamp?: number; title?: string };
+  duration: number;
+  events: number;
+}
+
+async function runs(args: string[], io: CliIo): Promise<number> {
+  const [verb, ...rest] = args;
+  switch (verb) {
+    case 'list': return runsList(rest, io);
+    case 'events': return runsEvents(rest, io);
+    default: throw new UsageError(verb ? `unknown runs command: ${verb}` : 'relay runs needs a command');
+  }
+}
+
+async function runsList(args: string[], io: CliIo): Promise<number> {
+  const { values } = parseKnown(args, { port: { type: 'string' } });
+  const list = parseRunList(await new Client(io, values.port).get<unknown>('/runs'));
+  const rows = list.map((run) => [run.run_id, run.started_at, String(run.events), run.panes.join(',') || '-']);
+  for (const line of table(['run_id', 'started_at', 'events', 'panes'], rows)) io.stdout(line);
+  return 0;
+}
+
+async function runsEvents(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { since: { type: 'string' }, port: { type: 'string' } });
+  const runId = positionals[0];
+  if (!runId) throw new UsageError('relay runs events needs a run id');
+  const since = values.since === undefined ? undefined : nonNegativeInteger(values.since, '--since');
+  const suffix = since === undefined ? '' : `?since=${since}`;
+  const raw = await new Client(io, values.port).get<unknown>(`/runs/${routeComponent(runId, 'run id')}/events${suffix}`);
+  if (!Array.isArray(raw)) throw new CommandError('response does not match Event[]');
+  raw.forEach((value, index) => {
+    const parsed = EventSchema.safeParse(value);
+    if (!parsed.success) throw new CommandError(`response does not match Event[] at index ${index}: ${parsed.error.toString()}`);
+    io.stdout(JSON.stringify(parsed.data));
+  });
+  return 0;
+}
+
+async function cast(args: string[], io: CliIo): Promise<number> {
+  const [verb, ...rest] = args;
+  switch (verb) {
+    case 'info': return castInfoCommand(rest, io);
+    case 'screen': return castScreen(rest, io);
+    case 'play': return castPlay(rest, io);
+    default: throw new UsageError(verb ? `unknown cast command: ${verb}` : 'relay cast needs a command');
+  }
+}
+
+async function castInfoCommand(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const source = positionals[0];
+  if (!source) throw new UsageError('relay cast info needs a file or run:pane');
+  const target = castTarget(source, io.cwd);
+  const info = target.kind === 'file'
+    ? (() => {
+        const parsed = parseCastFile(target.file);
+        return { header: parsed.header, duration: parsed.duration, events: parsed.events.length };
+      })()
+    : await remoteCastInfo(target, values.port, io);
+  printCastInfo(info, io);
+  return 0;
+}
+
+async function castScreen(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { t: { type: 'string' }, port: { type: 'string' } });
+  const source = positionals[0];
+  if (!source) throw new UsageError('relay cast screen needs a file or run:pane');
+  if (values.t === undefined) throw new UsageError('relay cast screen needs --t <seconds>');
+  const time = nonNegativeNumber(values.t, '--t');
+  const target = castTarget(source, io.cwd);
+  const lines = target.kind === 'file'
+    ? await renderCastScreen(parseCastFile(target.file), time)
+    : validateResponse(ScreenSnapshot, await new Client(io, values.port).get<unknown>(
+        `/runs/${routeComponent(target.run, 'run id')}/casts/${routeComponent(target.pane, 'pane id')}/screen?t=${time}`,
+      ), 'ScreenSnapshot').lines;
+  for (const line of lines) io.stdout(line);
+  return 0;
+}
+
+async function castPlay(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { speed: { type: 'string' } });
+  const source = positionals[0];
+  if (!source) throw new UsageError('relay cast play needs a file');
+  const speed = values.speed === undefined ? 1 : positiveNumber(values.speed, '--speed');
+  const file = path.resolve(io.cwd, source);
+  await playCast(parseCastFile(file), speed, io.write, io.sleep);
+  return 0;
+}
 
 async function pane(args: string[], io: CliIo): Promise<number> {
   const [verb, ...rest] = args;
@@ -532,6 +641,95 @@ export function formatTimestamp(ts: string): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+type CastTarget = { kind: 'file'; file: string } | { kind: 'remote'; run: string; pane: string };
+
+function castTarget(source: string, cwd: string): CastTarget {
+  const file = path.resolve(cwd, source);
+  if (fs.existsSync(file) || !source.includes(':')) return { kind: 'file', file };
+  const separator = source.indexOf(':');
+  const run = source.slice(0, separator);
+  const pane = source.slice(separator + 1);
+  if (!run || !pane) throw new UsageError(`cast reference must look like run:pane, got ${source}`);
+  return { kind: 'remote', run, pane };
+}
+
+function routeComponent(value: string, label: string): string {
+  if (value === '.' || value === '..' || value.includes('/') || value.includes('\\')) {
+    throw new UsageError(`${label} must be one path component, got ${value}`);
+  }
+  return value;
+}
+
+function parseRunList(value: unknown): RunInfo[] {
+  if (!Array.isArray(value)) throw new CommandError('response does not match RunInfo[]');
+  return value.map((item, index) => {
+    if (typeof item !== 'object' || item === null) throw new CommandError(`response does not match RunInfo[] at index ${index}`);
+    const run = item as Record<string, unknown>;
+    if (typeof run.run_id !== 'string' || typeof run.started_at !== 'string'
+      || !Number.isInteger(run.events) || Number(run.events) < 0
+      || !Array.isArray(run.panes) || !run.panes.every((pane) => typeof pane === 'string')) {
+      throw new CommandError(`response does not match RunInfo[] at index ${index}`);
+    }
+    return { run_id: run.run_id, started_at: run.started_at, events: Number(run.events), panes: run.panes };
+  });
+}
+
+function parseRemoteCastInfo(value: unknown, index: number): RemoteCastInfo {
+  if (typeof value !== 'object' || value === null) throw new CommandError(`response does not match CastInfo[] at index ${index}`);
+  const info = value as Record<string, unknown>;
+  const header = info.header as Record<string, unknown> | undefined;
+  if (typeof info.pane_id !== 'string' || typeof header !== 'object' || header === null
+    || header.version !== 2 || !Number.isInteger(header.width) || Number(header.width) <= 0
+    || !Number.isInteger(header.height) || Number(header.height) <= 0
+    || typeof info.duration !== 'number' || !Number.isFinite(info.duration) || info.duration < 0
+    || !Number.isInteger(info.events) || Number(info.events) < 0
+    || (header.timestamp !== undefined && typeof header.timestamp !== 'number')
+    || (header.title !== undefined && typeof header.title !== 'string')) {
+    throw new CommandError(`response does not match CastInfo[] at index ${index}`);
+  }
+  return {
+    pane_id: info.pane_id,
+    header: {
+      version: 2,
+      width: Number(header.width),
+      height: Number(header.height),
+      ...(typeof header.timestamp === 'number' ? { timestamp: header.timestamp } : {}),
+      ...(typeof header.title === 'string' ? { title: header.title } : {}),
+    },
+    duration: info.duration,
+    events: Number(info.events),
+  };
+}
+
+async function remoteCastInfo(
+  target: Extract<CastTarget, { kind: 'remote' }>,
+  port: string | undefined,
+  io: CliIo,
+): Promise<RemoteCastInfo> {
+  const raw = await new Client(io, port).get<unknown>(`/runs/${routeComponent(target.run, 'run id')}/casts`);
+  if (!Array.isArray(raw)) throw new CommandError('response does not match CastInfo[]');
+  const infos = raw.map(parseRemoteCastInfo);
+  const found = infos.find((info) => info.pane_id === target.pane);
+  if (!found) throw new CommandError(`cast for ${target.pane} not found in run ${target.run}`);
+  return found;
+}
+
+function printCastInfo(info: Omit<RemoteCastInfo, 'pane_id'>, io: CliIo): void {
+  io.stdout(`version: ${info.header.version}`);
+  io.stdout(`width: ${info.header.width}`);
+  io.stdout(`height: ${info.header.height}`);
+  io.stdout(`timestamp: ${info.header.timestamp ?? '-'}`);
+  io.stdout(`title: ${info.header.title ?? '-'}`);
+  io.stdout(`duration: ${info.duration}`);
+  io.stdout(`events: ${info.events}`);
+}
+
+function table(headings: string[], rows: string[][]): string[] {
+  const widths = headings.map((heading, index) => Math.max(heading.length, ...rows.map((row) => row[index]!.length)));
+  const render = (row: string[]) => row.map((cell, index) => cell.padEnd(widths[index]!)).join('  ').trimEnd();
+  return [render(headings), ...rows.map(render)];
+}
+
 export function baseUrl(env: Record<string, string | undefined>, port?: string): string {
   let url = env.RELAY_URL?.trim() || `http://127.0.0.1:${DEFAULT_PORT}`;
   if (port !== undefined) {
@@ -675,6 +873,24 @@ function positiveInteger(value: string, flag: string, max = Number.MAX_SAFE_INTE
   if (!Number.isInteger(parsed) || parsed <= 0 || parsed > max) {
     throw new UsageError(`${flag} must be an integer from 1 to ${max}, got ${value}`);
   }
+  return parsed;
+}
+
+function nonNegativeInteger(value: string, flag: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new UsageError(`${flag} must be a non-negative integer, got ${value}`);
+  return parsed;
+}
+
+function nonNegativeNumber(value: string, flag: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) throw new UsageError(`${flag} must be a non-negative number, got ${value}`);
+  return parsed;
+}
+
+function positiveNumber(value: string, flag: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new UsageError(`${flag} must be a positive number, got ${value}`);
   return parsed;
 }
 

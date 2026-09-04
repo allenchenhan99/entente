@@ -8,5 +8,7 @@ export type { ScreenQuery } from './screen.js';
 export { evaluateReadiness, QUIET_MS } from './readiness.js';
 export { keyToBytes, keysToBytes, UnknownKeyError } from './keys.js';
 export { CastRecorder } from './recorder.js';
+export { screenAt, castDuration, castInfo } from './replay.js';
+export type { CastHeader, CastInfo, ScreenAtOptions } from './replay.js';
 export { createPtyWebSocketServer } from './ws.js';
 export type { PtyUpgradeHandler } from './ws.js';

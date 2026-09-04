@@ -12,6 +12,7 @@ import type { Orchestrator } from '../orchestrator/orchestrator.js';
 import { RelayError } from '../orchestrator/errors.js';
 import { RELAYD_VERSION } from '../config.js';
 import { mountMcp } from '../mcp/server.js';
+import { mountRuns } from './runs.js';
 
 export interface AppOptions {
   orchestrator: Orchestrator;
@@ -47,6 +48,7 @@ export function createApp(opts: AppOptions): Hono {
   const { orchestrator, store } = opts;
   const pingMs = opts.pingIntervalMs ?? 15_000;
   const app = new Hono();
+  mountRuns(app, { store });
 
   app.onError((err, c) => {
     if (err instanceof RelayError) return c.json({ error: err.message }, err.status as 400);
