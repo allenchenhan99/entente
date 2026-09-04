@@ -15,7 +15,14 @@ function sameStringsAsSet(left: string[], right: string[]): boolean {
 }
 
 function isStagnant(task: TaskView, record: EvidenceRecord, currentFailures: string[], limit: number): boolean {
-  const attempts = [...task.attempts, record];
+  const attempts = [
+    ...task.attempts.filter(
+      (attempt) => attempt.task_id !== record.task_id
+        || attempt.contract_version !== record.contract_version
+        || attempt.attempt !== record.attempt,
+    ),
+    record,
+  ];
   if (attempts.length < limit) return false;
   const recent = attempts.slice(-limit);
   return recent.every(

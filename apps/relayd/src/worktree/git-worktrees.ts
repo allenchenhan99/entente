@@ -15,6 +15,10 @@ function lines(text: string): string[] {
   return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 
+function nulSeparated(text: string): string[] {
+  return text.length === 0 ? [] : text.split('\0').filter((value) => value.length > 0);
+}
+
 function withTrailingNewline(text: string): string {
   return text.length === 0 || text.endsWith('\n') ? text : `${text}\n`;
 }
@@ -31,6 +35,32 @@ export class GitWorktreeManager implements WorktreeManager {
     const result = await this.exec(argv, { cwd });
     if (!allowedExitCodes.includes(result.exitCode)) throw new Error(`worktree manager: ${describeFailure(argv, result)}`);
     return result;
+  }
+
+  private async ignoreGitFailure(args: string[], cwd: string): Promise<void> {
+    try {
+      await this.exec(['git', ...args], { cwd });
+    } catch {
+      // Preserve the original create error; cleanup is best-effort.
+    }
+  }
+
+  private basePath(repoRoot: string, taskId: string): string {
+    return path.join(repoRoot, '.relay', 'wt', '.bases', encodeURIComponent(taskId));
+  }
+
+  private readBase(repoRoot: string, taskId: string): string {
+    const basePath = this.basePath(repoRoot, taskId);
+    if (!fs.existsSync(basePath)) throw new Error(`worktree manager: existing worktree for ${taskId} has no recorded base`);
+    const base = fs.readFileSync(basePath, 'utf8').trim();
+    if (!/^[0-9a-f]{40}$/.test(base)) throw new Error(`worktree manager: invalid recorded base for ${taskId}`);
+    return base;
+  }
+
+  private writeBase(repoRoot: string, taskId: string, base: string): void {
+    const basePath = this.basePath(repoRoot, taskId);
+    fs.mkdirSync(path.dirname(basePath), { recursive: true });
+    fs.writeFileSync(basePath, `${base}\n`, 'utf8');
   }
 
   private async ensureRelayIgnored(repoRoot: string): Promise<void> {
@@ -50,30 +80,48 @@ export class GitWorktreeManager implements WorktreeManager {
     const branch = `relay/${task.id}`;
 
     if (fs.existsSync(worktreePath)) {
-      const head = await this.git(['rev-parse', 'HEAD'], worktreePath);
-      return { path: worktreePath, branch, base: head.stdout.trim() };
+      const currentBranch = (await this.git(['branch', '--show-current'], worktreePath)).stdout.trim();
+      if (currentBranch !== branch) {
+        throw new Error(`worktree manager: ${worktreePath} is on ${currentBranch || 'detached HEAD'}, expected ${branch}`);
+      }
+      return { path: worktreePath, branch, base: this.readBase(repoRoot, task.id) };
     }
 
     fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
-    await this.git(['worktree', 'add', worktreePath, '-b', branch, 'HEAD'], repoRoot);
-    for (const dependencyBranch of dependencyBranches) {
-      await this.git(['merge', '--no-edit', dependencyBranch], worktreePath);
+    let worktreeAdded = false;
+    try {
+      await this.git(['worktree', 'add', worktreePath, '-b', branch, 'HEAD'], repoRoot);
+      worktreeAdded = true;
+      for (const dependencyBranch of dependencyBranches) {
+        await this.git(['merge', '--no-edit', dependencyBranch], worktreePath);
+      }
+      const head = await this.git(['rev-parse', 'HEAD'], worktreePath);
+      const base = head.stdout.trim();
+      this.writeBase(repoRoot, task.id, base);
+      return { path: worktreePath, branch, base };
+    } catch (error) {
+      if (worktreeAdded) {
+        await this.ignoreGitFailure(['merge', '--abort'], worktreePath);
+        await this.ignoreGitFailure(['worktree', 'remove', '--force', worktreePath], repoRoot);
+        await this.ignoreGitFailure(['branch', '-D', branch], repoRoot);
+      }
+      fs.rmSync(this.basePath(repoRoot, task.id), { force: true });
+      throw error;
     }
-    const head = await this.git(['rev-parse', 'HEAD'], worktreePath);
-    return { path: worktreePath, branch, base: head.stdout.trim() };
   }
 
   async remove(repoRoot: string, taskId: string): Promise<void> {
     const worktreePath = path.join(repoRoot, '.relay', 'wt', taskId);
     await this.git(['worktree', 'remove', '--force', worktreePath], repoRoot);
     await this.git(['branch', '-D', `relay/${taskId}`], repoRoot);
+    fs.rmSync(this.basePath(repoRoot, taskId), { force: true });
   }
 
   async diff(worktreePath: string, base: string, options: DiffOptions = {}): Promise<{ patchPath: string; changedFiles: string[] }> {
-    const trackedNames = await this.git(['diff', '--name-only', base], worktreePath);
-    const untrackedNames = await this.git(['ls-files', '--others', '--exclude-standard'], worktreePath);
-    const untracked = lines(untrackedNames.stdout);
-    const changedFiles = [...new Set([...lines(trackedNames.stdout), ...untracked])].sort();
+    const trackedNames = await this.git(['diff', '--name-only', '-z', base], worktreePath);
+    const untrackedNames = await this.git(['ls-files', '--others', '--exclude-standard', '-z'], worktreePath);
+    const untracked = nulSeparated(untrackedNames.stdout);
+    const changedFiles = [...new Set([...nulSeparated(trackedNames.stdout), ...untracked])].sort();
     const trackedPatch = await this.git(['diff', base], worktreePath);
     const patchParts = [withTrailingNewline(trackedPatch.stdout)];
 
@@ -106,9 +154,9 @@ export class GitWorktreeManager implements WorktreeManager {
     for (const mergeBranch of branches) {
       const merge = await this.git(['merge', '--no-edit', mergeBranch], worktreePath, [0, 1]);
       if (merge.exitCode === 0) continue;
-      const unresolved = await this.git(['diff', '--name-only', '--diff-filter=U'], worktreePath);
+      const unresolved = await this.git(['diff', '--name-only', '--diff-filter=U', '-z'], worktreePath);
       await this.git(['merge', '--abort'], worktreePath);
-      return { branch, conflict: { branch: mergeBranch, files: lines(unresolved.stdout).sort() } };
+      return { branch, conflict: { branch: mergeBranch, files: nulSeparated(unresolved.stdout).sort() } };
     }
 
     return { branch };

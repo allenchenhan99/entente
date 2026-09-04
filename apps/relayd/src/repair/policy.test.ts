@@ -137,6 +137,17 @@ describe('repair policy', () => {
     expect(decision).toEqual({ kind: 'escalate', reason: 'stagnation on AC-1', failed_criteria: ['AC-1'] });
   });
 
+  it('does not count the current record twice when it is already in task attempts', () => {
+    const current = record(
+      { 'AC-1': { status: 'failed', observed: 'first failure' }, 'AC-2': { status: 'passed' } },
+      { attempt: 1 },
+    );
+
+    const decision = policy.decide(task({ attempts: [current] }), current);
+
+    expect(decision.kind).toBe('repair');
+  });
+
   it('returns pending human only when no criterion failed', () => {
     const pending = policy.decide(task(), record({
       'AC-1': { status: 'passed' },

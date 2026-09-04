@@ -63,9 +63,14 @@ describe('git worktree manager', () => {
     const manager = createWorktreeManager();
 
     const first = await manager.create(repo, task(), ['relay/dependency']);
-    const second = await manager.create(repo, task(), ['relay/dependency']);
+    write(first.path, 'task-change.txt', 'agent work\n');
+    git(first.path, ['add', 'task-change.txt']);
+    git(first.path, ['commit', '-m', 'agent work']);
+    const taskHead = git(first.path, ['rev-parse', 'HEAD']);
+    const second = await createWorktreeManager().create(repo, task(), ['relay/dependency']);
 
     expect(second).toEqual(first);
+    expect(taskHead).not.toBe(first.base);
     expect(first.path).toBe(path.join(repo, '.relay', 'wt', 't-worktree'));
     expect(first.branch).toBe('relay/t-worktree');
     expect(first.base).toMatch(/^[0-9a-f]{40}$/);
@@ -84,13 +89,14 @@ describe('git worktree manager', () => {
     const worktree = await manager.create(repo, task('t-diff'), []);
     write(worktree.path, 'tracked.txt', 'modified\n');
     write(worktree.path, 'untracked.txt', 'brand new content\nsecond line\n');
+    write(worktree.path, '驗證.txt', 'unicode content\n');
     fs.unlinkSync(path.join(worktree.path, 'deleted.txt'));
     const patchPath = path.join(repo, '.relay', 'evidence', 't-diff', 'attempt-1.patch');
 
     const result = await manager.diff(worktree.path, worktree.base, { patchPath });
 
     expect(result.patchPath).toBe(patchPath);
-    expect(result.changedFiles).toEqual(['deleted.txt', 'tracked.txt', 'untracked.txt']);
+    expect(result.changedFiles).toEqual(['deleted.txt', 'tracked.txt', 'untracked.txt', '驗證.txt']);
     const patch = fs.readFileSync(patchPath, 'utf8');
     expect(patch).toContain('-original');
     expect(patch).toContain('+modified');
@@ -98,6 +104,23 @@ describe('git worktree manager', () => {
     expect(patch).toContain('--- /dev/null');
     expect(patch).toContain('+brand new content');
     expect(patch).toContain('+second line');
+    expect(patch).toContain('+unicode content');
+  });
+
+  it('worktree cleans a failed dependency merge so a retry cannot report a conflicted checkout as ready', async () => {
+    const repo = createRepo();
+    createBranch(repo, 'relay/conflicting-dependency', { 'shared.txt': 'dependency version\n' });
+    write(repo, 'shared.txt', 'main version\n');
+    git(repo, ['add', 'shared.txt']);
+    git(repo, ['commit', '-m', 'main conflict']);
+    const manager = createWorktreeManager();
+    const worktreePath = path.join(repo, '.relay', 'wt', 't-conflicted-create');
+
+    await expect(manager.create(repo, task('t-conflicted-create'), ['relay/conflicting-dependency'])).rejects.toThrow(/merge/);
+
+    expect(fs.existsSync(worktreePath)).toBe(false);
+    expect(git(repo, ['branch', '--list', 'relay/t-conflicted-create'])).toBe('');
+    await expect(manager.create(repo, task('t-conflicted-create'), ['relay/conflicting-dependency'])).rejects.toThrow(/merge/);
   });
 
   it('integrate merges branches in order and aborts a conflicting merge into a clean worktree', async () => {
