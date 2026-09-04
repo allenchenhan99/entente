@@ -22,8 +22,9 @@ function fakeFetch(respond: (url: string, init?: RequestInit) => unknown) {
 
 function capture() {
   const out: string[] = [];
+  const raw: string[] = [];
   const err: string[] = [];
-  return { out, err, stdout: (l: string) => out.push(l), stderr: (l: string) => err.push(l) };
+  return { out, raw, err, stdout: (l: string) => out.push(l), write: (text: string) => raw.push(text), stderr: (l: string) => err.push(l) };
 }
 
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
@@ -40,6 +41,294 @@ function fakeGraphApi(overrides: Partial<GraphApi> = {}): GraphApi {
     ...overrides,
   };
 }
+
+const paneInfo = (overrides: Record<string, unknown> = {}) => ({
+  pane_id: 'relay:7',
+  task_id: 't-backend',
+  role: 'backend',
+  runtime: 'codex',
+  cwd: '/work/backend',
+  pid: 4242,
+  alive: true,
+  cols: 120,
+  rows: 40,
+  cast_path: '/run/casts/relay-7.cast',
+  started_at: '2026-09-04T08:00:00.000Z',
+  exited_at: '2026-09-04T09:00:00.000Z',
+  exit_code: 0,
+  ...overrides,
+});
+
+describe('relay pane list', () => {
+  it('renders a table with two validated panes and marks the focused pane', async () => {
+    const panes = [
+      paneInfo(),
+      paneInfo({
+        pane_id: 'relay:8',
+        task_id: undefined,
+        role: 'planner',
+        runtime: 'claude-code',
+        cwd: '/work',
+        pid: 4343,
+        alive: false,
+        cols: 80,
+        rows: 24,
+        cast_path: undefined,
+        exited_at: undefined,
+        exit_code: undefined,
+      }),
+    ];
+    const { fetch, requests } = fakeFetch(() => ({ panes, focused_pane: 'relay:7' }));
+    const io = capture();
+
+    expect(await run(['pane', 'list', '--port', '7500'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests).toEqual([{ url: 'http://127.0.0.1:7500/panes', method: 'GET', body: undefined }]);
+    expect(io.out).toEqual([
+      '  pane_id  role     task_id    alive  cols×rows  cwd',
+      '* relay:7  backend  t-backend  true   120×40     /work/backend',
+      '  relay:8  planner  -          false  80×24      /work',
+    ]);
+  });
+
+  it('accepts the frozen PaneInfo[] response when no focus metadata is available', async () => {
+    const { fetch } = fakeFetch(() => [paneInfo()]);
+    const io = capture();
+
+    expect(await run(['pane', 'list'], { ...io, fetch, env: {} })).toBe(0);
+    expect(io.out[1]).toMatch(/^  relay:7/);
+  });
+
+  it('fails clearly when a pane does not match PaneInfo', async () => {
+    const { fetch } = fakeFetch(() => [paneInfo({ cols: 0 })]);
+    const io = capture();
+
+    expect(await run(['pane', 'list'], { ...io, fetch, env: {} })).toBe(1);
+    expect(io.err.join('\n')).toContain('response does not match PaneInfo[]');
+    expect(io.err.join('\n')).toContain('cols');
+  });
+});
+
+describe('relay pane get', () => {
+  it('prints every PaneInfo field as key/value lines', async () => {
+    const { fetch, requests } = fakeFetch(() => paneInfo());
+    const io = capture();
+
+    expect(await run(['pane', 'get', 'relay:7'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toMatchObject({ url: 'http://127.0.0.1:7420/panes/relay:7', method: 'GET' });
+    expect(io.out).toEqual([
+      'pane_id: relay:7',
+      'task_id: t-backend',
+      'role: backend',
+      'runtime: codex',
+      'cwd: /work/backend',
+      'pid: 4242',
+      'alive: true',
+      'cols: 120',
+      'rows: 40',
+      'cast_path: /run/casts/relay-7.cast',
+      'started_at: 2026-09-04T08:00:00.000Z',
+      'exited_at: 2026-09-04T09:00:00.000Z',
+      'exit_code: 0',
+    ]);
+  });
+});
+
+describe('relay pane read', () => {
+  it('prints snapshot lines verbatim and forwards source and lines', async () => {
+    const snapshot = {
+      pane_id: 'relay:7',
+      cols: 120,
+      rows: 40,
+      lines: ['first line  ', '', 'prompt> npm test'],
+      cursor: { x: 16, y: 2 },
+      alternate: false,
+      scrollback_lines: 300,
+    };
+    const { fetch, requests } = fakeFetch(() => snapshot);
+    const io = capture();
+
+    expect(await run(['pane', 'read', 'relay:7', '--source', 'recent', '--lines', '50'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toMatchObject({
+      url: 'http://127.0.0.1:7420/panes/relay:7/screen?source=recent&lines=50',
+      method: 'GET',
+    });
+    expect(io.out).toEqual(snapshot.lines);
+  });
+
+  it('fails clearly when the response does not match ScreenSnapshot', async () => {
+    const { fetch } = fakeFetch(() => ({ pane_id: 'relay:7', lines: ['incomplete'] }));
+    const io = capture();
+
+    expect(await run(['pane', 'read', 'relay:7'], { ...io, fetch, env: {} })).toBe(1);
+    expect(io.err.join('\n')).toContain('response does not match ScreenSnapshot');
+  });
+});
+
+describe('relay pane input', () => {
+  it('posts text and comma-separated logical keys in PaneInputBody', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ ok: true }));
+    const io = capture();
+
+    expect(await run(['pane', 'input', 'relay:7', '--text', 'continue', '--keys', 'enter,ctrl+c'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests).toEqual([{
+      url: 'http://127.0.0.1:7420/panes/relay:7/input',
+      method: 'POST',
+      body: { text: 'continue', keys: ['enter', 'ctrl+c'] },
+    }]);
+    expect(io.out).toEqual(['ok']);
+  });
+
+  it('rejects a call with neither text nor keys without fetching', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ ok: true }));
+    const io = capture();
+
+    expect(await run(['pane', 'input', 'relay:7'], { ...io, fetch, env: {} })).toBe(2);
+    expect(requests).toHaveLength(0);
+    expect(io.err.join('\n')).toContain('at least one of --text or --keys');
+  });
+});
+
+describe('relay pane run', () => {
+  it('types the command followed by enter', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ ok: true }));
+    const io = capture();
+
+    expect(await run(['pane', 'run', 'relay:7', 'npx vitest run'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toEqual({
+      url: 'http://127.0.0.1:7420/panes/relay:7/input',
+      method: 'POST',
+      body: { text: 'npx vitest run', keys: ['enter'] },
+    });
+    expect(io.out).toEqual(['ok']);
+  });
+});
+
+describe('relay pane wait-output', () => {
+  it('prints a matched line and exits 0', async () => {
+    const { fetch, requests } = fakeFetch(() => ({
+      status: 'matched',
+      line: 'server ready on 7420',
+      at: '2026-09-04T08:01:00.000Z',
+    }));
+    const io = capture();
+
+    expect(await run([
+      'pane', 'wait-output', 'relay:7', '--match', 'ready', '--timeout-ms', '250', '--source', 'visible',
+    ], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toEqual({
+      url: 'http://127.0.0.1:7420/panes/relay:7/wait-output',
+      method: 'POST',
+      body: { match: 'ready', timeout_ms: 250, source: 'visible' },
+    });
+    expect(io.out).toEqual(['matched: server ready on 7420']);
+  });
+
+  it('maps timeout and exited results to exit codes 3 and 4', async () => {
+    const responses = [{ status: 'timeout' }, { status: 'exited', code: 137 }];
+    const { fetch, requests } = fakeFetch(() => responses.shift());
+    const timeoutIo = capture();
+    const exitedIo = capture();
+
+    expect(await run(['pane', 'wait-output', 'relay:7', '--regex', 'ready\\s+now'], { ...timeoutIo, fetch, env: {} })).toBe(3);
+    expect(await run(['pane', 'wait-output', 'relay:7', '--match', 'ready'], { ...exitedIo, fetch, env: {} })).toBe(4);
+    expect(requests.map((request) => request.body)).toEqual([
+      { regex: 'ready\\s+now', timeout_ms: 60_000, source: 'recent' },
+      { match: 'ready', timeout_ms: 60_000, source: 'recent' },
+    ]);
+    expect(timeoutIo.out).toEqual(['timeout']);
+    expect(exitedIo.out).toEqual(['exited 137']);
+  });
+
+  it('requires exactly one of match and regex before fetching', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ status: 'timeout' }));
+    const neither = capture();
+    const both = capture();
+
+    expect(await run(['pane', 'wait-output', 'relay:7'], { ...neither, fetch, env: {} })).toBe(2);
+    expect(await run(['pane', 'wait-output', 'relay:7', '--match', 'a', '--regex', 'b'], { ...both, fetch, env: {} })).toBe(2);
+    expect(requests).toHaveLength(0);
+    expect(neither.err.join('\n')).toContain('exactly one of --match or --regex');
+    expect(both.err.join('\n')).toContain('exactly one of --match or --regex');
+  });
+
+  it('fails clearly when the response does not match WaitOutputResult', async () => {
+    const { fetch } = fakeFetch(() => ({ status: 'matched', line: 'ready' }));
+    const io = capture();
+
+    expect(await run(['pane', 'wait-output', 'relay:7', '--match', 'ready'], { ...io, fetch, env: {} })).toBe(1);
+    expect(io.err.join('\n')).toContain('response does not match WaitOutputResult');
+  });
+});
+
+describe('relay pane readiness', () => {
+  it('prints readiness and exits 0 when ready or 3 otherwise', async () => {
+    const responses = [
+      { pane_id: 'relay:7', ready: true, source: 'declared', observed_at: '2026-09-04T08:00:00.000Z', detail: 'heartbeat fresh' },
+      { pane_id: 'relay:8', ready: false, source: 'screen', observed_at: '2026-09-04T08:00:01.000Z', detail: 'agent is working' },
+    ];
+    const { fetch, requests } = fakeFetch(() => responses.shift());
+    const readyIo = capture();
+    const busyIo = capture();
+
+    expect(await run(['pane', 'readiness', 'relay:7'], { ...readyIo, fetch, env: {} })).toBe(0);
+    expect(await run(['pane', 'readiness', 'relay:8', '--port', '7500'], { ...busyIo, fetch, env: {} })).toBe(3);
+    expect(requests.map((request) => request.url)).toEqual([
+      'http://127.0.0.1:7420/panes/relay:7/readiness',
+      'http://127.0.0.1:7500/panes/relay:8/readiness',
+    ]);
+    expect(readyIo.out).toEqual(['ready true (declared, heartbeat fresh)']);
+    expect(busyIo.out).toEqual(['ready false (screen, agent is working)']);
+  });
+});
+
+describe('relay pane kill and focus', () => {
+  it('posts to the documented routes and prints ok', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ ok: true }));
+    const killIo = capture();
+    const focusIo = capture();
+
+    expect(await run(['pane', 'kill', 'relay:7'], { ...killIo, fetch, env: {} })).toBe(0);
+    expect(await run(['pane', 'focus', 'relay:8', '--port', '7500'], { ...focusIo, fetch, env: {} })).toBe(0);
+    expect(requests).toEqual([
+      { url: 'http://127.0.0.1:7420/panes/relay:7/kill', method: 'POST', body: {} },
+      { url: 'http://127.0.0.1:7500/panes/relay:8/focus', method: 'POST', body: {} },
+    ]);
+    expect(killIo.out).toEqual(['ok']);
+    expect(focusIo.out).toEqual(['ok']);
+  });
+
+  it('validates the ok response', async () => {
+    const { fetch } = fakeFetch(() => ({ ok: false }));
+    const io = capture();
+
+    expect(await run(['pane', 'kill', 'relay:7'], { ...io, fetch, env: {} })).toBe(1);
+    expect(io.err.join('\n')).toContain('response does not match { ok: true }');
+  });
+});
+
+describe('relay pane cast', () => {
+  const cast = '{"version": 2, "width": 120, "height": 40}\n[0.1, "o", "hello\\r\\n"]\n';
+
+  it('gets the cast and writes it to stdout', async () => {
+    const { fetch, requests } = fakeFetch(() => new Response(cast, { status: 200 }));
+    const io = capture();
+
+    expect(await run(['pane', 'cast', 'relay:7'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toMatchObject({ url: 'http://127.0.0.1:7420/panes/relay:7/cast', method: 'GET' });
+    expect(io.out).toEqual([]);
+    expect(io.raw).toEqual([cast]);
+  });
+
+  it('writes --out relative to the CLI cwd without printing the cast', async () => {
+    const dir = tmpDir();
+    const { fetch } = fakeFetch(() => new Response(cast, { status: 200 }));
+    const io = capture();
+
+    expect(await run(['pane', 'cast', 'relay:7', '--out', 'session.cast'], { ...io, fetch, env: {}, cwd: dir })).toBe(0);
+    expect(fs.readFileSync(path.join(dir, 'session.cast'), 'utf8')).toBe(cast);
+    expect(io.out).toEqual([]);
+  });
+});
 
 describe('relay inbox', () => {
   it('prints one block per item with the exact command to act', async () => {

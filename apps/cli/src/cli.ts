@@ -22,6 +22,14 @@ import {
   DEFAULT_PORT,
   Event as EventSchema,
   LoadPlanBody,
+  OkOutput,
+  PaneId,
+  PaneInputBody,
+  PaneInfo,
+  PaneReadiness,
+  ScreenSnapshot,
+  WaitOutputBody,
+  WaitOutputResult,
   actionsFor,
   buildGraph,
   describe,
@@ -29,6 +37,7 @@ import {
   replay as replayEvents,
   routes,
   storyFor,
+  ptyRoutes,
 } from '@relay/protocol';
 import type {
   CancelBody,
@@ -39,6 +48,7 @@ import type {
   GraphApi,
   GraphObjectRef,
   InboxItem,
+  PaneInfo as PaneInfoType,
   ReviewBody,
   State,
 } from '@relay/protocol';
@@ -48,6 +58,8 @@ const defaultGraphApi: GraphApi = { buildGraph, actionsFor, narrate, storyFor, d
 export interface CliIo {
   fetch: typeof globalThis.fetch;
   stdout: (line: string) => void;
+  /** Writes exact stdout bytes without appending a line ending. */
+  write: (text: string) => void;
   stderr: (line: string) => void;
   env: Record<string, string | undefined>;
   cwd: string;
@@ -65,6 +77,16 @@ export const USAGE = `usage:
   relay inbox [--replay file.jsonl] [--port N]
   relay explain <object> [--replay file.jsonl] [--port N]
   relay story [--replay file.jsonl] [--task <task-id>] [--port N]
+  relay pane list [--port N]
+  relay pane get <id> [--port N]
+  relay pane read <id> [--source visible|recent] [--lines N] [--port N]
+  relay pane input <id> [--text "…"] [--keys enter,esc,ctrl+c] [--port N]
+  relay pane run <id> "<command>" [--port N]
+  relay pane wait-output <id> (--match "…" | --regex "…") [--timeout-ms N] [--source visible|recent] [--port N]
+  relay pane readiness <id> [--port N]
+  relay pane kill <id> [--port N]
+  relay pane focus <id> [--port N]
+  relay pane cast <id> [--out file] [--port N]
 
 Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).`;
 
@@ -75,6 +97,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
   const full: CliIo = {
     fetch: io.fetch ?? globalThis.fetch,
     stdout: io.stdout ?? ((line) => process.stdout.write(line + '\n')),
+    write: io.write ?? ((text) => process.stdout.write(text)),
     stderr: io.stderr ?? ((line) => process.stderr.write(line + '\n')),
     env: io.env ?? process.env,
     cwd: io.cwd ?? process.cwd(),
@@ -93,6 +116,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
       case 'inbox': return await inbox(rest, full);
       case 'explain': return await explain(rest, full);
       case 'story': return await story(rest, full);
+      case 'pane': return await pane(rest, full);
       case '-h': case '--help': case 'help':
         full.stdout(USAGE);
         return 0;
@@ -110,6 +134,199 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
 }
 
 // ---------------------------------------------------------------- commands
+
+async function pane(args: string[], io: CliIo): Promise<number> {
+  const [verb, ...rest] = args;
+  switch (verb) {
+    case 'list': return paneList(rest, io);
+    case 'get': return paneGet(rest, io);
+    case 'read': return paneRead(rest, io);
+    case 'input': return paneInput(rest, io);
+    case 'run': return paneRun(rest, io);
+    case 'wait-output': return paneWaitOutput(rest, io);
+    case 'readiness': return paneReadinessCommand(rest, io);
+    case 'kill': return panePostAction(rest, 'kill', io);
+    case 'focus': return panePostAction(rest, 'focus', io);
+    case 'cast': return paneCast(rest, io);
+    default: throw new UsageError(verb ? `unknown pane command: ${verb}` : 'relay pane needs a command');
+  }
+}
+
+async function paneList(args: string[], io: CliIo): Promise<number> {
+  const { values } = parseKnown(args, { port: { type: 'string' } });
+  const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.panes);
+  const list = parsePaneList(raw);
+  const panes = list.items.map((item, index) => ({
+    ...validateResponse(PaneInfo, item, `PaneInfo[] at index ${index}`),
+    focused: list.focusedPane === undefined ? isFocusedPane(item, index) : false,
+  }));
+  if (list.focusedPane !== undefined) {
+    for (const pane of panes) pane.focused = pane.pane_id === list.focusedPane;
+  }
+  const headings = ['pane_id', 'role', 'task_id', 'alive', 'cols×rows', 'cwd'];
+  const rows = panes.map((item) => [
+    item.pane_id,
+    item.role,
+    item.task_id ?? '-',
+    String(item.alive),
+    `${item.cols}×${item.rows}`,
+    item.cwd,
+  ]);
+  const widths = headings.map((heading, index) => Math.max(heading.length, ...rows.map((row) => row[index]!.length)));
+  const renderRow = (row: string[]) => row.map((cell, index) => cell.padEnd(widths[index]!)).join('  ').trimEnd();
+  io.stdout(`  ${renderRow(headings)}`);
+  panes.forEach((item, index) => io.stdout(`${item.focused ? '* ' : '  '}${renderRow(rows[index]!)}`));
+  return 0;
+}
+
+async function paneGet(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane get needs a pane id');
+  const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.pane(paneId));
+  const info = validateResponse(PaneInfo, raw, 'PaneInfo');
+  const fields: ReadonlyArray<keyof PaneInfoType> = [
+    'pane_id', 'task_id', 'role', 'runtime', 'cwd', 'pid', 'alive', 'cols', 'rows',
+    'cast_path', 'started_at', 'exited_at', 'exit_code',
+  ];
+  for (const field of fields) io.stdout(`${field}: ${info[field] ?? '-'}`);
+  return 0;
+}
+
+async function paneRead(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, {
+    source: { type: 'string' },
+    lines: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane read needs a pane id');
+  if (values.source !== undefined && values.source !== 'visible' && values.source !== 'recent') {
+    throw new UsageError(`--source must be visible or recent, got ${values.source}`);
+  }
+  const query = new URLSearchParams();
+  if (values.source !== undefined) query.set('source', values.source);
+  if (values.lines !== undefined) query.set('lines', String(positiveInteger(values.lines, '--lines', 5_000)));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  const raw = await new Client(io, values.port).get<unknown>(`${ptyRoutes.screen(paneId)}${suffix}`);
+  const snapshot = validateResponse(ScreenSnapshot, raw, 'ScreenSnapshot');
+  for (const line of snapshot.lines) io.stdout(line);
+  return 0;
+}
+
+async function paneInput(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, {
+    text: { type: 'string' },
+    keys: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane input needs a pane id');
+  const keys = values.keys === undefined ? undefined : parseKeys(values.keys);
+  if (values.text === undefined && keys === undefined) {
+    throw new UsageError('relay pane input needs at least one of --text or --keys');
+  }
+  const body = validateUsage(PaneInputBody, {
+    ...(values.text !== undefined ? { text: values.text } : {}),
+    ...(keys !== undefined ? { keys } : {}),
+  }, 'PaneInputBody');
+  return sendPaneInput(paneId, body, values.port, io);
+}
+
+async function paneRun(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const [paneId, command] = positionals;
+  if (!paneId || command === undefined) throw new UsageError('relay pane run needs a pane id and command');
+  return sendPaneInput(paneId, { text: command, keys: ['enter'] }, values.port, io);
+}
+
+async function sendPaneInput(paneId: string, body: PaneInputBody, port: string | undefined, io: CliIo): Promise<number> {
+  const raw = await new Client(io, port).post<unknown>(ptyRoutes.input(paneId), body);
+  validateResponse(OkOutput, raw, '{ ok: true }');
+  io.stdout('ok');
+  return 0;
+}
+
+async function paneWaitOutput(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, {
+    match: { type: 'string' },
+    regex: { type: 'string' },
+    'timeout-ms': { type: 'string' },
+    source: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane wait-output needs a pane id');
+  if ((values.match === undefined) === (values.regex === undefined)) {
+    throw new UsageError('relay pane wait-output needs exactly one of --match or --regex');
+  }
+  if (values.source !== undefined && values.source !== 'visible' && values.source !== 'recent') {
+    throw new UsageError(`--source must be visible or recent, got ${values.source}`);
+  }
+  const timeout = values['timeout-ms'] === undefined
+    ? undefined
+    : positiveInteger(values['timeout-ms'], '--timeout-ms', 600_000);
+  const body = validateUsage(WaitOutputBody, {
+    ...(values.match !== undefined ? { match: values.match } : {}),
+    ...(values.regex !== undefined ? { regex: values.regex } : {}),
+    ...(timeout !== undefined ? { timeout_ms: timeout } : {}),
+    ...(values.source !== undefined ? { source: values.source } : {}),
+  }, 'WaitOutputBody');
+  const raw = await new Client(io, values.port).post<unknown>(ptyRoutes.waitOutput(paneId), body);
+  const result = validateResponse(WaitOutputResult, raw, 'WaitOutputResult');
+  switch (result.status) {
+    case 'matched':
+      io.stdout(`matched: ${result.line}`);
+      return 0;
+    case 'timeout':
+      io.stdout('timeout');
+      return 3;
+    case 'exited':
+      io.stdout(`exited ${result.code}`);
+      return 4;
+  }
+}
+
+async function paneReadinessCommand(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane readiness needs a pane id');
+  const raw = await new Client(io, values.port).get<unknown>(ptyRoutes.readiness(paneId));
+  const readiness = validateResponse(PaneReadiness, raw, 'PaneReadiness');
+  io.stdout(`ready ${readiness.ready} (${readiness.source}, ${readiness.detail ?? '-'})`);
+  return readiness.ready ? 0 : 3;
+}
+
+async function panePostAction(args: string[], action: 'kill' | 'focus', io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError(`relay pane ${action} needs a pane id`);
+  const raw = await new Client(io, values.port).post<unknown>(`${ptyRoutes.pane(paneId)}/${action}`, {});
+  validateResponse(OkOutput, raw, '{ ok: true }');
+  io.stdout('ok');
+  return 0;
+}
+
+async function paneCast(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, {
+    out: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane cast needs a pane id');
+  const cast = await new Client(io, values.port).getText(ptyRoutes.cast(paneId));
+  if (values.out === undefined) {
+    io.write(cast);
+    return 0;
+  }
+  const output = path.resolve(io.cwd, values.out);
+  try {
+    fs.writeFileSync(output, cast);
+  } catch (err) {
+    throw new CommandError(`cannot write ${output}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return 0;
+}
 
 async function up(args: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parseKnown(args, {
@@ -435,6 +652,61 @@ function hasGraphRefSyntax(ref: string): boolean {
     || /^(contract|evidence):t-/.test(ref);
 }
 
+type ResponseSchema<T> = {
+  safeParse(value: unknown):
+    | { success: true; data: T }
+    | { success: false; error: { toString(): string } };
+};
+
+function validateResponse<T>(schema: ResponseSchema<T>, value: unknown, label: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new CommandError(`response does not match ${label}: ${parsed.error.toString()}`);
+  return parsed.data;
+}
+
+function validateUsage<T>(schema: ResponseSchema<T>, value: unknown, label: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new UsageError(`invalid ${label}: ${parsed.error.toString()}`);
+  return parsed.data;
+}
+
+function positiveInteger(value: string, flag: string, max = Number.MAX_SAFE_INTEGER): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > max) {
+    throw new UsageError(`${flag} must be an integer from 1 to ${max}, got ${value}`);
+  }
+  return parsed;
+}
+
+function parseKeys(value: string): string[] {
+  const keys = value.split(',').map((key) => key.trim());
+  if (keys.length === 0 || keys.some((key) => key.length === 0)) {
+    throw new UsageError('--keys must be a comma-separated list of logical keys');
+  }
+  return keys;
+}
+
+function isFocusedPane(value: unknown, index: number): boolean {
+  if (typeof value !== 'object' || value === null || !('focused' in value)) return false;
+  const focused = (value as { focused?: unknown }).focused;
+  if (typeof focused !== 'boolean') {
+    throw new CommandError(`response does not match PaneInfo[] at index ${index}: focused must be a boolean`);
+  }
+  return focused;
+}
+
+function parsePaneList(value: unknown): { items: unknown[]; focusedPane?: string } {
+  if (Array.isArray(value)) return { items: value };
+  if (typeof value !== 'object' || value === null || !('panes' in value) || !Array.isArray(value.panes)) {
+    throw new CommandError('GET /panes response does not match PaneInfo[] or { panes: PaneInfo[]; focused_pane?: PaneId }');
+  }
+  if (!('focused_pane' in value) || value.focused_pane === undefined) return { items: value.panes };
+  return {
+    items: value.panes,
+    focusedPane: validateResponse(PaneId, value.focused_pane, 'focused_pane PaneId'),
+  };
+}
+
 class Client {
   private readonly base: string;
   constructor(private readonly io: CliIo, port?: string) {
@@ -453,7 +725,25 @@ class Client {
     });
   }
 
+  async getText(route: string): Promise<string> {
+    return this.requestText(route, { method: 'GET' });
+  }
+
   private async request<T>(route: string, init: RequestInit): Promise<T> {
+    const { text, url } = await this.requestTextWithUrl(route, init);
+    if (!text) return undefined as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new CommandError(`${init.method} ${url}: response is not JSON`);
+    }
+  }
+
+  private async requestText(route: string, init: RequestInit): Promise<string> {
+    return (await this.requestTextWithUrl(route, init)).text;
+  }
+
+  private async requestTextWithUrl(route: string, init: RequestInit): Promise<{ text: string; url: string }> {
     const url = this.base + route;
     let response: Response;
     try {
@@ -463,11 +753,6 @@ class Client {
     }
     const text = await response.text();
     if (!response.ok) throw new CommandError(`${init.method} ${url} → HTTP ${response.status}${text ? `: ${text.slice(0, 500)}` : ''}`);
-    if (!text) return undefined as T;
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      throw new CommandError(`${init.method} ${url}: response is not JSON`);
-    }
+    return { text, url };
   }
 }
