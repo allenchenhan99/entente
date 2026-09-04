@@ -1,163 +1,152 @@
-# TUI Work Package Evidence
+# graph-model — Evidence
 
-Branch: `wp/tui`
+Branch: `wp/graph-model` (based on `b0c4d2e`). All work under `packages/protocol/src/graph/**`; `types.ts` untouched.
 
-Implementation commits:
+Commits:
 
-- `6009682` `docs(tui): plan RelayGraph terminal UI`
-- `1393f0e` `feat(tui): add state fixtures and graph canvas`
-- `8139cd7` `feat(tui): render animated handoff graph states`
-- `3c1a71a` `feat(tui): add mission tree and event timeline`
-- `70ab46f` `feat(tui): add protocol-backed replay data layer`
-- `1e9bd61` `feat(tui): stream live state over SSE`
-- `aa7ff4a` `feat(tui): add contract overlay and keyboard commands`
-- `fcff0dc` `feat(tui): compose responsive RelayGraph app`
-- `d298d2e` `feat(tui): add CLI and headless replay rendering`
-- `6dd6c4c` `fix(tui): stop evidence particle at verifier`
-- `e161a86` `fix(tui): support root-level TSX execution`
+- `401a4cf` test(graph): totality on escalation, budget, cancel and reject paths; share check tally helper
+- `bd10031` feat(graph): storyFor and describe — narrated histories and static facts per object
+- `f4ebb63` feat(graph): narrate — one present-tense English sentence per event type
+- `d7ceac5` test(graph): actionsFor ordering, targets and per-object availability
+- `77c7dae` feat(graph): buildGraph — nodes, edges and inbox derived from State
 
-## AC-1
+Changed files (`git diff --name-status b0c4d2e HEAD`):
 
-Command: `npx vitest run apps/tui -t "canvas"`
-
-```text
-Test Files  1 passed | 9 skipped (10)
-Tests       5 passed | 33 skipped (38)
-exit_code=0
+```
+A	packages/protocol/src/graph/actions.test.ts
+A	packages/protocol/src/graph/actions.ts
+A	packages/protocol/src/graph/build.test.ts
+A	packages/protocol/src/graph/build.ts
+A	packages/protocol/src/graph/common.ts
+A	packages/protocol/src/graph/describe.test.ts
+A	packages/protocol/src/graph/describe.ts
+M	packages/protocol/src/graph/index.ts
+A	packages/protocol/src/graph/narrate.test.ts
+A	packages/protocol/src/graph/narrate.ts
+A	packages/protocol/src/graph/story.test.ts
+A	packages/protocol/src/graph/story.ts
+A	packages/protocol/src/graph/testkit.test.ts
+A	packages/protocol/src/graph/total.test.ts
 ```
 
-Canvas coverage proves left/right/vertical clipping, bounded horizontal and vertical
-lines, horizontal-then-vertical arrows with `─`/`│`/corner/`▶`, styled ANSI output,
-and exact configured dimensions after ANSI removal.
-
-## AC-2
-
-Command: `npx vitest run apps/tui -t "graph states"`
-
-```text
-Test Files  1 passed | 9 skipped (10)
-Tests       6 passed | 32 skipped (38)
-exit_code=0
+```
+ 14 files changed, 1829 insertions(+), 22 deletions(-)
 ```
 
-The three hand-written protocol `State` fixtures prove amber/pulsing `? 2`, accepted
-`v2 ✓`, dependency and blocked markers, the red `AC-2` verifier back-edge, verified
-edges for every happy task, shifted dotted phases, moving evidence, and a particle
-that stops rather than wraps at the verifier.
+Interpretations of ambiguous contract fields are listed in `HANDOFF_NOTES.md` (questions 1–8); the main ones: a human
+review counts as pending only while `handoff_state === 'evidence_submitted'`; `since` of a task question is the
+proposal time (State has no "asked at"); the evidence edge appears once work has started.
 
-## AC-3
+## AC-1 — `buildGraph(replay(events-live-4))`
 
-Command: `npx vitest run apps/tui -t "tree"`
+`npx vitest run packages/protocol/src/graph -t "live-4"`
 
-```text
-Test Files  1 passed | 9 skipped (10)
-Tests       3 passed | 35 skipped (38)
-exit_code=0
+```
+ ✓ story.test.ts > storyFor > story of the planner on live-4 starts with the mission and its 6 questions, then the plans and integration
+ ✓ build.test.ts > buildGraph > live-4 (planner asks first, serial chain) > final state: fixed nodes plus three verified agents
+ ✓ build.test.ts > buildGraph > live-4 (planner asks first, serial chain) > final state: 3 verified contract edges, 3 verified evidence edges, 2 dependency edges, no reply edge
+ ✓ build.test.ts > buildGraph > live-4 (planner asks first, serial chain) > after the first 3 events: a mission_question inbox item with 6 detail lines and a mission_clarify action
+ ✓ build.test.ts > buildGraph > live-4 (planner asks first, serial chain) > while the chain is executing, the dependency edge carries the producer status and the consumer stays pending
+ Test Files  2 passed | 5 skipped (7)
+      Tests  5 passed | 55 skipped (60)
 ```
 
-The tree tests prove mission/lint summaries, independent runtime/task/handoff layers,
-the exact `◐ blocked on t-backend-auth` detail, clarification counts, worktree paths,
-and dim pre-acceptance worktree semantics.
+Asserted: nodes `human, planner, t-auth-routes, t-login-page, t-magic-link-core, verifier` (columns 0,0,1,1,1,2);
+3 `contract` edges `v1 ✓` / verified; 3 `evidence` edges `✓` / verified; 2 `dependency` edges
+(`dep:t-magic-link-core->t-auth-routes`, `dep:t-auth-routes->t-login-page`); no `reply` edge; inbox empty.
+First 3 events: inbox `[mission_question]`, 6 detail lines `Q1: …`…`Q6: …`, action `{key:'a', kind:'mission_clarify'}`
+with the six question ids, edge `question:mission` planner→human `? 6`.
 
-## AC-4
+## AC-2 — `buildGraph(replay(events-live-1))` at three points
 
-Command: `npx vitest run apps/tui -t "timeline|replay"`
+`npx vitest run packages/protocol/src/graph -t "live-1"`
 
-```text
-Test Files  4 passed | 6 skipped (10)
-Tests       10 passed | 28 skipped (38)
-exit_code=0
+```
+ ✓ build.test.ts > buildGraph > live-1 (human review fails, repair, blocker, verified) > after evidence_recorded with a pending human review: evidence edge needs attention and inbox has a human_review item
+ ✓ build.test.ts > buildGraph > live-1 (human review fails, repair, blocker, verified) > after repair_requested: evidence edge label starts with AC-3 and needs attention
+ ✓ build.test.ts > buildGraph > live-1 (human review fails, repair, blocker, verified) > after task_blocked: node badge ◐ blocked and a blocker inbox item with a reply action
+ ✓ build.test.ts > buildGraph > live-1 (human review fails, repair, blocker, verified) > final state: contract edge verified, canceled frontend failed, inbox empty
+ Test Files  1 passed | 6 skipped (7)
+      Tests  4 passed | 56 skipped (60)
 ```
 
-The timeline shows its newest-last visible tail and typed hints. Replay tests load
-both merged `fixtures/events-happy.jsonl` and `fixtures/events-repair.jsonl` with the
-real protocol event parser/reducer. `step(+1)` advances cursor and `last_seq` together;
-`seek(0)` restores `initialState()`.
+Asserted: after `repair_requested` the evidence edge is `AC-3 ✗`, `status: 'attention'`, `attention: true`;
+after `task_blocked` the node badge is `◐ blocked`, status `blocked`, inbox `[blocker]` with a `{key:'r', kind:'reply'}`
+action; final state: contract edge `v1 ✓` verified, evidence `✓` verified, inbox empty (the canceled frontend task is
+`failed` and raises no item).
 
-## AC-5
+## AC-3 — `narrate` over every `EVENT_TYPES` member
 
-Command: `npx vitest run apps/tui -t "keys"`
+`npx vitest run packages/protocol/src/graph -t "narrate"`
 
-```text
-Test Files  1 passed | 9 skipped (10)
-Tests       3 passed | 35 skipped (38)
-exit_code=0
+```
+ ✓ narrate.test.ts > narrate > returns one non-empty sentence for every EVENT_TYPES member, never echoing the raw type
+ ✓ narrate.test.ts > narrate > is total: every event type narrates on the initial state (unknown task/mission)
+ ✓ narrate.test.ts > narrate > the eight pinned shapes > task_proposed
+ ✓ narrate.test.ts > narrate > the eight pinned shapes > clarification_requested
+ ✓ narrate.test.ts > narrate > the eight pinned shapes > task_accepted
+ ✓ narrate.test.ts > narrate > the eight pinned shapes > check_failed
+ ✓ narrate.test.ts > narrate > the eight pinned shapes > repair_requested
+ ✓ narrate.test.ts > narrate > the eight pinned shapes > task_blocked
+ ✓ narrate.test.ts > narrate > the eight pinned shapes > blocker_replied
+ ✓ narrate.test.ts > narrate > the eight pinned shapes > mission_clarification_requested
+ ✓ narrate.test.ts > narrate > voice and naming > names the human "you", relayd "RelayGraph", agents by role, and uses present tense
+ ✓ narrate.test.ts > narrate > voice and naming > resolves the role from state when the actor is not the agent (relayd verifying backend)
+ ✓ narrate.test.ts > narrate > voice and naming > truncates long quotes to 120 characters with an ellipsis
+ Test Files  1 passed | 6 skipped (7)
+      Tests  13 passed | 47 skipped (60)
 ```
 
-With fetch and command execution injected through context, the tests prove `a` opens
-Questions and POSTs a `ClarifyBody.parse`-valid body, while `f` collects observed text
-and POSTs a failed `ReviewBody.parse`-valid body. Focus argv and cancel confirmation
-are also covered without invoking real Herdr/tmux processes.
+Asserted: all 36 types yield a non-empty sentence that does not contain the raw type, `agent:` or `relayd`, both with a
+known task and on the initial state. The eight pinned sentences match exactly, e.g.
+`RelayGraph opens repair r1 for AC-2 only (2 repairs left)` and
+`backend is stuck: waiting on schema (waiting on t-auth-schema)`. Quotes are clipped to 120 chars with `…`.
 
-## AC-6
+## AC-4 — `storyFor` and `describe`
 
-Command: `npx vitest run apps/tui -t "headless"`
+`npx vitest run packages/protocol/src/graph -t "story|describe"`
 
-```text
-Test Files  1 passed | 9 skipped (10)
-Tests       4 passed | 34 skipped (38)
-exit_code=0
+```
+ ✓ describe.test.ts > describe > contract edge after a failed check: every criterion with its check status
+ ✓ describe.test.ts > describe > contract edge once verified: the human_review criterion counts as passed; unchecked criteria before evidence show no verdict
+ ✓ describe.test.ts > describe > agent node: role, the three states, worktree, attempt and blocker
+ ✓ describe.test.ts > describe > agent node with dependencies lists them with their state
+ ✓ describe.test.ts > describe > verifier: criteria, machine-checked and mismatch counts from metrics
+ ✓ describe.test.ts > describe > human: open inbox count; planner: mission title, status and open questions
+ ✓ describe.test.ts > describe > inbox item: its title then detail
+ ✓ describe.test.ts > describe > evidence, dependency, question and reply edges describe their facts; unknown refs are total
+ ✓ story.test.ts > storyFor > story of the backend node on live-2: every backend event, in seq order, each with an HH:MM prefix
+ ✓ story.test.ts > storyFor > story of the planner on live-4 starts with the mission and its 6 questions, then the plans and integration
+ ✓ story.test.ts > storyFor > story of the human lists only human-actor events
+ ✓ story.test.ts > storyFor > story of the verifier: checks, records, verifications and integration only
+ ✓ story.test.ts > storyFor > story of a contract edge: proposal, lint, clarification, revision, acceptance of that task only
+ ✓ story.test.ts > storyFor > story of an evidence edge: evidence, checks, human review, repair and verification of that task only
+ ✓ story.test.ts > storyFor > story of a question edge, a reply edge and an inbox item
+ ✓ story.test.ts > storyFor > is total: unknown refs and empty logs yield []
+ Test Files  2 passed | 5 skipped (7)
+      Tests  16 passed | 44 skipped (60)
 ```
 
-The tests render two frames from the real repair fixture through
-`ink-testing-library`, require at least 20 lines per frame, reject ANSI escapes, and
-prove non-TTY auto-detection.
+Asserted: the backend story on live-2 has one line per backend event (≥ 8), in seq order, each prefixed with the
+event's `HH:MM`; the planner story on live-4 starts `you create mission …` then
+`planner asks you 6 questions before decomposing: Q1 …`; `describe(contract:t-backend-auth)` on the repair fixture lists
+`AC-1 ✓ command: …`, `AC-2 ✗ command: … — GET /auth/verify … expected 401`, `AC-3 ⏳ human_review`, `AC-4 ✓ diff_scope`
+and `versions: v1 → v2 (2 clarifications)`.
 
-Fresh source-runtime check:
+## AC-5 — whole repo typechecks, all protocol tests pass
 
-```text
-$ node --import tsx apps/tui/src/index.tsx --replay fixtures/events-repair.jsonl --frames 2 --no-tty
-exit_code=0
-rendered_lines=60
+`npx tsc -b && npx vitest run packages/protocol`
+
+```
+ Test Files  11 passed (11)
+      Tests  137 passed (137)
 ```
 
-Fresh compiled-runtime check:
+Whole worktree gate, `npx tsc -b && npx vitest run`:
 
-```text
-$ node apps/tui/dist/index.js --replay fixtures/events-repair.jsonl --frames 2 --no-tty
-exit_code=0
-rendered_lines=60
 ```
-
-The exact `npx tsx ...` wrapper was also attempted. This managed shell rejects tsx's
-own pre-start Unix IPC socket with `listen EPERM`; it fails before loading the TUI.
-Both the same TSX loader invoked without its IPC wrapper and the compiled entry point
-pass, demonstrating that the application path itself exits cleanly.
-
-## AC-7
-
-Command: `npx tsc -b && npx vitest run apps/tui`
-
-```text
-Test Files  10 passed (10)
-Tests       38 passed (38)
-exit_code=0
+ Test Files  37 passed (37)
+      Tests  314 passed (314)
 ```
-
-Required whole-repository gate: `npx tsc -b && npx vitest run`
-
-```text
-Test Files  18 passed (18)
-Tests       153 passed (153)
-exit_code=0
-```
-
-## Diff and changed paths
-
-`git diff --check` exits 0. The branch audit against `origin/main` reports no changed
-implementation path outside `apps/tui/**`. `EVIDENCE.md` is the explicit root-level
-output required by the work contract. The working branch is `wp/tui`.
-
-Conservative interpretations used:
-
-- The frozen work contract and PRD are the approved design; no additional approval
-  round was introduced because the user required autonomous execution without
-  questions.
-- Replay timestamp speed uses `delay / speed`, so larger values play faster.
-- “Three layers per task” means runtime, task, and handoff state are all visible in
-  each task summary, with the second line reserved for worktree/dependency/question
-  context as specified by PRD §12.2.
-- Headless frames are deterministic snapshots distributed across the replay log;
-  this makes repair and terminal states visible in CI without wall-clock waits.
 
 STATUS: done
