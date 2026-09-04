@@ -896,6 +896,19 @@ describe('relay clarify / review / cancel', () => {
     expect(io.out).toEqual(['mission m-cd0a69: 1 answered, 0 open']);
   });
 
+  it('revise patches a contract: field=value replaces, field+=value appends to the current list', async () => {
+    const state = { missions: {}, tasks: { 't-backend': { id: 't-backend', contract: { constraints: ['existing rule'], inputs: [] } } } };
+    const { fetch, requests } = fakeFetch((url) => (url.endsWith('/state') ? state : { contract_version: 3 }));
+    const io = capture();
+    expect(await run(['revise', 't-backend', 'constraints+=expose POST /auth/request', 'goal=Serve the login endpoints'], { ...io, fetch, env: {} })).toBe(0);
+    const post = requests.find((r) => r.method === 'POST')!;
+    expect(post).toMatchObject({ url: 'http://127.0.0.1:7420/tasks/t-backend/revise', body: { constraints: ['existing rule', 'expose POST /auth/request'], goal: 'Serve the login endpoints' } });
+    expect(io.out).toEqual(['contract v3']);
+    expect(await run(['revise', 't-backend'], { ...capture(), fetch, env: {} })).toBe(2);
+    expect(await run(['revise', 't-backend', 'budget=1'], { ...capture(), fetch, env: {} })).toBe(2);
+    expect(await run(['revise', 't-backend', 'goal+=more'], { ...capture(), fetch, env: {} })).toBe(2);
+  });
+
   it('reply posts a message to /tasks/:id/reply', async () => {
     const { fetch, requests } = fakeFetch(() => ({ delivered: true, unread: 1 }));
     const io = capture();

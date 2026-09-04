@@ -132,6 +132,26 @@ describe('http', () => {
     expect((await app.request('/tasks/t-nope/reply', json({ message: 'x' }))).status).toBe(404);
   });
 
+  it('POST /tasks/:id/revise lets the human patch a contract before it is verified; immutable afterwards', async () => {
+    const { app, orchestrator, ofType } = setup();
+    const { mission_id } = await createMission(app);
+    await app.request(`/missions/${mission_id}/plan`, json({ tasks: [sampleContract('t-a')] }));
+    expect((await app.request('/tasks/t-a/revise', json({}))).status).toBe(400);
+    expect((await app.request('/tasks/t-zzz/revise', json({ goal: 'x' }))).status).toBe(404);
+    const revised = await app.request('/tasks/t-a/revise', json({ constraints: ['expose POST /auth/request'] }));
+    expect(revised.status).toBe(200);
+    expect(await revised.json()).toEqual({ contract_version: 2 });
+    const event = ofType('contract_revised')[0];
+    expect(event.actor).toBe('human');
+    expect(event.payload.contract.constraints).toEqual(['expose POST /auth/request']);
+    expect(event.payload.contract.goal).toBe(sampleContract('t-a').goal); // untouched keys survive
+    orchestrator.respond('t-a', { contract_version: 2, decision: 'accepted', interpretation: ['x'], assumptions: [], risks: [], verification_plan: { 'AC-1': 'run it', 'AC-2': 'run it' }, questions: [] });
+    orchestrator.submitEvidence('t-a', { contract_version: 2, claimed: { 'AC-1': { status: 'passed' }, 'AC-2': { status: 'passed' } }, summary: 's' });
+    await orchestrator.settled();
+    expect(orchestrator.taskView('t-a')!.task_state).toBe('completed');
+    expect((await app.request('/tasks/t-a/revise', json({ goal: 'later' }))).status).toBe(409);
+  });
+
   it('POST /tasks/:id/clarify, /review, /cancel behave per api.ts', async () => {
     const { app, orchestrator, ofType, host } = setup({ script: { 'AC-2': 'pending_human' } });
     const { mission_id } = await createMission(app);

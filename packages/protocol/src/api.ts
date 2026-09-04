@@ -12,10 +12,12 @@
  *   POST /tasks/:id/review       → ReviewBody        → { ok: true }
  *   POST /tasks/:id/cancel       → CancelBody        → { ok: true }
  *   POST /tasks/:id/reply        → ReplyBody         → { delivered: true, unread } (human answers a blocked agent)
+ *   POST /tasks/:id/revise       → ReviseBody        → { contract_version } (human revises a contract that is not yet verified)
  *   GET  /health                 → { ok: true, version }
  */
 import { z } from 'zod';
 import { TaskContractInput, RuntimeKind } from './contract.js';
+import { TaskContractPatch } from './mcp.js';
 
 export const CreateMissionBody = z.object({
   repo: z.string(),
@@ -46,6 +48,9 @@ export const CancelBody = z.object({ reason: z.string().optional() });
 
 export const ReplyBody = z.object({ message: z.string().min(1) });
 export type ReplyBody = z.infer<typeof ReplyBody>;
+/** Same patch the planner sends through `relay_revise_task`; only keys present change. Verified / canceled contracts are immutable (409). */
+export const ReviseBody = TaskContractPatch;
+export type ReviseBody = z.infer<typeof ReviseBody>;
 export type CancelBody = z.infer<typeof CancelBody>;
 
 export const DEFAULT_PORT = 7420;
@@ -61,6 +66,7 @@ export const routes = {
   review: (taskId: string) => `/tasks/${taskId}/review`,
   cancel: (taskId: string) => `/tasks/${taskId}/cancel`,
   reply: (taskId: string) => `/tasks/${taskId}/reply`,
+  revise: (taskId: string) => `/tasks/${taskId}/revise`,
   mcp: '/mcp',
   health: '/health',
   /**

@@ -77,6 +77,7 @@ export const USAGE = `usage:
   relay review <task-id> <AC-id> pass|fail ["observed failure"] [--port N]
   relay cancel <task-id> ["reason"] [--port N]
   relay reply <task-id> "message" [--port N]       answer a blocked agent
+  relay revise <task-id> field=value|field+=value … [--port N]   patch a contract before it is verified (goal, recipient, runtime, inputs, constraints, non_goals; += appends)
   relay replay <file.jsonl>
   relay inbox [--replay file.jsonl] [--port N]
   relay explain <object> [--replay file.jsonl] [--port N]
@@ -125,6 +126,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
       case 'review': return await review(rest, full);
       case 'cancel': return await cancel(rest, full);
       case 'reply': return await reply(rest, full);
+      case 'revise': return await revise(rest, full);
       case 'replay': return replay(rest, full);
       case 'inbox': return await inbox(rest, full);
       case 'explain': return await explain(rest, full);
@@ -552,6 +554,46 @@ async function reply(args: string[], io: CliIo): Promise<number> {
   if (!taskId || !message) throw new UsageError('relay reply needs a task id and a message');
   const result = await new Client(io, values).post<{ delivered: true; unread: number }>(routes.reply(taskId), { message });
   io.stdout(`replied to ${taskId} (${result.unread} unread by the agent)`);
+  return 0;
+}
+
+const REVISE_TEXT_FIELDS = ['goal', 'recipient', 'runtime'] as const;
+const REVISE_LIST_FIELDS = ['inputs', 'constraints', 'non_goals'] as const;
+
+/** `relay revise <task> goal="…" constraints+="…"`: the human's counterpart of the planner's `relay_revise_task`. */
+async function revise(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const [taskId, ...pairs] = positionals;
+  if (!taskId) throw new UsageError('relay revise needs a task id');
+  if (pairs.length === 0) throw new UsageError('relay revise needs at least one field=value or field+=value');
+  const client = new Client(io, values);
+  const patch: Record<string, unknown> = {};
+  let current: State['tasks'][string]['contract'] | undefined;
+  for (const pair of pairs) {
+    const match = /^([a-z_]+)(\+?=)([\s\S]*)$/.exec(pair);
+    if (!match) throw new UsageError(`expected field=value or field+=value, got: ${pair}`);
+    const [, field, op, value] = match as unknown as [string, string, '=' | '+=', string];
+    if ((REVISE_TEXT_FIELDS as readonly string[]).includes(field)) {
+      if (op === '+=') throw new UsageError(`${field} is a single value; use ${field}=…`);
+      patch[field] = value;
+    } else if ((REVISE_LIST_FIELDS as readonly string[]).includes(field)) {
+      if (op === '+=') {
+        if (!current) {
+          const state = await client.get<State>(routes.state);
+          current = state.tasks?.[taskId]?.contract;
+          if (!current) throw new UsageError(`task ${taskId} not found`);
+        }
+        const base = (patch[field] as string[] | undefined) ?? ((current as unknown as Record<string, string[] | undefined>)[field] ?? []);
+        patch[field] = [...base, value];
+      } else {
+        patch[field] = value === '' ? [] : [value];
+      }
+    } else {
+      throw new UsageError(`unknown field ${field}; expected one of ${[...REVISE_TEXT_FIELDS, ...REVISE_LIST_FIELDS].join(', ')}`);
+    }
+  }
+  const result = await client.post<{ contract_version: number }>(routes.revise(taskId), patch);
+  io.stdout(`contract v${result.contract_version}`);
   return 0;
 }
 

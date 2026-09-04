@@ -34,7 +34,7 @@ Built at the FUTUREMODE BUILDMODE Gen-AI Hackathon 2026. The full product design
 | `packages/protocol` | zod schemas for contracts, events, state; the state reducer; the communication-debt linter |
 | `apps/relayd` | the daemon: JSONL event store, HTTP + SSE API, **MCP server the agents talk to**, git worktree manager, check runner, repair policy, agent launcher (`relay` / `relayterm` hosts, Claude Code / Codex runtimes) |
 | `apps/tui` | Ink terminal UI: mission tree, animated handoff graph, event timeline, contract overlay, live (SSE) and replay modes |
-| `apps/cli` | `relay up / status / clarify / review / cancel / replay` |
+| `apps/cli` | `relay up / status / clarify / revise / review / reply / cancel / inbox / explain / story / pane / replay` |
 | `demo-repo` | a small Hono app with a user model and session store and **no authentication** — the target of the demo mission |
 | `fixtures` | replayable event logs, including a recorded real run (`events-live-1.jsonl`) |
 | `examples` | hand-written contracts for the demo mission |
