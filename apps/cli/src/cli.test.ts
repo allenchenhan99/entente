@@ -124,6 +124,76 @@ describe('relay pane get', () => {
   });
 });
 
+describe('relay pane read', () => {
+  it('prints snapshot lines verbatim and forwards source and lines', async () => {
+    const snapshot = {
+      pane_id: 'relay:7',
+      cols: 120,
+      rows: 40,
+      lines: ['first line  ', '', 'prompt> npm test'],
+      cursor: { x: 16, y: 2 },
+      alternate: false,
+      scrollback_lines: 300,
+    };
+    const { fetch, requests } = fakeFetch(() => snapshot);
+    const io = capture();
+
+    expect(await run(['pane', 'read', 'relay:7', '--source', 'recent', '--lines', '50'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toMatchObject({
+      url: 'http://127.0.0.1:7420/panes/relay:7/screen?source=recent&lines=50',
+      method: 'GET',
+    });
+    expect(io.out).toEqual(snapshot.lines);
+  });
+
+  it('fails clearly when the response does not match ScreenSnapshot', async () => {
+    const { fetch } = fakeFetch(() => ({ pane_id: 'relay:7', lines: ['incomplete'] }));
+    const io = capture();
+
+    expect(await run(['pane', 'read', 'relay:7'], { ...io, fetch, env: {} })).toBe(1);
+    expect(io.err.join('\n')).toContain('response does not match ScreenSnapshot');
+  });
+});
+
+describe('relay pane input', () => {
+  it('posts text and comma-separated logical keys in PaneInputBody', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ ok: true }));
+    const io = capture();
+
+    expect(await run(['pane', 'input', 'relay:7', '--text', 'continue', '--keys', 'enter,ctrl+c'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests).toEqual([{
+      url: 'http://127.0.0.1:7420/panes/relay:7/input',
+      method: 'POST',
+      body: { text: 'continue', keys: ['enter', 'ctrl+c'] },
+    }]);
+    expect(io.out).toEqual(['ok']);
+  });
+
+  it('rejects a call with neither text nor keys without fetching', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ ok: true }));
+    const io = capture();
+
+    expect(await run(['pane', 'input', 'relay:7'], { ...io, fetch, env: {} })).toBe(2);
+    expect(requests).toHaveLength(0);
+    expect(io.err.join('\n')).toContain('at least one of --text or --keys');
+  });
+});
+
+describe('relay pane run', () => {
+  it('types the command followed by enter', async () => {
+    const { fetch, requests } = fakeFetch(() => ({ ok: true }));
+    const io = capture();
+
+    expect(await run(['pane', 'run', 'relay:7', 'npx vitest run'], { ...io, fetch, env: {} })).toBe(0);
+    expect(requests[0]).toEqual({
+      url: 'http://127.0.0.1:7420/panes/relay:7/input',
+      method: 'POST',
+      body: { text: 'npx vitest run', keys: ['enter'] },
+    });
+    expect(io.out).toEqual(['ok']);
+  });
+});
+
 describe('relay inbox', () => {
   it('prints one block per item with the exact command to act', async () => {
     const graph: Graph = {

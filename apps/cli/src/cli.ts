@@ -22,7 +22,10 @@ import {
   DEFAULT_PORT,
   Event as EventSchema,
   LoadPlanBody,
+  OkOutput,
+  PaneInputBody,
   PaneInfo,
+  ScreenSnapshot,
   actionsFor,
   buildGraph,
   describe,
@@ -70,6 +73,9 @@ export const USAGE = `usage:
   relay story [--replay file.jsonl] [--task <task-id>] [--port N]
   relay pane list [--port N]
   relay pane get <id> [--port N]
+  relay pane read <id> [--source visible|recent] [--lines N] [--port N]
+  relay pane input <id> [--text "…"] [--keys enter,esc,ctrl+c] [--port N]
+  relay pane run <id> "<command>" [--port N]
 
 Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).`;
 
@@ -122,6 +128,9 @@ async function pane(args: string[], io: CliIo): Promise<number> {
   switch (verb) {
     case 'list': return paneList(rest, io);
     case 'get': return paneGet(rest, io);
+    case 'read': return paneRead(rest, io);
+    case 'input': return paneInput(rest, io);
+    case 'run': return paneRun(rest, io);
     default: throw new UsageError(verb ? `unknown pane command: ${verb}` : 'relay pane needs a command');
   }
 }
@@ -161,6 +170,60 @@ async function paneGet(args: string[], io: CliIo): Promise<number> {
     'cast_path', 'started_at', 'exited_at', 'exit_code',
   ];
   for (const field of fields) io.stdout(`${field}: ${info[field] ?? '-'}`);
+  return 0;
+}
+
+async function paneRead(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, {
+    source: { type: 'string' },
+    lines: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane read needs a pane id');
+  if (values.source !== undefined && values.source !== 'visible' && values.source !== 'recent') {
+    throw new UsageError(`--source must be visible or recent, got ${values.source}`);
+  }
+  const query = new URLSearchParams();
+  if (values.source !== undefined) query.set('source', values.source);
+  if (values.lines !== undefined) query.set('lines', String(positiveInteger(values.lines, '--lines', 5_000)));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  const raw = await new Client(io, values.port).get<unknown>(`${ptyRoutes.screen(paneId)}${suffix}`);
+  const snapshot = validateResponse(ScreenSnapshot, raw, 'ScreenSnapshot');
+  for (const line of snapshot.lines) io.stdout(line);
+  return 0;
+}
+
+async function paneInput(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, {
+    text: { type: 'string' },
+    keys: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const paneId = positionals[0];
+  if (!paneId) throw new UsageError('relay pane input needs a pane id');
+  const keys = values.keys === undefined ? undefined : parseKeys(values.keys);
+  if (values.text === undefined && keys === undefined) {
+    throw new UsageError('relay pane input needs at least one of --text or --keys');
+  }
+  const body = validateUsage(PaneInputBody, {
+    ...(values.text !== undefined ? { text: values.text } : {}),
+    ...(keys !== undefined ? { keys } : {}),
+  }, 'PaneInputBody');
+  return sendPaneInput(paneId, body, values.port, io);
+}
+
+async function paneRun(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const [paneId, command] = positionals;
+  if (!paneId || command === undefined) throw new UsageError('relay pane run needs a pane id and command');
+  return sendPaneInput(paneId, { text: command, keys: ['enter'] }, values.port, io);
+}
+
+async function sendPaneInput(paneId: string, body: PaneInputBody, port: string | undefined, io: CliIo): Promise<number> {
+  const raw = await new Client(io, port).post<unknown>(ptyRoutes.input(paneId), body);
+  validateResponse(OkOutput, raw, '{ ok: true }');
+  io.stdout('ok');
   return 0;
 }
 
@@ -498,6 +561,28 @@ function validateResponse<T>(schema: ResponseSchema<T>, value: unknown, label: s
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new CommandError(`response does not match ${label}: ${parsed.error.toString()}`);
   return parsed.data;
+}
+
+function validateUsage<T>(schema: ResponseSchema<T>, value: unknown, label: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new UsageError(`invalid ${label}: ${parsed.error.toString()}`);
+  return parsed.data;
+}
+
+function positiveInteger(value: string, flag: string, max = Number.MAX_SAFE_INTEGER): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > max) {
+    throw new UsageError(`${flag} must be an integer from 1 to ${max}, got ${value}`);
+  }
+  return parsed;
+}
+
+function parseKeys(value: string): string[] {
+  const keys = value.split(',').map((key) => key.trim());
+  if (keys.length === 0 || keys.some((key) => key.length === 0)) {
+    throw new UsageError('--keys must be a comma-separated list of logical keys');
+  }
+  return keys;
 }
 
 function isFocusedPane(value: unknown, index: number): boolean {
