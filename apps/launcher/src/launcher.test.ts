@@ -1,9 +1,41 @@
+import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { DEFAULT_PORT } from '@relay/protocol';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { parseArgs } from './launcher.js';
+import { parseArgs, runLauncher, type ChildProcessLike, type SpawnFunction } from './launcher.js';
+
+const temporaryDirectories: string[] = [];
+
+function temporaryDirectory(): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+function childProcess(pid: number) {
+  const child = new EventEmitter() as ChildProcessLike;
+  child.pid = pid;
+  child.unref = vi.fn();
+  child.kill = vi.fn(() => true);
+  return child;
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
 
 describe('parseArgs', () => {
   const cwd = path.resolve('/tmp', 'relay-launcher-repo');
@@ -53,5 +85,134 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['restart'], cwd)).toThrow(/unknown command/i);
     expect(() => parseArgs(['--host', 'fake'], cwd)).toThrow(/--host/);
     expect(() => parseArgs(['--port', '0'], cwd)).toThrow(/--port/);
+  });
+});
+
+describe('up', () => {
+  it('reuses a healthy relayd and starts only the foreground TUI with its URL and token', async () => {
+    const repo = temporaryDirectory();
+    const workspaceRoot = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    fs.mkdirSync(relayDir);
+    fs.writeFileSync(path.join(relayDir, 'session.token'), 'existing-token\n');
+    const tuiChild = childProcess(7002);
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => tuiChild.emit('exit', 7, null));
+      return tuiChild;
+    }) as unknown as SpawnFunction;
+    const fetch = vi.fn(async () => jsonResponse({ ok: true, version: '0.0.1' }));
+
+    const code = await runLauncher([], {
+      cwd: repo,
+      workspaceRoot,
+      fetch,
+      spawn,
+      stdout: vi.fn(),
+      stderr: vi.fn(),
+    });
+
+    expect(code).toBe(7);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith(process.execPath, [
+      '--import', 'tsx', path.join(workspaceRoot, 'apps/tui/src/index.tsx'),
+      '--url', `http://127.0.0.1:${DEFAULT_PORT}`,
+      '--token', 'existing-token',
+    ], expect.objectContaining({ detached: false, stdio: 'inherit' }));
+  });
+
+  it('spawns relayd once after failed health checks, waits, writes its pid, and starts the TUI', async () => {
+    const cwd = temporaryDirectory();
+    const repo = path.join(cwd, 'project');
+    const relayDir = path.join(cwd, 'state');
+    const workspaceRoot = temporaryDirectory();
+    fs.mkdirSync(repo);
+    fs.mkdirSync(relayDir);
+    fs.writeFileSync(path.join(relayDir, 'session.token'), 'spawned-token');
+    const daemon = childProcess(7001);
+    const tui = childProcess(7002);
+    const spawn = vi.fn((_command, _args, options) => {
+      if (options.detached) return daemon;
+      queueMicrotask(() => tui.emit('exit', 0, null));
+      return tui;
+    }) as unknown as SpawnFunction;
+    let healthAttempts = 0;
+    const fetch = vi.fn(async () => {
+      healthAttempts += 1;
+      if (healthAttempts < 3) throw new Error('ECONNREFUSED');
+      return jsonResponse({ ok: true, version: '0.0.1' });
+    });
+    let clock = 0;
+    const sleep = vi.fn(async (milliseconds: number) => { clock += milliseconds; });
+
+    const code = await runLauncher([
+      '--repo', 'project', '--dir', 'state', '--port', '9444', '--host', 'tmux',
+    ], {
+      cwd,
+      workspaceRoot,
+      env: { PATH: '/test/bin' },
+      fetch,
+      spawn,
+      now: () => clock,
+      sleep,
+      stdout: vi.fn(),
+      stderr: vi.fn(),
+    });
+
+    expect(code).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    const relaydCall = spawn.mock.calls.find((call) => call[2].detached);
+    expect(relaydCall).toEqual([
+      process.execPath,
+      ['--import', 'tsx', path.join(workspaceRoot, 'apps/relayd/src/index.ts')],
+      expect.objectContaining({
+        detached: true,
+        env: {
+          PATH: '/test/bin',
+          RELAY_REPO: repo,
+          RELAY_DIR: relayDir,
+          RELAY_PORT: '9444',
+          RELAY_HOST: 'tmux',
+          RELAY_RESUME: 'latest',
+        },
+      }),
+    ]);
+    expect(relaydCall?.[2].stdio).toEqual(['ignore', expect.any(Number), expect.any(Number)]);
+    expect(daemon.unref).toHaveBeenCalledOnce();
+    expect(fs.readFileSync(path.join(relayDir, 'relayd.pid'), 'utf8')).toBe('7001\n');
+    expect(spawn.mock.calls[1]?.[1]).toEqual([
+      '--import', 'tsx', path.join(workspaceRoot, 'apps/tui/src/index.tsx'),
+      '--url', 'http://127.0.0.1:9444', '--token', 'spawned-token',
+    ]);
+    expect(sleep).toHaveBeenCalledWith(200);
+  });
+
+  it('starts replay directly without a health check, token read, or daemon spawn', async () => {
+    const cwd = temporaryDirectory();
+    const workspaceRoot = temporaryDirectory();
+    const tui = childProcess(7002);
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => tui.emit('exit', 0, null));
+      return tui;
+    }) as unknown as SpawnFunction;
+    const fetch = vi.fn();
+
+    const code = await runLauncher(['--replay', 'fixtures/demo.jsonl'], {
+      cwd,
+      workspaceRoot,
+      fetch,
+      spawn,
+      stdout: vi.fn(),
+      stderr: vi.fn(),
+    });
+
+    expect(code).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(spawn).toHaveBeenCalledWith(process.execPath, [
+      '--import', 'tsx', path.join(workspaceRoot, 'apps/tui/src/index.tsx'),
+      '--replay', 'fixtures/demo.jsonl',
+    ], expect.objectContaining({ detached: false, stdio: 'inherit' }));
   });
 });
