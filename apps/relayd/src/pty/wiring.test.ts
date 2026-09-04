@@ -90,7 +90,7 @@ describe('relay host wiring', () => {
 });
 
 describe('relay host boot', () => {
-  it('RELAY_HOST=relay npx tsx apps/relayd/src/index.ts serves GET /panes → {"panes":[]} and a 404 WS upgrade for an unknown pane', async () => {
+  it('RELAY_HOST=relay npx tsx apps/relayd/src/index.ts serves GET /panes → {"panes":[]} with the session token and refuses a WS upgrade without it', async () => {
     const repo = tmp();
     const child = execa('npx', ['tsx', 'apps/relayd/src/index.ts'], {
       cwd: ROOT, env: { RELAY_HOST: 'relay', RELAY_PORT: '0', RELAY_REPO: repo, RELAY_RUN_ID: 'boot-relay' }, reject: false, all: true, detached: true,
@@ -107,7 +107,10 @@ describe('relay host boot', () => {
     });
     try {
       expect(output).not.toMatch(/fakes for .*host/);
-      const panes = await fetch(`${url}/panes`);
+      const token = /relayd token: ([0-9a-f]{32})/.exec(output)?.[1];
+      expect(token).toBeDefined();
+      expect((await fetch(`${url}/panes`)).status).toBe(401);
+      const panes = await fetch(`${url}/panes`, { headers: { authorization: `Bearer ${token}` } });
       expect(panes.status).toBe(200);
       expect(await panes.text()).toBe('{"panes":[]}');
       const { WebSocket } = await import('ws');
@@ -117,7 +120,14 @@ describe('relay host boot', () => {
         ws.once('open', () => reject(new Error('unexpected upgrade')));
         ws.once('error', reject);
       });
-      expect(status).toBe(404);
+      expect(status).toBe(401);
+      const withToken = await new Promise<number>((resolve, reject) => {
+        const ws = new WebSocket(`${url.replace('http', 'ws')}/pty/relay:1`, [`relay.${token}`]);
+        ws.once('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0));
+        ws.once('open', () => reject(new Error('unexpected upgrade')));
+        ws.once('error', reject);
+      });
+      expect(withToken).toBe(404);
     } finally {
       if (child.pid !== undefined) {
         try { process.kill(-child.pid, 'SIGTERM'); } catch { try { process.kill(child.pid, 'SIGTERM'); } catch { /* gone */ } }
