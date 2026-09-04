@@ -109,3 +109,38 @@ describe('pane process', () => {
     expect(pane.readiness(Date.now())).toMatchObject({ ready: false, source: 'unknown' });
   });
 });
+
+describe('pane timings', () => {
+  it('reports spawn, first output, render p50/p95 and throughput for a bursty printer', async () => {
+    const pane = open(['sh', '-c', 'printf "x%.0s" $(seq 1 2000); sleep 0.2; echo done']);
+    await pane.exited;
+    const t = pane.timings();
+    expect(t.output_bytes).toBeGreaterThanOrEqual(2000);
+    expect(t.output_chunks).toBeGreaterThanOrEqual(1);
+    expect(t.render_p50_ms).toBeDefined();
+    expect(t.render_p95_ms).toBeDefined();
+    expect(t.render_p50_ms!).toBeLessThan(100);
+    expect(t.render_p95_ms!).toBeLessThan(100);
+    expect(t.render_p50_ms!).toBeLessThanOrEqual(t.render_p95_ms!);
+    expect(t.spawn_ms).toBeDefined();
+    expect(t.first_output_ms).toBeDefined();
+    expect(t.spawn_ms!).toBeGreaterThanOrEqual(0);
+    expect(t.first_output_ms!).toBeGreaterThanOrEqual(0);
+    // A pane spawned without a prompt never reaches the readiness / prompt marks.
+    expect(t.readiness_ms).toBeUndefined();
+    expect(t.prompt_write_ms).toBeUndefined();
+    expect(t.prompt_accept_ms).toBeUndefined();
+    expect(t.prompt_retries).toBeUndefined();
+    expect(pane.info().timings).toEqual(t);
+  });
+
+  it('timings before any output carry spawn_ms only and no render samples', () => {
+    const pane = open(['sh', '-c', 'read x']);
+    const t = pane.timings();
+    expect(t.spawn_ms).toBeGreaterThanOrEqual(0);
+    expect(t.first_output_ms).toBeUndefined();
+    expect(t.render_p50_ms).toBeUndefined();
+    expect(t.render_p95_ms).toBeUndefined();
+    expect(t).toMatchObject({ output_bytes: 0, output_chunks: 0 });
+  });
+});

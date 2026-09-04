@@ -7,7 +7,8 @@ import path from 'node:path';
 import * as nodePty from 'node-pty';
 import xtermHeadless from '@xterm/headless';
 import type { Terminal as HeadlessTerminal } from '@xterm/headless';
-import type { PaneInfo, PaneReadiness, ScreenSnapshot } from '@relay/protocol';
+import { performance } from 'node:perf_hooks';
+import type { PaneInfo, PaneReadiness, PaneTimings, ScreenSnapshot } from '@relay/protocol';
 import { CastRecorder } from './recorder.js';
 import { readScreen, type ScreenQuery } from './screen.js';
 import { evaluateReadiness, lastNonEmptyLine, QUIET_MS } from './readiness.js';
@@ -23,6 +24,8 @@ export const RING_CAPACITY = 256 * 1024;
 const HEADLESS_SCROLLBACK = 5000;
 /** SIGTERM → SIGKILL grace. */
 export const KILL_GRACE_MS = 3000;
+/** Render-latency samples kept per pane (PaneTimings.render_p50_ms / p95 are computed over this ring). */
+export const RENDER_SAMPLES = 512;
 
 export interface PaneOptions {
   paneId: string;
@@ -37,6 +40,47 @@ export interface PaneOptions {
   /** ISO clock for PaneInfo timestamps. */
   clock?: () => string;
   quietMs?: number;
+  /** Task this pane hosts, when the caller knows it (surfaces as PaneInfo.task_id / HostMetrics.panes[].task_id). */
+  taskId?: string;
+  /** `performance.now()` when the spawn was requested; defaults to construction time. */
+  spawnRequestedAt?: number;
+}
+
+/**
+ * Raw `performance.now()` marks behind `PaneTimings` (monotonic; never the ISO `clock`). The pane records the
+ * spawn/output marks itself; the host's prompt deliverer fills in the readiness/prompt marks.
+ */
+export interface PaneMarks {
+  spawnRequestedAt: number;
+  /** Right after `nodePty.spawn` returned. */
+  startedAt: number;
+  firstOutputAt?: number;
+  readyAt?: number;
+  promptWrittenAt?: number;
+  promptAcceptedAt?: number;
+  promptRetries?: number;
+}
+
+/** Fixed ring of latency samples with nearest-rank percentiles. */
+class SampleRing {
+  private readonly samples: number[];
+  private next = 0;
+  private count = 0;
+  constructor(private readonly capacity: number) {
+    this.samples = new Array<number>(capacity);
+  }
+  push(value: number): void {
+    this.samples[this.next] = value;
+    this.next = (this.next + 1) % this.capacity;
+    if (this.count < this.capacity) this.count++;
+  }
+  /** Nearest-rank percentile (`p` in 0..100); undefined until the first sample. */
+  percentile(p: number): number | undefined {
+    if (this.count === 0) return undefined;
+    const sorted = this.samples.slice(0, this.count).sort((a, b) => a - b);
+    const rank = Math.max(1, Math.ceil((p / 100) * this.count));
+    return sorted[rank - 1];
+  }
 }
 
 /** Bounded FIFO of raw output bytes. */
@@ -80,8 +124,13 @@ export class Pane {
   /** Resolves with the exit code once the process has ended. */
   readonly exited: Promise<number>;
   readonly startedAt: string;
+  readonly taskId: string | undefined;
+  readonly marks: PaneMarks;
 
   private readonly pty: nodePty.IPty;
+  private readonly renderRing = new SampleRing(RENDER_SAMPLES);
+  private outputBytes = 0;
+  private outputChunks = 0;
   private readonly ring = new ByteRing(RING_CAPACITY);
   private readonly outputListeners = new Set<(chunk: Buffer) => void>();
   private readonly exitListeners = new Set<(code: number) => void>();
@@ -100,8 +149,10 @@ export class Pane {
   private pendingWrites: Promise<void> = Promise.resolve();
 
   constructor(opts: PaneOptions) {
+    const spawnRequestedAt = opts.spawnRequestedAt ?? performance.now();
     this.id = opts.paneId;
     this.role = opts.role;
+    this.taskId = opts.taskId;
     this.runtime = opts.runtime;
     this.cwd = opts.cwd;
     this.castPath = opts.castPath;
@@ -117,6 +168,7 @@ export class Pane {
     this.term = new Terminal({ cols: this.cols, rows: this.rows, allowProposedApi: true, scrollback: HEADLESS_SCROLLBACK });
     this.recorder = new CastRecorder({ path: opts.castPath, cols: this.cols, rows: this.rows, title: opts.role });
     this.pty = nodePty.spawn(file, args, { name: 'xterm-256color', cols: this.cols, rows: this.rows, cwd: opts.cwd, env: opts.env });
+    this.marks = { spawnRequestedAt, startedAt: performance.now() };
 
     this.exited = new Promise<number>((resolve) => {
       // node-pty can report the exit before the parser has applied the final chunk: publish exit only after
@@ -134,13 +186,19 @@ export class Pane {
   }
 
   private handleOutput(data: string): void {
+    const receivedAt = performance.now();
     this.lastOutputAt = Date.now();
+    if (this.marks.firstOutputAt === undefined) this.marks.firstOutputAt = receivedAt;
     this.firstOutputResolve();
     this.recorder.output(data);
     // xterm parses asynchronously: publish the chunk (ring + listeners) only once the screen reflects it, so a
     // wait-output scan or a client joining between chunks never sees the ring ahead of the screen or twice.
     const bytes = Buffer.from(data, 'utf8');
+    this.outputBytes += bytes.length;
+    this.outputChunks++;
     this.pendingWrites = new Promise<void>((resolve) => this.term.write(data, () => {
+      // Render latency: PTY byte received → the headless screen reflects it.
+      this.renderRing.push(performance.now() - receivedAt);
       this.ring.push(bytes);
       for (const l of this.outputListeners) l(bytes);
       resolve();
@@ -155,9 +213,29 @@ export class Pane {
     return this.exitCode === undefined;
   }
 
+  /** `PaneTimings` derived from the raw marks (undefined = that point was not reached). */
+  timings(): PaneTimings {
+    const m = this.marks;
+    const since = (from: number | undefined, to: number | undefined): number | undefined =>
+      from === undefined || to === undefined ? undefined : Math.max(0, to - from);
+    return {
+      spawn_ms: since(m.spawnRequestedAt, m.startedAt),
+      first_output_ms: since(m.startedAt, m.firstOutputAt),
+      readiness_ms: since(m.firstOutputAt, m.readyAt),
+      prompt_write_ms: since(m.readyAt, m.promptWrittenAt),
+      prompt_accept_ms: since(m.promptWrittenAt, m.promptAcceptedAt),
+      prompt_retries: m.promptRetries,
+      render_p50_ms: this.renderRing.percentile(50),
+      render_p95_ms: this.renderRing.percentile(95),
+      output_bytes: this.outputBytes,
+      output_chunks: this.outputChunks,
+    };
+  }
+
   info(): PaneInfo {
     return {
       pane_id: this.id,
+      task_id: this.taskId,
       role: this.role,
       runtime: this.runtime,
       cwd: this.cwd,
@@ -169,6 +247,7 @@ export class Pane {
       started_at: this.startedAt,
       exited_at: this.exitedAt,
       exit_code: this.exitCode,
+      timings: this.timings(),
     };
   }
 
