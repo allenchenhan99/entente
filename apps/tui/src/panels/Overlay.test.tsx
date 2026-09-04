@@ -79,3 +79,24 @@ describe('overlay', () => {
     expect(planner.lastFrame()).not.toContain('Contract  Response');
   });
 });
+
+describe('storyWindow', () => {
+  it('pins the description and shows the newest story lines that fit, marking hidden earlier lines', async () => {
+    const { storyWindow } = await import('./Overlay.js');
+    const description = { title: 'backend · t-backend-auth', lines: ['role: backend', 'runtime: working', 'worktree: .relay/wt/t-backend-auth'] };
+    const story = Array.from({ length: 30 }, (_, i) => `10:${String(i).padStart(2, '0')} event ${i + 1}`);
+    const rows = storyWindow(description, story, 10);
+    expect(rows).toHaveLength(10);
+    expect(rows[0]).toBe('backend · t-backend-auth');
+    expect(rows).toContain('');
+    expect(rows[rows.length - 1]).toBe('10:29 event 30');
+    expect(rows.some((r) => r.startsWith('… ') && r.endsWith('earlier'))).toBe(true);
+    expect(rows).not.toContain('10:00 event 1');
+  });
+
+  it('shows everything when it fits', async () => {
+    const { storyWindow } = await import('./Overlay.js');
+    const rows = storyWindow({ title: 'planner', lines: ['3 tasks planned'] }, ['10:00 a', '10:01 b'], 12);
+    expect(rows).toEqual(['planner', '3 tasks planned', '', '10:00 a', '10:01 b']);
+  });
+});

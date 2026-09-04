@@ -109,6 +109,22 @@ function historyContent(task: TaskView): string {
   ].join('\n');
 }
 
+/**
+ * The Story tab is a log: keep the description (title + a few facts) pinned at the top and fill the rest
+ * with the NEWEST story lines, so what just happened is always visible without scrolling.
+ */
+export function storyWindow(description: { title: string; lines: string[] }, story: string[], available: number): string[] {
+  const facts = [description.title, ...description.lines];
+  const factRows = Math.min(facts.length, Math.max(1, Math.floor(available / 2)));
+  const head = facts.slice(0, factRows);
+  const remaining = available - head.length - 1; // one blank separator row
+  if (remaining <= 0) return head.slice(0, available);
+  const tail = story.slice(-remaining);
+  const hidden = story.length - tail.length;
+  const body = hidden > 0 ? [`… ${hidden} earlier`, ...tail.slice(hidden > 0 ? 1 : 0)] : tail;
+  return [...head, '', ...body].slice(0, available);
+}
+
 function tabHeader(active: OverlayTab, task: TaskView | undefined): string {
   const tabs = task ? TASK_TABS : ['Story'] as const;
   return tabs.map((tab) => tab === active ? `[${tab}]` : tab).join('  ');
@@ -119,14 +135,13 @@ export function Overlay(props: OverlayProps) {
   const task = scopedTask(objectRef, graph, state);
   const description = api.describe(objectRef, graph, state);
   const story = api.storyFor(objectRef, graph, state, events);
-  const storyContent = [description.title, ...description.lines, '', ...story].join('\n');
   const activeTab = task ? tab : 'Story';
-  const content = activeTab === 'Story' ? storyContent
-    : activeTab === 'Contract' ? contractContent(task!)
+  const tabLines = activeTab === 'Story' ? []
+    : (activeTab === 'Contract' ? contractContent(task!)
       : activeTab === 'Response' ? responseContent(task!)
         : activeTab === 'Questions' ? questionsContent(task!)
           : activeTab === 'Evidence' ? evidenceLines(task!).join('\n')
-            : historyContent(task!);
+            : historyContent(task!)).split('\n');
   const mismatches = activeTab === 'Evidence' && task
     ? [...new Set(task.attempts.flatMap((attempt) => attempt.self_report_mismatch))]
     : [];
@@ -135,13 +150,19 @@ export function Overlay(props: OverlayProps) {
       : inputMode === 'review-failure' ? `observed failure> ${inputValue}`
         : inputMode === 'cancel-confirm' ? 'cancel task? y/N' : undefined;
 
+  // Rows available for content: border (2) + header (1) + optional status rows.
+  const reserved = 3 + (mismatches.length > 0 ? 1 : 0) + (prompt ? 1 : 0) + (error ? 1 : 0);
+  // No height (tests, headless dumps) means no window: show everything.
+  const available = Number.isFinite(height) ? Math.max(1, (height as number) - reserved) : Number.POSITIVE_INFINITY;
+  const lines = activeTab === 'Story' ? storyWindow(description, story, available) : tabLines.slice(0, available);
+
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" height={height} overflow="hidden" paddingX={1}>
       <Box height={1} flexShrink={0}>
         <Text bold color="cyan" wrap="truncate">{objectRef.id}  {tabHeader(activeTab, task)}</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        <Text wrap="truncate">{content}</Text>
+        {lines.map((line, index) => <Text key={index} wrap="truncate">{line === '' ? ' ' : line}</Text>)}
         {mismatches.length > 0 && <Text color="red" bold>SELF-REPORT MISMATCH: {mismatches.join(', ')}</Text>}
         {prompt && <Text color="yellow" bold>{prompt}</Text>}
         {error && <Text color="red">{error}</Text>}
