@@ -14,6 +14,7 @@ import { RELAYD_VERSION } from '../config.js';
 import { mountMcp } from '../mcp/server.js';
 import { sessionGuard, type SessionAuth } from '../auth/token.js';
 import { mountRuns } from './runs.js';
+import { mountGraph } from './graph.js';
 
 export interface AppOptions {
   orchestrator: Orchestrator;
@@ -56,6 +57,7 @@ export function createApp(opts: AppOptions): Hono {
   const app = new Hono();
   if (opts.auth) app.use('*', sessionGuard(opts.auth));
   mountRuns(app, { store });
+  mountGraph(app, { store });
 
   app.onError((err, c) => {
     if (err instanceof RelayError) return c.json({ error: err.message }, err.status as 400);
