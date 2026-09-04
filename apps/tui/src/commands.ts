@@ -1,4 +1,4 @@
-import { CancelBody, ClarifyBody, ReviewBody, routes } from '@relay/protocol';
+import { CancelBody, ClarifyBody, ReplyBody, ReviewBody, routes } from '@relay/protocol';
 
 import type { CommandExecutor, FetchLike } from './context.js';
 
@@ -24,6 +24,27 @@ export async function postClarification(options: {
 }): Promise<void> {
   const body = ClarifyBody.parse({ answers: [{ question_id: options.questionId, answer: options.answer }] });
   await postJson(options.fetch, commandUrl(options.url, routes.clarify(options.taskId)), body);
+}
+
+export async function postMissionClarification(options: {
+  fetch: FetchLike;
+  url: string;
+  missionId: string;
+  questionId: string;
+  answer: string;
+}): Promise<void> {
+  const body = ClarifyBody.parse({ answers: [{ question_id: options.questionId, answer: options.answer }] });
+  await postJson(options.fetch, commandUrl(options.url, routes.missionClarify(options.missionId)), body);
+}
+
+export async function postReply(options: {
+  fetch: FetchLike;
+  url: string;
+  taskId: string;
+  message: string;
+}): Promise<void> {
+  const body = ReplyBody.parse({ message: options.message });
+  await postJson(options.fetch, commandUrl(options.url, routes.reply(options.taskId)), body);
 }
 
 export async function postReview(options: {

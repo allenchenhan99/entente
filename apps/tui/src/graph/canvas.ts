@@ -4,6 +4,7 @@ export interface CellStyle {
   color?: CanvasColor;
   bold?: boolean;
   dim?: boolean;
+  inverse?: boolean;
 }
 
 export interface Point {
@@ -29,6 +30,7 @@ function ansiPrefix(cell: Cell): string {
   const codes: number[] = [];
   if (cell.bold) codes.push(1);
   if (cell.dim) codes.push(2);
+  if (cell.inverse) codes.push(7);
   if (cell.color) codes.push(COLOR_CODES[cell.color]);
   return codes.length === 0 ? '' : `\u001b[${codes.join(';')}m`;
 }

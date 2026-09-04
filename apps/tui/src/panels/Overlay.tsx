@@ -1,13 +1,25 @@
-import type { TaskContract, TaskView } from '@relay/protocol';
+import type {
+  Event,
+  Graph,
+  GraphApi,
+  GraphObjectRef,
+  State,
+  TaskContract,
+  TaskView,
+} from '@relay/protocol';
 import { Box, Text } from 'ink';
 import React from 'react';
 
 import type { InputMode, OverlayTab } from '../keys.js';
 
-const TABS: OverlayTab[] = ['Contract', 'Response', 'Questions', 'Evidence', 'History'];
+const TASK_TABS: OverlayTab[] = ['Story', 'Contract', 'Response', 'Questions', 'Evidence', 'History'];
 
 export interface OverlayProps {
-  task: TaskView;
+  objectRef: GraphObjectRef;
+  graph: Graph;
+  state: State;
+  events: Event[];
+  api: GraphApi;
   tab: OverlayTab;
   inputMode?: InputMode;
   inputValue: string;
@@ -25,6 +37,15 @@ export function naiveContractDiff(previous: TaskContract, current: TaskContract)
     if (after[index] !== undefined) output.push(`+ ${after[index]}`);
   }
   return output.join('\n');
+}
+
+function scopedTask(objectRef: GraphObjectRef, graph: Graph, state: State): TaskView | undefined {
+  const taskId = objectRef.kind === 'node'
+    ? graph.nodes.find((node) => node.id === objectRef.id)?.task_id
+    : objectRef.kind === 'edge'
+      ? graph.edges.find((edge) => edge.id === objectRef.id)?.task_id
+      : graph.inbox.find((item) => item.id === objectRef.id)?.task_id;
+  return taskId ? state.tasks[taskId] : undefined;
 }
 
 function contractContent(task: TaskView): string {
@@ -88,30 +109,39 @@ function historyContent(task: TaskView): string {
   ].join('\n');
 }
 
-function tabHeader(active: OverlayTab): string {
-  return TABS.map((tab) => tab === active ? `[${tab}]` : tab).join('  ');
+function tabHeader(active: OverlayTab, task: TaskView | undefined): string {
+  const tabs = task ? TASK_TABS : ['Story'] as const;
+  return tabs.map((tab) => tab === active ? `[${tab}]` : tab).join('  ');
 }
 
-export function Overlay({ task, tab, inputMode, inputValue, error, height }: OverlayProps) {
-  const content = tab === 'Contract' ? contractContent(task)
-    : tab === 'Response' ? responseContent(task)
-      : tab === 'Questions' ? questionsContent(task)
-        : tab === 'Evidence' ? evidenceLines(task).join('\n')
-          : historyContent(task);
-  const mismatches = tab === 'Evidence'
+export function Overlay(props: OverlayProps) {
+  const { objectRef, graph, state, events, api, tab, inputMode, inputValue, error, height } = props;
+  const task = scopedTask(objectRef, graph, state);
+  const description = api.describe(objectRef, graph, state);
+  const story = api.storyFor(objectRef, graph, state, events);
+  const storyContent = [description.title, ...description.lines, '', ...story].join('\n');
+  const activeTab = task ? tab : 'Story';
+  const content = activeTab === 'Story' ? storyContent
+    : activeTab === 'Contract' ? contractContent(task!)
+      : activeTab === 'Response' ? responseContent(task!)
+        : activeTab === 'Questions' ? questionsContent(task!)
+          : activeTab === 'Evidence' ? evidenceLines(task!).join('\n')
+            : historyContent(task!);
+  const mismatches = activeTab === 'Evidence' && task
     ? [...new Set(task.attempts.flatMap((attempt) => attempt.self_report_mismatch))]
     : [];
   const prompt = inputMode === 'answer' ? `answer> ${inputValue}`
-    : inputMode === 'review-failure' ? `observed failure> ${inputValue}`
-      : inputMode === 'cancel-confirm' ? 'cancel task? y/N' : undefined;
+    : inputMode === 'reply' ? `reply> ${inputValue}`
+      : inputMode === 'review-failure' ? `observed failure> ${inputValue}`
+        : inputMode === 'cancel-confirm' ? 'cancel task? y/N' : undefined;
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" height={height} overflow="hidden" paddingX={1}>
       <Box height={1} flexShrink={0}>
-        <Text bold color="cyan">{task.id}  {tabHeader(tab)}</Text>
+        <Text bold color="cyan" wrap="truncate">{objectRef.id}  {tabHeader(activeTab, task)}</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        <Text>{content}</Text>
+        <Text wrap="truncate">{content}</Text>
         {mismatches.length > 0 && <Text color="red" bold>SELF-REPORT MISMATCH: {mismatches.join(', ')}</Text>}
         {prompt && <Text color="yellow" bold>{prompt}</Text>}
         {error && <Text color="red">{error}</Text>}

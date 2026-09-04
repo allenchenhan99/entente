@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
 
+import {
+  actionsFor,
+  buildGraph,
+  describe,
+  narrate,
+  storyFor,
+  type GraphApi,
+} from '@relay/protocol';
 import React, { createContext, useContext, type ReactNode } from 'react';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -20,18 +28,31 @@ const defaultExecute: CommandExecutor = async (argv) => {
 interface Dependencies {
   fetch: FetchLike;
   execute: CommandExecutor;
+  graphApi: GraphApi;
 }
 
-const DependenciesContext = createContext<Dependencies>({ fetch: defaultFetch, execute: defaultExecute });
+const defaultGraphApi: GraphApi = { buildGraph, actionsFor, narrate, storyFor, describe };
+
+const DependenciesContext = createContext<Dependencies>({
+  fetch: defaultFetch,
+  execute: defaultExecute,
+  graphApi: defaultGraphApi,
+});
 
 export interface DependenciesProviderProps {
   fetch?: FetchLike;
   execute?: CommandExecutor;
+  graphApi?: GraphApi;
   children: ReactNode;
 }
 
-export function DependenciesProvider({ fetch = defaultFetch, execute = defaultExecute, children }: DependenciesProviderProps) {
-  return <DependenciesContext.Provider value={{ fetch, execute }}>{children}</DependenciesContext.Provider>;
+export function DependenciesProvider({
+  fetch = defaultFetch,
+  execute = defaultExecute,
+  graphApi = defaultGraphApi,
+  children,
+}: DependenciesProviderProps) {
+  return <DependenciesContext.Provider value={{ fetch, execute, graphApi }}>{children}</DependenciesContext.Provider>;
 }
 
 export function useDependencies(): Dependencies {

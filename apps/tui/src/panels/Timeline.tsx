@@ -1,10 +1,11 @@
 import type { Event } from '@relay/protocol';
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 import React from 'react';
 
 export interface TimelineProps {
   events: Event[];
   height: number;
+  selectedIndex?: number;
 }
 
 export function eventHint(event: Event): string {
@@ -44,9 +45,24 @@ export function formatTimelineEvent(event: Event): string {
   return `${eventTime(event.ts)}  ${event.actor}  ${event.type}  ${task}${hint === '' ? '' : `  ${hint}`}`;
 }
 
-export function Timeline({ events, height }: TimelineProps) {
-  const visible = [...events]
+export function Timeline({ events, height, selectedIndex }: TimelineProps) {
+  const sorted = [...events]
     .sort((left, right) => left.seq - right.seq)
-    .slice(-Math.max(0, height));
-  return <Text>{visible.map(formatTimelineEvent).join('\n')}</Text>;
+    .map((event, index) => ({ event, index }));
+  const windowSize = Math.max(0, height);
+  const selected = selectedIndex === undefined
+    ? sorted.length - 1
+    : Math.max(0, Math.min(sorted.length - 1, selectedIndex));
+  const start = selected < windowSize
+    ? 0
+    : Math.min(selected - windowSize + 1, Math.max(0, sorted.length - windowSize));
+  const visible = sorted.slice(start, start + windowSize);
+  if (visible.length === 0) return <Text dimColor>&lt;no events&gt;</Text>;
+  return (
+    <Box flexDirection="column">
+      {visible.map(({ event, index }) => (
+        <Text key={event.seq} inverse={index === selectedIndex} wrap="truncate">{formatTimelineEvent(event)}</Text>
+      ))}
+    </Box>
+  );
 }
