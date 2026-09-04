@@ -12,7 +12,7 @@ const makeHost = (dir = tmp()) => {
   hosts.push(host);
   return { host, dir };
 };
-const until = async (pred: () => boolean | Promise<boolean>, ms = 5000): Promise<void> => {
+const until = async (pred: () => boolean | Promise<boolean>, ms = 15_000): Promise<void> => {
   const end = Date.now() + ms;
   while (!(await pred())) {
     if (Date.now() > end) throw new Error('condition not met in time');

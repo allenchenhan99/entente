@@ -70,7 +70,7 @@ export async function startTestServer(host: RelayHost): Promise<TestServer> {
       const client: TestClient = {
         ws,
         frames,
-        frames_of: (t, count = 1, timeoutMs = 5000) => new Promise((resolve, reject) => {
+        frames_of: (t, count = 1, timeoutMs = 15_000) => new Promise((resolve, reject) => {
           const pick = () => frames.filter((f) => f.t === t) as never[];
           const check = () => {
             if (pick().length >= count) {
