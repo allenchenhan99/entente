@@ -17,6 +17,7 @@ import { createOrchestrator } from './orchestrator/orchestrator.js';
 import type { Orchestrator } from './orchestrator/orchestrator.js';
 import { createApp } from './http/app.js';
 import { mountPty } from './http/pty.js';
+import { createSessionAuth } from './auth/token.js';
 import type { RelayHost } from './pty/host.js';
 import { usingFallbackLint } from './lint.js';
 import type { EventStore, WorktreeManager, CheckRunner, RepairPolicy, TerminalHost, AgentRuntime } from './ports.js';
@@ -34,6 +35,9 @@ export interface PortDeps {
   relayDir: string;
   /** Resolved before the check runner, which needs it to collect diffs. */
   worktrees?: WorktreeManager;
+  /** The daemon's environment; the check runner filters it through the sandbox allow-list. */
+  env?: Record<string, string | undefined>;
+  log?: (msg: string) => void;
 }
 
 export interface Ports {
@@ -96,8 +100,9 @@ export async function resolvePorts(
   store: EventStore,
   log: (msg: string) => void = () => {},
   importer: Importer = defaultImporter,
+  env: Record<string, string | undefined> = process.env,
 ): Promise<Ports> {
-  const deps: PortDeps = { config, store, repoRoot: config.repoRoot, relayDir: config.relayDir };
+  const deps: PortDeps = { config, store, repoRoot: config.repoRoot, relayDir: config.relayDir, env, log };
   const fakes: string[] = [];
   const [worktreeMod, verifyMod, repairMod, launchMod] = await Promise.all([
     importer(MODULES.worktree), importer(MODULES.verify), importer(MODULES.repair), importer(MODULES.launch),
@@ -139,7 +144,9 @@ export async function main(env: Record<string, string | undefined> = process.env
   const dir = runDir(config);
   const resuming = hasRecordedEvents(dir);
   const store = createJsonlStore({ dir, log: (m) => console.error(`relayd: ${m}`) });
-  const ports = await resolvePorts(config, store, log);
+  const ports = await resolvePorts(config, store, log, defaultImporter, env);
+  // Per-daemon session token (docs/security.md): printed once, written to <relayDir>/session.token (0600).
+  const auth = createSessionAuth({ relayDir: config.relayDir, mode: config.authMode });
   if (resuming && ports.host.kind === 'relay') {
     // The relay host numbers panes from 1 and casts are opened with `flags: 'w'`; without this the respawned
     // `relay:1` would overwrite the previous run's recording (see HANDOFF_NOTES.md for the proper host option).
@@ -162,15 +169,16 @@ export async function main(env: Record<string, string | undefined> = process.env
     store, ...ports, repoRoot: config.repoRoot, relayDir: config.relayDir, mcpUrl: `${url}${routes.mcp}`,
     log: (m) => console.error(`relayd: ${m}`),
   });
-  const app = createApp({ orchestrator, store });
+  const app = createApp({ orchestrator, store, auth });
   // RELAY_HOST=relay: relayd hosts the agent terminals itself (PRD §23): pane routes + WebSocket upgrade.
   if (config.host === 'relay' && (ports.host.kind as string) === 'relay') {
-    const { handleUpgrade } = mountPty(app, ports.host as unknown as RelayHost);
+    const { handleUpgrade } = mountPty(app, ports.host as unknown as RelayHost, { auth });
     server.on('upgrade', handleUpgrade);
   }
   fetchImpl = (req) => app.fetch(req);
 
   log(`relayd ${RELAYD_VERSION} · repo ${config.repoRoot} · log ${path.join(dir, 'events.jsonl')}`);
+  log(`relayd token: ${auth.token} (file ${auth.file}; RELAY_AUTH=${auth.mode})`);
   log(`relayd listening on ${url}`);
 
   // Pane inventory for the next restart; subscribed before restore so respawned panes are recorded.

@@ -1,6 +1,7 @@
 /** relayd runtime configuration, read from the environment. */
 import path from 'node:path';
 import { DEFAULT_PORT } from '@relay/protocol';
+import { parseAuthMode, type AuthMode } from './auth/token.js';
 
 export const RELAYD_VERSION = '0.0.1';
 
@@ -12,6 +13,11 @@ export interface RelaydConfig {
   relayDir: string;
   host: HostKind;
   runId: string;
+  /**
+   * Session-token mode (`RELAY_AUTH`, docs/security.md): `optional` (default) guards only the pane/pty/runs
+   * routes; `required` also guards /state, /events*, /missions* and /tasks*.
+   */
+  authMode: AuthMode;
 }
 
 const HOSTS: HostKind[] = ['tmux', 'herdr', 'relay', 'fake'];
@@ -24,7 +30,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const host = (env.RELAY_HOST ?? 'tmux') as HostKind;
   if (!HOSTS.includes(host)) throw new Error(`RELAY_HOST must be one of ${HOSTS.join('|')}, got ${env.RELAY_HOST}`);
   const runId = env.RELAY_RUN_ID ?? `run-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-  return { port, repoRoot, relayDir, host, runId };
+  const authMode = parseAuthMode(env.RELAY_AUTH);
+  return { port, repoRoot, relayDir, host, runId, authMode };
 }
 
 /** Directory holding this run's `events.jsonl` (PRD §13). */
