@@ -8,6 +8,8 @@ import { DEFAULT_PORT, routes } from '@relay/protocol';
 
 export type LauncherCommand = 'up' | 'status' | 'down';
 export type LauncherHost = 'relay' | 'relayterm' | 'herdr' | 'tmux';
+/** Which client takes over the terminal: the Rust `relay-tui` (crates/relay-tui) or the Ink TUI (apps/tui). */
+export type LauncherTui = 'rust' | 'ink';
 
 export interface LauncherOptions {
   command: LauncherCommand;
@@ -15,7 +17,10 @@ export interface LauncherOptions {
   relayDir: string;
   relayDirExplicit?: true;
   port: number;
-  host: LauncherHost;
+  /** Undefined = auto: `relayterm` when a `termd` binary is found, else the TypeScript `relay` host. */
+  host?: LauncherHost;
+  /** Undefined = auto: `rust` when a `relay-tui` binary is found (or `--replay` names a fixture directory), else `ink`. */
+  tui?: LauncherTui;
   replay?: string;
   noSpawn: boolean;
 }
@@ -27,6 +32,7 @@ interface RawArgs {
     repo?: string;
     port?: string;
     host?: string;
+    tui?: string;
     dir?: string;
     replay?: string;
     'no-spawn'?: boolean;
@@ -91,11 +97,15 @@ export interface HealthResult {
 }
 
 export const USAGE = `usage:
-  entente [up] [--repo <path>] [--port N] [--host relay|relayterm|herdr|tmux] [--dir <relayDir>] [--replay <file>] [--no-spawn]
+  entente [up] [--repo <path>] [--port N] [--host relay|relayterm|herdr|tmux] [--tui rust|ink] [--dir <relayDir>] [--replay <file|dir>] [--no-spawn]
   entente status [--repo <path>] [--port N] [--dir <relayDir>]
-  entente down [--repo <path>] [--port N] [--dir <relayDir>]`;
+  entente down [--repo <path>] [--port N] [--dir <relayDir>]
+
+--host defaults to relayterm when a termd binary is found (RELAY_TERMD, target/release, target/debug), else relay.
+--tui defaults to rust when a relay-tui binary is found (RELAY_TUI, target/release, target/debug), else ink.`;
 
 const HOSTS: readonly LauncherHost[] = ['relay', 'relayterm', 'herdr', 'tmux'];
+const TUIS: readonly LauncherTui[] = ['rust', 'ink'];
 const HEALTH_TIMEOUT_MS = 1_000;
 const HEALTH_POLL_MS = 200;
 const HEALTH_DEADLINE_MS = 15_000;
@@ -123,6 +133,7 @@ export function parseArgs(argv: string[], cwd: string = process.cwd()): ParsedAr
         repo: { type: 'string' },
         port: { type: 'string' },
         host: { type: 'string' },
+        tui: { type: 'string' },
         dir: { type: 'string' },
         replay: { type: 'string' },
         'no-spawn': { type: 'boolean' },
@@ -144,9 +155,13 @@ export function parseArgs(argv: string[], cwd: string = process.cwd()): ParsedAr
   else throw new UsageError(`unknown command: ${first}`);
   if (positionals.length > 0) throw new UsageError(`unexpected argument: ${positionals[0]}`);
 
-  const host = parsed.values.host ?? 'relay';
-  if (!HOSTS.includes(host as LauncherHost)) {
+  const host = parsed.values.host;
+  if (host !== undefined && !HOSTS.includes(host as LauncherHost)) {
     throw new UsageError(`--host must be one of ${HOSTS.join('|')}, got ${host}`);
+  }
+  const tui = parsed.values.tui;
+  if (tui !== undefined && !TUIS.includes(tui as LauncherTui)) {
+    throw new UsageError(`--tui must be one of ${TUIS.join('|')}, got ${tui}`);
   }
   const repo = path.resolve(cwd, parsed.values.repo ?? '.');
   const explicitDir = parsed.values.dir === undefined ? undefined : path.resolve(cwd, parsed.values.dir);
@@ -157,7 +172,8 @@ export function parseArgs(argv: string[], cwd: string = process.cwd()): ParsedAr
     relayDir: explicitDir ?? path.join(repo, '.relay'),
     ...(explicitDir === undefined ? {} : { relayDirExplicit: true as const }),
     port: portNumber(parsed.values.port),
-    host: host as LauncherHost,
+    ...(host === undefined ? {} : { host: host as LauncherHost }),
+    ...(tui === undefined ? {} : { tui: tui as LauncherTui }),
     ...(parsed.values.replay === undefined ? {} : { replay: parsed.values.replay }),
     noSpawn: parsed.values['no-spawn'] ?? false,
   };
@@ -223,6 +239,23 @@ export async function waitForHealth(
   }
 }
 
+/**
+ * A Rust binary from the Relay Terminal rewrite: `RELAY_TERMD` / `RELAY_TUI` override, else the cargo output of this
+ * checkout (`target/release`, then `target/debug`). Undefined when nothing is built, so the TypeScript fallback runs.
+ */
+export function findBinary(
+  name: 'termd' | 'relay-tui',
+  deps: Pick<LauncherDependencies, 'fs' | 'env' | 'workspaceRoot'>,
+): string | undefined {
+  const override = deps.env[name === 'termd' ? 'RELAY_TERMD' : 'RELAY_TUI'];
+  if (override) return override;
+  for (const profile of ['release', 'debug']) {
+    const candidate = path.join(deps.workspaceRoot, 'target', profile, name);
+    if (deps.fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
 function executableArgs(workspaceRoot: string, app: 'relayd' | 'tui', fileSystem: Pick<FileSystem, 'existsSync'>): string[] {
   const dist = path.join(workspaceRoot, `apps/${app}/dist/index.js`);
   if (fileSystem.existsSync(dist)) return [dist];
@@ -230,8 +263,11 @@ function executableArgs(workspaceRoot: string, app: 'relayd' | 'tui', fileSystem
   return ['--import', 'tsx', source];
 }
 
-export interface SpawnRelaydOptions extends LauncherOptions {
+export interface SpawnRelaydOptions extends Omit<LauncherOptions, 'host'> {
   workspaceRoot: string;
+  host: LauncherHost;
+  /** Path of the termd binary for `RELAY_HOST=relayterm` (exported as RELAY_TERMD). */
+  termd?: string;
 }
 
 export function spawnRelayd(
@@ -252,6 +288,7 @@ export function spawnRelayd(
         ...(options.relayDirExplicit ? { RELAY_DIR: options.relayDir } : {}),
         RELAY_PORT: String(options.port),
         RELAY_HOST: options.host,
+        ...(options.termd === undefined ? {} : { RELAY_TERMD: options.termd }),
         RELAY_RESUME: 'latest',
       },
     });
@@ -294,6 +331,11 @@ function lastLogLines(fileSystem: Pick<FileSystem, 'readFileSync'>, relayDir: st
 
 export interface RunTuiOptions {
   workspaceRoot: string;
+  tui: LauncherTui;
+  /** The relay-tui binary (required when `tui` is `rust`). */
+  binary?: string;
+  /** Repo root passed to relay-tui so it can find `.relay/session.token` on reconnect. */
+  repo?: string;
   url?: string;
   token?: string;
   replay?: string;
@@ -309,13 +351,22 @@ export function runTui(
   options: RunTuiOptions,
   deps: Pick<LauncherDependencies, 'spawn' | 'fs' | 'signals'>,
 ): Promise<number> {
-  const args = executableArgs(options.workspaceRoot, 'tui', deps.fs);
+  let command = process.execPath;
+  let args: string[];
+  if (options.tui === 'rust') {
+    if (options.binary === undefined) throw new LauncherError('--tui rust needs a relay-tui binary (cargo build -p relay-tui, or RELAY_TUI=<path>)');
+    command = options.binary;
+    args = [];
+  } else {
+    args = executableArgs(options.workspaceRoot, 'tui', deps.fs);
+  }
   if (options.replay !== undefined) args.push('--replay', options.replay);
   else {
     if (options.url === undefined || options.token === undefined) throw new LauncherError('live TUI needs a relayd URL and session token');
     args.push('--url', options.url, '--token', options.token);
+    if (options.tui === 'rust' && options.repo !== undefined) args.push('--repo', options.repo);
   }
-  const child = deps.spawn(process.execPath, args, { detached: false, stdio: 'inherit' });
+  const child = deps.spawn(command, args, { detached: false, stdio: 'inherit' });
 
   return new Promise<number>((resolve, reject) => {
     const forwardInt = () => { child.kill('SIGINT'); };
@@ -339,9 +390,36 @@ export function runTui(
   });
 }
 
+/** `--replay` names a relay-tui fixture directory (dumped by scripts/dump-graph-fixture.mjs) or an Ink event log. */
+function isFixtureDirectory(replay: string, fileSystem: Pick<FileSystem, 'existsSync'>): boolean {
+  return fileSystem.existsSync(path.join(replay, 'graph.json'));
+}
+
+export interface ResolvedTerminalBase {
+  host: LauncherHost;
+  termd?: string;
+  tui: LauncherTui;
+  tuiBinary?: string;
+}
+
+/** Applies the `--host` / `--tui` defaults: our own terminal base (termd + relay-tui) whenever it is built. */
+export function resolveTerminalBase(
+  options: Pick<LauncherOptions, 'host' | 'tui' | 'replay'>,
+  deps: Pick<LauncherDependencies, 'fs' | 'env' | 'workspaceRoot'>,
+): ResolvedTerminalBase {
+  const termd = findBinary('termd', deps);
+  const tuiBinary = findBinary('relay-tui', deps);
+  const host = options.host ?? (termd !== undefined ? 'relayterm' : 'relay');
+  const tui = options.tui ?? (
+    options.replay !== undefined ? (isFixtureDirectory(options.replay, deps.fs) ? 'rust' : 'ink')
+      : tuiBinary !== undefined ? 'rust' : 'ink');
+  return { host, ...(termd === undefined ? {} : { termd }), tui, ...(tuiBinary === undefined ? {} : { tuiBinary }) };
+}
+
 async function up(options: LauncherOptions, deps: LauncherDependencies): Promise<number> {
+  const base = resolveTerminalBase(options, deps);
   if (options.replay !== undefined) {
-    return runTui({ workspaceRoot: deps.workspaceRoot, replay: options.replay }, deps);
+    return runTui({ workspaceRoot: deps.workspaceRoot, tui: base.tui, binary: base.tuiBinary, replay: options.replay }, deps);
   }
 
   const url = baseUrl(options.port);
@@ -349,7 +427,7 @@ async function up(options: LauncherOptions, deps: LauncherDependencies): Promise
   if (!initialHealth.healthy) {
     if (initialHealth.responded) throw new LauncherError(`port ${options.port} is busy, but the responder is not relayd`);
     if (options.noSpawn) throw new LauncherError('relayd is not running; remove --no-spawn to start it');
-    spawnRelayd({ ...options, workspaceRoot: deps.workspaceRoot }, deps);
+    spawnRelayd({ ...options, host: base.host, termd: base.termd, workspaceRoot: deps.workspaceRoot }, deps);
     try {
       await waitForHealth(url, deps);
     } catch (error) {
@@ -360,7 +438,7 @@ async function up(options: LauncherOptions, deps: LauncherDependencies): Promise
     }
   }
   const token = await readToken(options.relayDir, deps);
-  return runTui({ workspaceRoot: deps.workspaceRoot, url, token }, deps);
+  return runTui({ workspaceRoot: deps.workspaceRoot, tui: base.tui, binary: base.tuiBinary, repo: options.repo, url, token }, deps);
 }
 
 export async function status(options: LauncherOptions, deps: LauncherDependencies): Promise<number> {

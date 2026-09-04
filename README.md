@@ -42,10 +42,13 @@ Built at the FUTUREMODE BUILDMODE Gen-AI Hackathon 2026. The full product design
 ## Quick start
 
 Requirements: Node ≥ 22 and git. Agents need `claude` (Claude Code) and/or `codex` on your PATH and logged in.
-The default `relay` terminal host needs no tmux or Herdr setup.
+No tmux or Herdr needed: RelayGraph hosts the agent terminals itself. With a Rust toolchain, `cargo build`
+produces the native terminal base (`termd` + `relay-tui`) and `entente` uses it automatically; without it the
+TypeScript host and the Ink TUI run instead.
 
 ```bash
 npm install && npx tsc -b
+cargo build -p termd -p relay-tui   # optional: the Rust terminal base (Relay Terminal)
 
 # Materialise the demo app as its own git repository.
 bash demo-repo/scripts/init-demo.sh ~/entente-demo/app && (cd ~/entente-demo/app && npm install)
@@ -58,9 +61,12 @@ entente status --repo ~/entente-demo/app
 entente down --repo ~/entente-demo/app
 ```
 
-`entente` defaults to `entente up`, port 7420, and the built-in `relay` host. Use `--host herdr` or
-`--host tmux` for an external terminal host, `--port N` for another port, and `--dir <relayDir>` to move
+`entente` defaults to `entente up` on port 7420. `--host` defaults to `relayterm` when a `termd` binary is
+found (`RELAY_TERMD`, `target/release`, `target/debug`) and to the TypeScript `relay` host otherwise; `--tui`
+defaults to `rust` when `relay-tui` is built (`RELAY_TUI` overrides) and to `ink` otherwise. Use `--host herdr`
+or `--host tmux` for an external terminal host, `--port N` for another port, and `--dir <relayDir>` to move
 `relayd.log`, `relayd.pid`, and `session.token`. Pass `--no-spawn` to require an already-running daemon.
+`--replay` takes an event log (Ink) or a relay-tui fixture directory (Rust).
 
 Terminal hosts (`RELAY_HOST` for a hand-started `relayd`):
 

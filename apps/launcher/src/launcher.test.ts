@@ -46,9 +46,13 @@ describe('parseArgs', () => {
       repo: cwd,
       relayDir: path.join(cwd, '.relay'),
       port: DEFAULT_PORT,
-      host: 'relay',
       noSpawn: false,
     });
+  });
+
+  it('parses --tui and rejects unknown clients', () => {
+    expect(parseArgs(['--tui', 'ink'], cwd)).toMatchObject({ command: 'up', tui: 'ink' });
+    expect(() => parseArgs(['--tui', 'web'], cwd)).toThrow(/--tui/);
   });
 
   it('parses every up flag and resolves filesystem paths', () => {
@@ -119,6 +123,71 @@ describe('up', () => {
       '--url', `http://127.0.0.1:${DEFAULT_PORT}`,
       '--token', 'existing-token',
     ], expect.objectContaining({ detached: false, stdio: 'inherit' }));
+  });
+
+  it('auto-selects our own terminal base (relayterm + relay-tui) when the Rust binaries are built', async () => {
+    const cwd = temporaryDirectory();
+    const repo = path.join(cwd, 'project');
+    const relayDir = path.join(repo, '.relay');
+    const workspaceRoot = temporaryDirectory();
+    fs.mkdirSync(relayDir, { recursive: true });
+    fs.writeFileSync(path.join(relayDir, 'session.token'), 'rust-token');
+    fs.mkdirSync(path.join(workspaceRoot, 'target', 'debug'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceRoot, 'target', 'debug', 'termd'), '');
+    fs.writeFileSync(path.join(workspaceRoot, 'target', 'debug', 'relay-tui'), '');
+    const daemon = childProcess(7001);
+    const tui = childProcess(7002);
+    const spawn = vi.fn((_command, _args, options) => {
+      if (options.detached) return daemon;
+      queueMicrotask(() => tui.emit('exit', 0, null));
+      return tui;
+    }) as unknown as SpawnFunction;
+    let healthAttempts = 0;
+    const fetch = vi.fn(async () => {
+      healthAttempts += 1;
+      if (healthAttempts < 2) throw new Error('ECONNREFUSED');
+      return jsonResponse({ ok: true, version: '0.0.1' });
+    });
+    let clock = 0;
+
+    const code = await runLauncher(['--repo', 'project'], {
+      cwd, workspaceRoot, env: { PATH: '/test/bin' }, fetch, spawn,
+      now: () => clock, sleep: vi.fn(async (ms: number) => { clock += ms; }), stdout: vi.fn(), stderr: vi.fn(),
+    });
+
+    expect(code).toBe(0);
+    const relaydCall = spawn.mock.calls.find((call) => call[2].detached);
+    expect(relaydCall?.[2].env).toMatchObject({
+      RELAY_HOST: 'relayterm',
+      RELAY_TERMD: path.join(workspaceRoot, 'target', 'debug', 'termd'),
+    });
+    expect(spawn.mock.calls[1]?.[0]).toBe(path.join(workspaceRoot, 'target', 'debug', 'relay-tui'));
+    expect(spawn.mock.calls[1]?.[1]).toEqual([
+      '--url', `http://127.0.0.1:${DEFAULT_PORT}`, '--token', 'rust-token', '--repo', repo,
+    ]);
+  });
+
+  it('--tui ink keeps the Ink client and --host relay the TypeScript host even when the binaries exist', async () => {
+    const repo = temporaryDirectory();
+    const workspaceRoot = temporaryDirectory();
+    fs.mkdirSync(path.join(repo, '.relay'));
+    fs.writeFileSync(path.join(repo, '.relay', 'session.token'), 'ink-token');
+    fs.mkdirSync(path.join(workspaceRoot, 'target', 'release'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceRoot, 'target', 'release', 'termd'), '');
+    fs.writeFileSync(path.join(workspaceRoot, 'target', 'release', 'relay-tui'), '');
+    const tui = childProcess(7002);
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => tui.emit('exit', 0, null));
+      return tui;
+    }) as unknown as SpawnFunction;
+    const fetch = vi.fn(async () => jsonResponse({ ok: true, version: '0.0.1' }));
+
+    await runLauncher(['--tui', 'ink', '--host', 'relay'], { cwd: repo, workspaceRoot, fetch, spawn, stdout: vi.fn(), stderr: vi.fn() });
+
+    expect(spawn).toHaveBeenCalledWith(process.execPath, [
+      '--import', 'tsx', path.join(workspaceRoot, 'apps/tui/src/index.tsx'),
+      '--url', `http://127.0.0.1:${DEFAULT_PORT}`, '--token', 'ink-token',
+    ], expect.objectContaining({ stdio: 'inherit' }));
   });
 
   it('spawns relayd once after failed health checks, waits, writes its pid, and starts the TUI', async () => {
