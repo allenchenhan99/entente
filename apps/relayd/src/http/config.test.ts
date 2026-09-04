@@ -17,4 +17,9 @@ describe('config', () => {
   it('rejects an unknown host', () => {
     expect(() => loadConfig({ RELAY_HOST: 'screen' })).toThrow(/RELAY_HOST/);
   });
+  it('reads the session token mode from RELAY_AUTH (default optional)', () => {
+    expect(loadConfig({}).authMode).toBe('optional');
+    expect(loadConfig({ RELAY_AUTH: 'required' }).authMode).toBe('required');
+    expect(() => loadConfig({ RELAY_AUTH: 'off' })).toThrow(/RELAY_AUTH/);
+  });
 });

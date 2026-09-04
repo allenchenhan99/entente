@@ -12,6 +12,7 @@ import type { Orchestrator } from '../orchestrator/orchestrator.js';
 import { RelayError } from '../orchestrator/errors.js';
 import { RELAYD_VERSION } from '../config.js';
 import { mountMcp } from '../mcp/server.js';
+import { sessionGuard, type SessionAuth } from '../auth/token.js';
 import { mountRuns } from './runs.js';
 
 export interface AppOptions {
@@ -21,6 +22,11 @@ export interface AppOptions {
   pingIntervalMs?: number;
   /** Skip mounting the MCP endpoint (tests of the plain HTTP surface). */
   withMcp?: boolean;
+  /**
+   * Session-token guard (docs/security.md): always on `/panes*`, `/pty/*`, `/runs*`; also on `/state`, `/events*`,
+   * `/missions*`, `/tasks*` when `auth.mode === 'required'`. Omitted → open (library use in tests).
+   */
+  auth?: SessionAuth;
 }
 
 export const formatIssues = (issues: z.core.$ZodIssue[]): string[] =>
@@ -48,6 +54,7 @@ export function createApp(opts: AppOptions): Hono {
   const { orchestrator, store } = opts;
   const pingMs = opts.pingIntervalMs ?? 15_000;
   const app = new Hono();
+  if (opts.auth) app.use('*', sessionGuard(opts.auth));
   mountRuns(app, { store });
 
   app.onError((err, c) => {

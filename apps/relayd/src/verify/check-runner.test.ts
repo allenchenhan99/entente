@@ -180,3 +180,41 @@ describe('check runner', () => {
     expect(events.map((event) => event.payload.criterion_id)).toEqual(['AC-1', 'AC-2', 'AC-4', 'AC-5']);
   });
 });
+
+describe('check runner sandbox env', () => {
+  it('runs a real command check with only the allow-listed env, in the worktree, with the evidence dir writable and output capped', async () => {
+    const relayDir = tempDir();
+    const worktreePath = tempDir();
+    const evidenceDir = path.join(relayDir, 'evidence', 't-checks');
+    const criteria: AcceptanceCriterion[] = [
+      { id: 'AC-1', condition: 'env', check: { kind: 'command', run: 'env | sort; pwd', timeout_ms: 5_000 } },
+      { id: 'AC-2', condition: 'evidence writable', check: { kind: 'command', run: `touch "${evidenceDir}/side-effect"`, timeout_ms: 5_000 } },
+      { id: 'AC-3', condition: 'big output', check: { kind: 'command', run: "i=0; while [ $i -lt 1200 ]; do printf '%01000d\\n' $i; i=$((i+1)); done; exit 3", timeout_ms: 20_000 } },
+    ];
+    const { store } = fakeStore();
+    const { worktrees } = fakeWorktrees([], path.join(evidenceDir, 'attempt-1.patch'));
+    const logs: string[] = [];
+    const runner = createCheckRunner({
+      store, worktrees, relayDir, log: (m) => logs.push(m),
+      env: { PATH: process.env.PATH, RELAY_SECRET_TEST: 'hunter2', RELAY_CHECK_SANDBOX: 'off' },
+    });
+
+    const record = await runner.run(taskView(criteria), submission(), { ...worktree, path: worktreePath }, evidenceDir);
+
+    expect(record.checks['AC-1']?.status).toBe('passed');
+    const envOutput = fs.readFileSync(path.join(evidenceDir, 'AC-1.txt'), 'utf8');
+    expect(envOutput).toContain('PATH=');
+    expect(envOutput).toContain('CI=1');
+    expect(envOutput).toContain(`HOME=${path.join(relayDir, 'home')}`);
+    expect(envOutput).not.toContain('RELAY_SECRET_TEST');
+    expect(envOutput.trimEnd().endsWith(fs.realpathSync(worktreePath))).toBe(true);
+    expect(record.checks['AC-2']?.status).toBe('passed');
+    expect(fs.existsSync(path.join(evidenceDir, 'side-effect'))).toBe(true);
+    expect(record.checks['AC-3']?.status).toBe('failed');
+    const big = fs.readFileSync(path.join(evidenceDir, 'AC-3.txt'), 'utf8');
+    expect(big.startsWith('[relayd: output truncated to the last 1048576 bytes]\n')).toBe(true);
+    expect(Buffer.byteLength(big)).toBeLessThanOrEqual(1024 * 1024 + 100);
+    expect(record.checks['AC-3']?.observed?.split('\n').at(-1)?.endsWith('1199')).toBe(true);
+    expect(logs).toEqual(['check sandbox: disabled by RELAY_CHECK_SANDBOX=off']);
+  });
+});

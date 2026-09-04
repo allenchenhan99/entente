@@ -9,6 +9,7 @@ import React from 'react';
 import { App, RelayGraphApp } from './App.js';
 import type { FocusCommand } from './commands.js';
 import { DependenciesProvider } from './context.js';
+import { resolveSessionToken, withSessionToken } from './data/auth.js';
 import { loadJsonlFile } from './data/jsonl.js';
 
 export interface CliOptions {
@@ -19,6 +20,8 @@ export interface CliOptions {
   noTty: boolean;
   focusCmd: FocusCommand;
   selected?: GraphObjectRef;
+  /** relayd session token from `--token` or `RELAY_TOKEN`; the token file fallback is applied in `runCli`. */
+  token?: string;
 }
 
 export interface OutputStream {
@@ -59,6 +62,7 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     noTty: false,
     focusCmd: env.HERDR_ENV === '1' ? 'herdr' : 'tmux',
   };
+  if (env.RELAY_TOKEN?.trim()) options.token = env.RELAY_TOKEN.trim();
 
   for (let index = 0; index < argv.length; index += 1) {
     const option = argv[index]!;
@@ -99,6 +103,11 @@ export function parseCliArgs(argv: string[], env: Record<string, string | undefi
     }
     if (option === '--select') {
       options.selected = graphObjectRef(optionValue(argv, index, option));
+      index += 1;
+      continue;
+    }
+    if (option === '--token') {
+      options.token = optionValue(argv, index, option);
       index += 1;
       continue;
     }
@@ -161,8 +170,10 @@ export async function runCli(
     return 0;
   }
 
+  const token = resolveSessionToken({ flag: options.token, env, cwd: process.cwd() });
+  const fetchWithToken = withSessionToken((input, init) => globalThis.fetch(input, init), token);
   const app = renderInk(
-    <DependenciesProvider>
+    <DependenciesProvider fetch={fetchWithToken}>
       <RelayGraphApp
         url={options.url}
         replayFile={options.replayFile}
