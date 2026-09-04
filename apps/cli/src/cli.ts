@@ -92,6 +92,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
       case 'replay': return replay(rest, full);
       case 'inbox': return await inbox(rest, full);
       case 'explain': return await explain(rest, full);
+      case 'story': return await story(rest, full);
       case '-h': case '--help': case 'help':
         full.stdout(USAGE);
         return 0;
@@ -279,6 +280,24 @@ async function explain(args: string[], io: CliIo): Promise<number> {
   const story = io.graph.storyFor(ref, graph, state, events);
   if (story.length === 0) io.stdout('nothing to show');
   else for (const line of story) io.stdout(line);
+  return 0;
+}
+
+async function story(args: string[], io: CliIo): Promise<number> {
+  const { values } = parseKnown(args, {
+    replay: { type: 'string' },
+    task: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const { state, events } = await loadGraphSource(values.replay, values.port, io);
+  const selected = values.task === undefined ? events : events.filter((event) => event.task_id === values.task);
+  if (selected.length === 0) {
+    io.stdout('story empty — nothing to show');
+    return 0;
+  }
+  for (const event of selected) {
+    io.stdout(`${formatTimestamp(event.ts).slice(0, 5)}  ${io.graph.narrate(event, state)}`);
+  }
   return 0;
 }
 

@@ -193,6 +193,43 @@ describe('relay explain', () => {
   });
 });
 
+describe('relay story', () => {
+  it('narrates only the selected task events with HH:MM prefixes', async () => {
+    const events = [
+      { seq: 1, ts: '2026-09-04T01:02:03.000Z', mission_id: 'm-1', task_id: 't-a', actor: 'agent:backend', type: 'progress_reported', payload: { message: 'started' } },
+      { seq: 2, ts: '2026-09-04T01:03:03.000Z', mission_id: 'm-1', task_id: 't-b', actor: 'agent:frontend', type: 'progress_reported', payload: { message: 'unrelated' } },
+      { seq: 3, ts: '2026-09-04T01:04:03.000Z', mission_id: 'm-1', task_id: 't-a', actor: 'agent:backend', type: 'task_blocked', payload: { reason: 'needs decision' } },
+    ];
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? events : initialState()));
+    const narrated: number[] = [];
+    const graph = fakeGraphApi({
+      narrate: (event) => {
+        narrated.push(event.seq);
+        return `event ${event.seq} for ${event.task_id}`;
+      },
+    });
+    const io = capture();
+
+    const code = await run(['story', '--task', 't-a'], { ...io, fetch, env: {}, graph });
+
+    expect(code).toBe(0);
+    expect(narrated).toEqual([1, 3]);
+    expect(io.out).toEqual([
+      `${formatTimestamp(events[0]!.ts).slice(0, 5)}  event 1 for t-a`,
+      `${formatTimestamp(events[2]!.ts).slice(0, 5)}  event 3 for t-a`,
+    ]);
+    expect(io.out.every((line) => /^\d{2}:\d{2}  /.test(line))).toBe(true);
+  });
+
+  it('prints a clear message when there are no events to narrate', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    expect(await run(['story'], { ...io, fetch, env: {}, graph: fakeGraphApi() })).toBe(0);
+    expect(io.out).toEqual(['story empty — nothing to show']);
+  });
+});
+
 describe('relay replay', () => {
   it('prints one timeline line per event: HH:MM:SS actor type task_id', async () => {
     const dir = tmpDir();
