@@ -9,7 +9,7 @@ import { createWorkspaceTracker, readWorkspace, writeWorkspace } from './workspa
 import { restoreRun, RESUME_PROMPT, latestRunId, resolveResumeEnv } from './restore.js';
 
 const mission = { repo: '/repo', title: 'Add login' };
-const accept = (v: number) => ({ contract_version: v, decision: 'accepted' as const, interpretation: ['x'], assumptions: [], risks: [], verification_plan: { 'AC-1': 'run' }, questions: [] });
+const accept = (v: number, ids = ['AC-1', 'AC-2']) => ({ contract_version: v, decision: 'accepted' as const, interpretation: ['x'], assumptions: [], risks: [], verification_plan: Object.fromEntries(ids.map((id) => [id, `prove ${id}`])), questions: [] });
 const needs = { contract_version: 1, decision: 'needs_clarification' as const, interpretation: [], assumptions: [], risks: [], verification_plan: {}, questions: [{ id: 'Q1', text: 'Which mechanism?', blocking: true }] };
 const claimedAll = { 'AC-1': { status: 'passed' as const }, 'AC-2': { status: 'passed' as const }, 'AC-3': { status: 'passed' as const } };
 const humanAc = { id: 'AC-3', condition: 'looks right to a human', check: { kind: 'human_review' as const } };
@@ -36,7 +36,7 @@ async function firstRun(dir: string) {
   await r.orchestrator.proposeTask(mission_id, { ...contract, acceptance_criteria: [...contract.acceptance_criteria, humanAc] }, 'planner');
   expect(r.orchestrator.respond('t-a', needs).status).toBe('waiting');
   await r.orchestrator.clarify('t-a', [{ question_id: 'Q1', answer: 'magic link' }], 'human');
-  expect(r.orchestrator.respond('t-a', accept(2)).status).toBe('work_started');
+  expect(r.orchestrator.respond('t-a', accept(2, ['AC-1', 'AC-2', 'AC-3'])).status).toBe('work_started');
   r.orchestrator.reportBlocker('t-a', { reason: 'which sender?', waiting_on: 'human' });
   r.orchestrator.reply('t-a', 'use the stub', 'human');
   expect((await r.orchestrator.awaitReply('t-a', 1)).status).toBe('replied');

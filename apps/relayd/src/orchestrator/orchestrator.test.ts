@@ -156,7 +156,7 @@ describe('spawn gating', () => {
     expect(r.host.calls.spawn).toHaveLength(1);
     expect(r.host.calls.spawn[0].name).toBe('a');
     // drive t-a to completion through the fake checks
-    r.orchestrator.respond('t-a', { contract_version: 1, decision: 'accepted', interpretation: ['x'], assumptions: [], risks: [], verification_plan: { 'AC-1': 'run' }, questions: [] });
+    r.orchestrator.respond('t-a', { contract_version: 1, decision: 'accepted', interpretation: ['x'], assumptions: [], risks: [], verification_plan: { 'AC-1': 'run', 'AC-2': 'diff' }, questions: [] });
     r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: { 'AC-1': { status: 'passed' }, 'AC-2': { status: 'passed' } }, summary: 'done' });
     await r.orchestrator.settled();
     expect(r.ofType('task_completed').map((e) => e.task_id)).toEqual(['t-a']);
@@ -166,7 +166,7 @@ describe('spawn gating', () => {
   });
 });
 
-const accept = { contract_version: 1, decision: 'accepted' as const, interpretation: ['x'], assumptions: [], risks: [], verification_plan: { 'AC-1': 'run' }, questions: [] };
+const accept = { contract_version: 1, decision: 'accepted' as const, interpretation: ['x'], assumptions: [], risks: [], verification_plan: { 'AC-1': 'run', 'AC-2': 'diff' }, questions: [] };
 const claimedAll = { 'AC-1': { status: 'passed' as const }, 'AC-2': { status: 'passed' as const } };
 
 async function spawnedTask(r: ReturnType<typeof createTestRelay>, id = 't-a', over = {}) {
@@ -576,5 +576,61 @@ describe('awaitTask', () => {
     const poll = r.orchestrator.awaitTask('t-a-schema', 30, ac.signal);
     setTimeout(() => ac.abort(), 10);
     expect(await poll).toMatchObject({ status: 'pending' });
+  });
+});
+
+describe('accept guard', () => {
+  const full = { 'AC-1': 'run the tests', 'AC-2': 'diff stays in scope' };
+
+  it('accept with an empty interpretation is invalid, names interpretation, and emits nothing', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    const out = r.orchestrator.respond('t-a', { ...accept, interpretation: ['', '  '], verification_plan: full });
+    expect(out.status).toBe('invalid');
+    if (out.status !== 'invalid') throw new Error();
+    expect(out.errors.join('\n')).toMatch(/interpretation/);
+    expect(r.types()).not.toContain('task_accepted');
+    expect(r.orchestrator.taskView('t-a')).toMatchObject({ task_state: 'proposed', handoff_state: 'proposed' });
+  });
+
+  it('accept with a plan missing AC-2 is invalid and names AC-2; unknown plan ids are named too', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    const missing = r.orchestrator.respond('t-a', { ...accept, verification_plan: { 'AC-1': 'run', 'AC-2': '   ' } });
+    expect(missing.status).toBe('invalid');
+    if (missing.status !== 'invalid') throw new Error();
+    expect(missing.errors.join('\n')).toMatch(/AC-2/);
+    expect(missing.errors.join('\n')).not.toMatch(/AC-1/);
+    const unknown = r.orchestrator.respond('t-a', { ...accept, verification_plan: { ...full, 'AC-9': 'nope' } });
+    expect(unknown.status).toBe('invalid');
+    if (unknown.status !== 'invalid') throw new Error();
+    expect(unknown.errors.join('\n')).toMatch(/AC-9/);
+    expect(r.types()).not.toContain('task_accepted');
+  });
+
+  it('after an invalid accept the agent can respond again; a full plan starts work', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    expect(r.orchestrator.respond('t-a', { ...accept, interpretation: [] }).status).toBe('invalid');
+    const ok = r.orchestrator.respond('t-a', { ...accept, verification_plan: full });
+    expect(ok).toMatchObject({ status: 'work_started', worktree: { path: '/tmp/fake/t-a' } });
+    expect(r.types().filter((t) => t === 'task_accepted' || t === 'work_started')).toEqual(['task_accepted', 'work_started']);
+    expect(r.orchestrator.taskView('t-a')!.task_state).toBe('executing');
+  });
+
+  it('needs_clarification requires at least one question and rejected requires a reason', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    const noQuestions = r.orchestrator.respond('t-a', { ...accept, decision: 'needs_clarification', questions: [] });
+    expect(noQuestions.status).toBe('invalid');
+    if (noQuestions.status !== 'invalid') throw new Error();
+    expect(noQuestions.errors.join('\n')).toMatch(/question/);
+    const noReason = r.orchestrator.respond('t-a', { ...accept, decision: 'rejected', reason: '  ' });
+    expect(noReason.status).toBe('invalid');
+    if (noReason.status !== 'invalid') throw new Error();
+    expect(noReason.errors.join('\n')).toMatch(/reason/);
+    expect(r.types()).not.toContain('clarification_requested');
+    expect(r.types()).not.toContain('task_rejected');
+    expect(r.orchestrator.respond('t-a', { ...accept, decision: 'rejected', reason: 'out of scope' })).toEqual({ status: 'rejected' });
   });
 });

@@ -199,6 +199,29 @@ interface TaskRecord {
 }
 
 const hex = (bytes: number) => randomBytes(bytes).toString('hex');
+const nonEmpty = (s: string | undefined): boolean => typeof s === 'string' && s.trim().length > 0;
+
+/**
+ * PRD §6.3 / §4 principle 1: an acceptance is only meaningful when the recipient restates the task and says how
+ * it will prove every criterion; a clarification needs questions; a rejection needs a reason. Pure: the caller
+ * reports the errors and lets the agent respond again.
+ */
+export function responseShapeErrors(contract: TaskContract, input: Omit<ContractResponse, 'task_id'>): string[] {
+  const errors: string[] = [];
+  if (input.decision === 'accepted') {
+    if (!input.interpretation.some(nonEmpty)) errors.push('accepted requires a non-empty interpretation (restate the task in your own words)');
+    const criteria = contract.acceptance_criteria.map((ac) => ac.id);
+    const missing = criteria.filter((id) => !nonEmpty(input.verification_plan[id]));
+    if (missing.length > 0) errors.push(`verification_plan is missing an entry for ${missing.join(', ')}`);
+    const unknown = Object.keys(input.verification_plan).filter((id) => !criteria.includes(id));
+    if (unknown.length > 0) errors.push(`verification_plan names unknown criteria ${unknown.join(', ')} (criteria: ${criteria.join(', ') || 'none'})`);
+  } else if (input.decision === 'needs_clarification') {
+    if (input.questions.length === 0) errors.push('needs_clarification requires at least one question');
+  } else if (!nonEmpty(input.reason)) {
+    errors.push('rejected requires a reason');
+  }
+  return errors;
+}
 export const INTEGRATION_BRANCH = 'relay/integration';
 /** Synthetic criterion for the mission-level integration check (`CriterionId` requires `AC-<n>`). */
 export const INTEGRATION_CRITERION = 'AC-0';
@@ -536,6 +559,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     if (rec.taskState === 'canceled') errors.push('task is canceled');
     if (rec.handoffState !== 'proposed') errors.push(`contract v${contract.version} already has a response (${rec.handoffState})`);
     if (input.decision === 'accepted' && !rec.worktree) errors.push('task has no worktree yet (not spawned)');
+    errors.push(...responseShapeErrors(contract, input));
     if (errors.length > 0) return { status: 'invalid', errors };
     const response: ContractResponse = { ...input, task_id: taskId };
     rec.response = response;
