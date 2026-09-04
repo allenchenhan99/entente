@@ -15,3 +15,9 @@ dist/
 # build output
 **/dist/
 **/*.tsbuildinfo
+
+# per-worktree agent scratch files (never committed)
+WORK_CONTRACT.md
+EVIDENCE.md
+HANDOFF_NOTES.md
+demo-repo/node_modules/

@@ -2,7 +2,9 @@
   "name": "@relay/relayd",
   "version": "0.0.1",
   "type": "module",
-  "bin": { "relayd": "./dist/index.js" },
+  "bin": {
+    "relayd": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc -b",
     "dev": "tsx src/index.ts",
@@ -14,6 +16,11 @@
     "@relay/protocol": "*",
     "execa": "^10.0.0",
     "hono": "^4.13.0",
-    "zod": "^4.5.0"
+    "zod": "^4.5.0",
+    "picomatch": "^4.0.2",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/picomatch": "^4.0.0"
   }
 }
