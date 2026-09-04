@@ -330,6 +330,131 @@ describe('relay pane cast', () => {
   });
 });
 
+function writeCast(dir: string, name = 'session.cast'): string {
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, [
+    JSON.stringify({ version: 2, width: 20, height: 5, timestamp: 1_788_458_400, title: 'backend' }),
+    JSON.stringify([1, 'o', 'hello']),
+    JSON.stringify([2, 'o', '\x1b[2J']),
+    JSON.stringify([3, 'o', 'world']),
+  ].join('\n') + '\n');
+  return file;
+}
+
+describe('relay runs commands', () => {
+  it('lists runs and requests events after the since cursor', async () => {
+    const event = {
+      seq: 3,
+      ts: '2026-09-04T10:00:02.000Z',
+      mission_id: 'm-1',
+      task_id: 't-backend',
+      actor: 'agent:backend',
+      type: 'progress_reported',
+      payload: { message: 'done' },
+    };
+    const { fetch, requests } = fakeFetch((url) => url.includes('/events') ? [event] : [{
+      run_id: 'run-1',
+      started_at: '2026-09-04T10:00:00.000Z',
+      events: 3,
+      panes: ['relay:7', 'relay:8'],
+    }]);
+    const listIo = capture();
+    const eventsIo = capture();
+
+    expect(await run(['runs', 'list'], { ...listIo, fetch, env: {} })).toBe(0);
+    expect(listIo.out).toEqual([
+      'run_id  started_at                events  panes',
+      'run-1   2026-09-04T10:00:00.000Z  3       relay:7,relay:8',
+    ]);
+    expect(await run(['runs', 'events', 'run-1', '--since', '2'], { ...eventsIo, fetch, env: {} })).toBe(0);
+    expect(eventsIo.out).toEqual([JSON.stringify(event)]);
+    expect(requests.map((request) => request.url)).toEqual([
+      'http://127.0.0.1:7420/runs',
+      'http://127.0.0.1:7420/runs/run-1/events?since=2',
+    ]);
+  });
+});
+
+describe('relay cast info and screen', () => {
+  it('prints local cast metadata and the screen at a requested time', async () => {
+    const dir = tmpDir();
+    const file = writeCast(dir);
+    const infoIo = capture();
+    const screenIo = capture();
+
+    expect(await run(['cast', 'info', file], { ...infoIo, env: {} })).toBe(0);
+    expect(infoIo.out).toEqual([
+      'version: 2',
+      'width: 20',
+      'height: 5',
+      'timestamp: 1788458400',
+      'title: backend',
+      'duration: 3',
+      'events: 3',
+    ]);
+
+    expect(await run(['cast', 'screen', file, '--t', '1.5'], { ...screenIo, env: {} })).toBe(0);
+    expect(screenIo.out).toHaveLength(5);
+    expect(screenIo.out.some((line) => line.includes('hello'))).toBe(true);
+  });
+
+  it('gets cast metadata and screen snapshots for run:pane references', async () => {
+    const snapshot = {
+      pane_id: 'relay:7', cols: 20, rows: 5, lines: ['hello', '', '', '', ''],
+      cursor: { x: 5, y: 0 }, alternate: false, scrollback_lines: 0,
+    };
+    const { fetch, requests } = fakeFetch((url) => url.endsWith('/casts') ? [{
+      pane_id: 'relay:7',
+      header: { version: 2, width: 20, height: 5, timestamp: 1_788_458_400, title: 'backend' },
+      duration: 3,
+      events: 3,
+    }] : snapshot);
+    const infoIo = capture();
+    const screenIo = capture();
+
+    expect(await run(['cast', 'info', 'run-1:relay:7'], { ...infoIo, fetch, env: {} })).toBe(0);
+    expect(infoIo.out).toContain('duration: 3');
+    expect(await run(['cast', 'screen', 'run-1:relay:7', '--t', '1.5'], { ...screenIo, fetch, env: {} })).toBe(0);
+    expect(screenIo.out).toEqual(snapshot.lines);
+    expect(requests.map((request) => request.url)).toEqual([
+      'http://127.0.0.1:7420/runs/run-1/casts',
+      'http://127.0.0.1:7420/runs/run-1/casts/relay:7/screen?t=1.5',
+    ]);
+  });
+});
+
+describe('relay cast play', () => {
+  it('writes output chunks with recorded timing divided by speed', async () => {
+    const dir = tmpDir();
+    const file = path.join(dir, 'timing.cast');
+    fs.writeFileSync(file, [
+      JSON.stringify({ version: 2, width: 20, height: 5 }),
+      JSON.stringify([0.5, 'o', 'A']),
+      JSON.stringify([1.5, 'r', '10x3']),
+      JSON.stringify([2.5, 'o', 'B']),
+    ].join('\n') + '\n');
+    const io = capture();
+    const sleeps: number[] = [];
+
+    expect(await run(['cast', 'play', file, '--speed', '2'], {
+      ...io,
+      env: {},
+      sleep: async (milliseconds) => { sleeps.push(milliseconds); },
+    })).toBe(0);
+    expect(sleeps).toEqual([250, 500, 500]);
+    expect(io.raw).toEqual(['A', 'B']);
+  });
+
+  it('rejects a non-positive speed before playback', async () => {
+    const dir = tmpDir();
+    const file = writeCast(dir);
+    const io = capture();
+
+    expect(await run(['cast', 'play', file, '--speed', '0'], { ...io, env: {} })).toBe(2);
+    expect(io.err.join('\n')).toContain('--speed must be a positive number');
+  });
+});
+
 describe('relay inbox', () => {
   it('prints one block per item with the exact command to act', async () => {
     const graph: Graph = {
