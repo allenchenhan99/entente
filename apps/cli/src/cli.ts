@@ -7,6 +7,9 @@
  *   relay review <task-id> <AC-id> pass|fail ["observed failure"]
  *   relay cancel <task-id> ["reason"]
  *   relay replay <file.jsonl>
+ *   relay inbox [--replay file.jsonl]
+ *   relay explain <object> [--replay file.jsonl]
+ *   relay story [--replay file.jsonl] [--task <task-id>]
  *
  * Base URL: RELAY_URL (default http://127.0.0.1:7420); --port overrides the port.
  * `run()` takes injectable fetch/stdout/env so tests never touch the network.
@@ -15,8 +18,30 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { parse as parseYaml } from 'yaml';
-import { DEFAULT_PORT, LoadPlanBody, routes } from '@relay/protocol';
-import type { CreateMissionBody, ClarifyBody, ReviewBody, CancelBody, State } from '@relay/protocol';
+import {
+  DEFAULT_PORT,
+  Event as EventSchema,
+  LoadPlanBody,
+  actionsFor,
+  buildGraph,
+  describe,
+  narrate,
+  replay as replayEvents,
+  routes,
+  storyFor,
+} from '@relay/protocol';
+import type {
+  CancelBody,
+  ClarifyBody,
+  CreateMissionBody,
+  Event,
+  GraphApi,
+  InboxItem,
+  ReviewBody,
+  State,
+} from '@relay/protocol';
+
+const defaultGraphApi: GraphApi = { buildGraph, actionsFor, narrate, storyFor, describe };
 
 export interface CliIo {
   fetch: typeof globalThis.fetch;
@@ -24,6 +49,7 @@ export interface CliIo {
   stderr: (line: string) => void;
   env: Record<string, string | undefined>;
   cwd: string;
+  graph: GraphApi;
 }
 
 export const USAGE = `usage:
@@ -34,6 +60,9 @@ export const USAGE = `usage:
   relay cancel <task-id> ["reason"] [--port N]
   relay reply <task-id> "message" [--port N]       answer a blocked agent
   relay replay <file.jsonl>
+  relay inbox [--replay file.jsonl] [--port N]
+  relay explain <object> [--replay file.jsonl] [--port N]
+  relay story [--replay file.jsonl] [--task <task-id>] [--port N]
 
 Base URL comes from RELAY_URL (default http://127.0.0.1:${DEFAULT_PORT}).`;
 
@@ -47,6 +76,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
     stderr: io.stderr ?? ((line) => process.stderr.write(line + '\n')),
     env: io.env ?? process.env,
     cwd: io.cwd ?? process.cwd(),
+    graph: io.graph ?? defaultGraphApi,
   };
   const [command, ...rest] = argv;
   try {
@@ -58,6 +88,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
       case 'cancel': return await cancel(rest, full);
       case 'reply': return await reply(rest, full);
       case 'replay': return replay(rest, full);
+      case 'inbox': return await inbox(rest, full);
       case '-h': case '--help': case 'help':
         full.stdout(USAGE);
         return 0;
@@ -204,6 +235,26 @@ function replay(args: string[], io: CliIo): number {
   return 0;
 }
 
+async function inbox(args: string[], io: CliIo): Promise<number> {
+  const { values } = parseKnown(args, {
+    replay: { type: 'string' },
+    port: { type: 'string' },
+  });
+  const { state } = await loadGraphSource(values.replay, values.port, io);
+  const items = io.graph.buildGraph(state).inbox;
+  if (items.length === 0) {
+    io.stdout('inbox empty — nothing needs you');
+    return 0;
+  }
+  items.forEach((item, index) => {
+    if (index > 0) io.stdout('');
+    io.stdout(`[${item.kind}] ${item.title}`);
+    for (const line of item.detail) io.stdout(`  ${line}`);
+    io.stdout(`→ ${commandForInboxItem(item)}`);
+  });
+  return 0;
+}
+
 // ---------------------------------------------------------------- helpers
 
 /** `HH:MM:SS` in local time; falls back to the raw string if it is not a date. */
@@ -250,6 +301,63 @@ function loadPlan(file: string): LoadPlanBody {
     throw new CommandError(`invalid plan ${file}:\n${issues}`);
   }
   return parsed.data;
+}
+
+async function loadGraphSource(replayFile: string | undefined, port: string | undefined, io: CliIo): Promise<{ state: State; events: Event[] }> {
+  if (replayFile !== undefined) {
+    const events = loadReplayEvents(path.resolve(io.cwd, replayFile));
+    return { state: replayEvents(events), events };
+  }
+  const client = new Client(io, port);
+  const state = await client.get<State>(routes.state);
+  const events = await client.get<Event[]>(`${routes.eventsLog}?since=0`);
+  return { state, events };
+}
+
+function loadReplayEvents(file: string): Event[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    throw new CommandError(`cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return text.split('\n').flatMap((line, index) => {
+    if (line.trim().length === 0) return [];
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      throw new CommandError(`${file}:${index + 1}: invalid JSON`);
+    }
+    const parsed = EventSchema.safeParse(value);
+    if (!parsed.success) throw new CommandError(`${file}:${index + 1}: invalid event: ${parsed.error.issues[0]?.message ?? 'unknown error'}`);
+    return [parsed.data];
+  });
+}
+
+function commandForInboxItem(item: InboxItem): string {
+  const action = item.actions[0];
+  if (!action) return `relay explain ${item.id}`;
+  const taskId = action.target.task_id ?? item.task_id;
+  switch (action.kind) {
+    case 'clarify': {
+      const questions = (action.target.question_ids ?? []).map((id) => `${id}="…"`).join(' ');
+      return `relay clarify ${taskId ?? item.ref.id}${questions ? ` ${questions}` : ''}`;
+    }
+    case 'mission_clarify': {
+      const questions = (action.target.question_ids ?? []).map((id) => `${id}="…"`).join(' ');
+      return `relay clarify ${action.target.mission_id ?? item.mission_id}${questions ? ` ${questions}` : ''}`;
+    }
+    case 'review':
+      return `relay review ${taskId ?? item.ref.id} ${action.target.criterion_id ?? 'AC-?'} pass|fail`;
+    case 'reply':
+      return `relay reply ${taskId ?? item.ref.id} "…"`;
+    case 'cancel':
+      return `relay cancel ${taskId ?? item.ref.id}`;
+    case 'focus':
+    case 'inspect':
+      return `relay explain ${item.ref.id}`;
+  }
 }
 
 class Client {

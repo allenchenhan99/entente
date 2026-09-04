@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { initialState } from '@relay/protocol';
+import type { Graph, GraphApi } from '@relay/protocol';
 import { run, formatTimestamp } from './cli.js';
 
 interface Recorded { url: string; method: string; body?: unknown }
@@ -25,6 +27,102 @@ function capture() {
 }
 
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+
+const emptyGraph = (): Graph => ({ nodes: [], edges: [], inbox: [] });
+
+function fakeGraphApi(overrides: Partial<GraphApi> = {}): GraphApi {
+  return {
+    buildGraph: emptyGraph,
+    actionsFor: () => [],
+    narrate: (event) => `${event.actor} ${event.type}`,
+    storyFor: () => [],
+    describe: (ref) => ({ title: ref.id, lines: [] }),
+    ...overrides,
+  };
+}
+
+describe('relay inbox', () => {
+  it('prints one block per item with the exact command to act', async () => {
+    const graph: Graph = {
+      nodes: [],
+      edges: [],
+      inbox: [
+        {
+          id: 'inbox:questions:t-a',
+          kind: 'task_question',
+          mission_id: 'm-1',
+          task_id: 't-a',
+          title: 'backend asks 2 questions (v1)',
+          detail: ['Q1: Which authentication method?', 'Q2: How long should links last?'],
+          ref: { kind: 'edge', id: 'contract:t-a' },
+          actions: [{ key: 'a', label: 'answer', kind: 'clarify', target: { task_id: 't-a', question_ids: ['Q1', 'Q2'] } }],
+        },
+        {
+          id: 'inbox:review:t-a:AC-3',
+          kind: 'human_review',
+          mission_id: 'm-1',
+          task_id: 't-a',
+          title: 'AC-3 needs human review',
+          detail: ['A link cannot be reused'],
+          ref: { kind: 'edge', id: 'evidence:t-a' },
+          actions: [{ key: 'p', label: 'review', kind: 'review', target: { task_id: 't-a', criterion_id: 'AC-3' } }],
+        },
+      ],
+    };
+    const state = initialState();
+    const { fetch, requests } = fakeFetch((url) => (url.includes('/events/log') ? [] : state));
+    const io = capture();
+
+    const code = await run(['inbox'], { ...io, fetch, env: {}, graph: fakeGraphApi({ buildGraph: () => graph }) });
+
+    expect(code).toBe(0);
+    expect(requests.map((request) => request.url)).toEqual([
+      'http://127.0.0.1:7420/state',
+      'http://127.0.0.1:7420/events/log?since=0',
+    ]);
+    expect(io.out).toEqual([
+      '[task_question] backend asks 2 questions (v1)',
+      '  Q1: Which authentication method?',
+      '  Q2: How long should links last?',
+      '→ relay clarify t-a Q1="…" Q2="…"',
+      '',
+      '[human_review] AC-3 needs human review',
+      '  A link cannot be reused',
+      '→ relay review t-a AC-3 pass|fail',
+    ]);
+  });
+
+  it('prints the empty message when nothing needs attention', async () => {
+    const { fetch } = fakeFetch((url) => (url.includes('/events/log') ? [] : initialState()));
+    const io = capture();
+
+    expect(await run(['inbox'], { ...io, fetch, env: {}, graph: fakeGraphApi() })).toBe(0);
+    expect(io.out).toEqual(['inbox empty — nothing needs you']);
+  });
+
+  it('replays a JSONL file without calling fetch', async () => {
+    const dir = tmpDir();
+    const file = path.join(dir, 'events.jsonl');
+    fs.writeFileSync(file, `${JSON.stringify({
+      seq: 1,
+      ts: '2026-09-04T01:02:03.000Z',
+      mission_id: 'm-1',
+      actor: 'human',
+      type: 'mission_created',
+      payload: { id: 'm-1', repo: '/r', title: 'Login' },
+    })}\n`);
+    let fetchCalls = 0;
+    const fetch = (async () => {
+      fetchCalls += 1;
+      throw new Error('fetch must not be called in replay mode');
+    }) as typeof globalThis.fetch;
+    const io = capture();
+
+    expect(await run(['inbox', '--replay', file], { ...io, fetch, env: {}, graph: fakeGraphApi() })).toBe(0);
+    expect(fetchCalls).toBe(0);
+    expect(io.out).toEqual(['inbox empty — nothing needs you']);
+  });
+});
 
 describe('relay replay', () => {
   it('prints one timeline line per event: HH:MM:SS actor type task_id', async () => {
