@@ -554,3 +554,85 @@ describe('the pane shell startup file', () => {
     expect(env.RELAY_SHELL_RC).toBe(path.join(relayDir, 'shell-rc'));
   });
 });
+
+describe('entente daemon', () => {
+  const health = (repo?: string) =>
+    new Response(JSON.stringify({ ok: true, version: '0.0.1', ...(repo === undefined ? {} : { repo }) }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  const dead = () => Promise.reject(new Error('ECONNREFUSED'));
+
+  it('reuses the daemon already serving this repo instead of starting a second one', async () => {
+    const repo = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    fs.mkdirSync(relayDir, { recursive: true });
+    fs.writeFileSync(path.join(relayDir, 'session.token'), 'tok-existing\n');
+    const spawn = vi.fn();
+    const out: string[] = [];
+
+    const code = await runLauncher(['daemon', '--repo', repo, '--port', '7460'], {
+      fetch: vi.fn(async () => health(repo)) as unknown as typeof globalThis.fetch,
+      spawn: spawn as unknown as SpawnFunction,
+      fs,
+      stdout: (line: string) => out.push(line),
+    });
+
+    expect(code).toBe(0);
+    // Two relayds on one repo overwrite each other's session token and lock out whoever was already
+    // connected, so a healthy one serving this repo is joined, never duplicated.
+    expect(spawn).not.toHaveBeenCalled();
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ url: 'http://127.0.0.1:7460', token: 'tok-existing', started: false });
+  });
+
+  it('walks past a daemon serving someone else, rather than taking it', async () => {
+    const repo = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    fs.mkdirSync(relayDir, { recursive: true });
+    fs.writeFileSync(path.join(relayDir, 'session.token'), 'tok-mine\n');
+    const asked: string[] = [];
+    const out: string[] = [];
+    const child = childProcess(7461);
+
+    const code = await runLauncher(['daemon', '--repo', repo, '--port', '7460'], {
+      fetch: vi.fn(async (url: string) => {
+        asked.push(String(url));
+        // 7460 is another project's; 7461 answers only once ours has been started there.
+        if (String(url).includes('7460')) return health('/somewhere/else');
+        return asked.filter((u) => u.includes('7461')).length > 1 ? health(repo) : dead();
+      }) as unknown as typeof globalThis.fetch,
+      spawn: vi.fn(() => child) as unknown as SpawnFunction,
+      fs,
+      stdout: (line: string) => out.push(line),
+    });
+
+    expect(code).toBe(0);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ port: 7461, started: true });
+  });
+
+  it('leaves a daemon too old to say which repo it serves alone', async () => {
+    const repo = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    fs.mkdirSync(relayDir, { recursive: true });
+    fs.writeFileSync(path.join(relayDir, 'session.token'), 'tok-mine\n');
+    const out: string[] = [];
+    const child = childProcess(7461);
+    let asked = 0;
+
+    const code = await runLauncher(['daemon', '--repo', repo, '--port', '7460'], {
+      fetch: vi.fn(async (url: string) => {
+        asked += 1;
+        // No `repo` field at all: it cannot be told apart, and taking it would be the token clobber
+        // this whole dance exists to avoid.
+        if (String(url).includes('7460')) return health(undefined);
+        return asked > 2 ? health(repo) : dead();
+      }) as unknown as typeof globalThis.fetch,
+      spawn: vi.fn(() => child) as unknown as SpawnFunction,
+      fs,
+      stdout: (line: string) => out.push(line),
+    });
+
+    expect(code).toBe(0);
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ port: 7461 });
+  });
+});

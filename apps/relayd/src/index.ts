@@ -179,7 +179,7 @@ export async function main(env: Record<string, string | undefined> = process.env
     log: (m) => console.error(`relayd: ${m}`),
     annotations,
   });
-  const app = createApp({ orchestrator, store, auth });
+  const app = createApp({ orchestrator, store, auth, repoRoot: config.repoRoot });
   // RELAY_HOST=relay: relayd hosts the agent terminals itself (PRD §23): pane routes + WebSocket upgrade.
   if (config.host === 'relay' && (ports.host.kind as string) === 'relay') {
     const { handleUpgrade } = mountPty(app, ports.host as unknown as RelayHost, { auth, annotations });

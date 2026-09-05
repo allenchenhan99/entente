@@ -225,6 +225,10 @@ pub const KEY_HELP: &[(&str, &str)] = &[
     ),
     ("x", "kill the selected task (asks y/N) — the row is not dismissed, the task is ended"),
     (
+        "n",
+        "open another project as its own workspace (starts a daemon for it, or joins the one serving it)",
+    ),
+    (
         "←/→",
         "in the inspector: scroll along a long line · in the graph: pan",
     ),

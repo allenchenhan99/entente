@@ -56,6 +56,13 @@ pub enum Msg {
     Connection(Connection),
     /// A pane was created on the daemon; focus it once the refreshed list arrives.
     PaneOpened(String),
+    /// `entente daemon` answered: a project is being served here, and this is how to reach it.
+    WorkspaceReady {
+        url: String,
+        token: String,
+        name: String,
+        started: bool,
+    },
     /// The daemon killed a pane the user closed; take it out of the grid.
     PaneDismissed(String),
     Error(String),
@@ -417,6 +424,39 @@ impl<B: Backend> Runtime<B> {
                 self.app.dismiss_pane(&pane_id);
                 Vec::new()
             }
+            Msg::WorkspaceReady {
+                url,
+                token,
+                name,
+                started,
+            } => {
+                let index = self.app.add_workspace(url.clone(), Some(name.clone()));
+                // One client per workspace, in the same order, so `Msg::Graph(index, …)` and the rest
+                // land on the project they came from.
+                if let Source::Live(clients) = &mut self.source {
+                    if clients.len() <= index {
+                        clients.resize_with(index + 1, || {
+                            Arc::new(Client::new(url.clone(), Some(token.clone())))
+                        });
+                    }
+                    clients[index] = Arc::new(Client::new(url.clone(), Some(token.clone())));
+                }
+                self.app.set_notice(format!(
+                    "{name} is workspace {} ({url}){}",
+                    index + 1,
+                    if started {
+                        " · started its daemon"
+                    } else {
+                        ""
+                    }
+                ));
+                let effects = self.app.set_active(index);
+                self.run_effects(effects);
+                // Its graph, state and panes are fetched now rather than at the next tick, so the new
+                // workspace has something in it the moment you are switched to it.
+                self.refresh_now();
+                Vec::new()
+            }
             Msg::PaneOpened(pane_id) => {
                 self.pending_pane = Some(pane_id.clone());
                 self.app
@@ -577,6 +617,26 @@ impl<B: Backend> Runtime<B> {
             // runtime owns the escape sequences.
             // A shell beside the agents, so a mission can be started without leaving the app. The UI never
             // sends a command line: the shell comes from the environment and the cwd from --repo.
+            Effect::OpenWorkspace(repo) => {
+                if matches!(self.source, Source::Replay(_)) {
+                    self.app.set_notice("replay cannot open another project");
+                    return;
+                }
+                self.app.set_notice(format!(
+                    "opening {repo} — starting its daemon if it needs one…"
+                ));
+                let tx = self.tx.clone();
+                self.tasks.push(tokio::spawn(async move {
+                    match open_workspace(&repo).await {
+                        Ok(msg) => {
+                            let _ = tx.send(msg);
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Msg::Error(format!("could not open {repo}: {e}")));
+                        }
+                    }
+                }));
+            }
             Effect::NewShellPane => {
                 let Some(client) = self.active_client() else {
                     self.app
@@ -753,6 +813,69 @@ impl<B: Backend> Drop for Runtime<B> {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+/// Ask `entente daemon` to make sure a project is being served, and say where.
+///
+/// The client does not decide whether a daemon is needed. Two relayds on one repository overwrite
+/// each other's session token and lock out whoever was already connected, so exactly one thing gets
+/// to answer "is there one already" — the launcher, which has always answered it, and which reuses a
+/// healthy daemon serving the same repo or starts one on the next port that is free.
+pub async fn open_workspace(repo: &str) -> anyhow::Result<Msg> {
+    let entente = entente_binary().ok_or_else(|| {
+        anyhow::anyhow!("`entente` is not on PATH (the launcher normally puts it there)")
+    })?;
+    let out = tokio::process::Command::new(&entente)
+        .args(["daemon", "--repo", repo])
+        .output()
+        .await?;
+    if !out.status.success() {
+        let why = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!(
+            "{}",
+            why.trim()
+                .lines()
+                .next_back()
+                .unwrap_or("entente daemon failed")
+        );
+    }
+    let line = String::from_utf8_lossy(&out.stdout);
+    let line = line
+        .lines()
+        .rev()
+        .find(|l| l.trim_start().starts_with('{'))
+        .ok_or_else(|| anyhow::anyhow!("entente daemon said nothing about where it is"))?;
+    let answer: serde_json::Value = serde_json::from_str(line)?;
+    let url = answer["url"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("no url in {line}"))?
+        .to_string();
+    let token = answer["token"].as_str().unwrap_or_default().to_string();
+    let repo_path = answer["repo"].as_str().unwrap_or(repo);
+    Ok(Msg::WorkspaceReady {
+        url,
+        token,
+        name: std::path::Path::new(repo_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(repo_path)
+            .to_string(),
+        started: answer["started"].as_bool().unwrap_or(false),
+    })
+}
+
+/// The `entente` the launcher put on this process's PATH, if it did.
+pub fn entente_binary() -> Option<String> {
+    let direct = std::env::var("RELAY_ENTENTE").ok();
+    if direct.is_some() {
+        return direct;
+    }
+    let tools = std::env::var("RELAY_TOOLS").ok()?;
+    tools
+        .split(':')
+        .map(|dir| std::path::Path::new(dir).join("entente"))
+        .find(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]

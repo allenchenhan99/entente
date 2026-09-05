@@ -428,3 +428,46 @@ fn keys_selection_survives_a_graph_refresh_and_falls_back_when_the_object_is_gon
         "falls back to the first agent"
     );
 }
+
+#[test]
+fn n_opens_another_project_as_its_own_workspace() {
+    let mut app = app_with(demo_graph());
+
+    app.handle_key(Key::char('n'));
+    assert_eq!(app.input_mode, Some(InputMode::NewWorkspace));
+    assert_eq!(
+        app.prompt_line().as_deref(),
+        Some("open a project (path to its repo)> ")
+    );
+
+    keys(&mut app, "~/code/other");
+    let effects = app.handle_key(Key::ENTER);
+
+    // The path only. A workspace is a daemon, and whether one is needed is the launcher's to answer:
+    // two relayds on one repo overwrite each other's session token and lock out whoever was connected.
+    assert_eq!(
+        effects,
+        vec![Effect::OpenWorkspace("~/code/other".to_string())]
+    );
+    assert_eq!(app.input_mode, None);
+}
+
+#[test]
+fn an_empty_path_opens_nothing() {
+    let mut app = app_with(demo_graph());
+    app.handle_key(Key::char('n'));
+
+    assert!(app.handle_key(Key::ENTER).is_empty());
+    assert_eq!(app.input_mode, None, "and the prompt closes");
+}
+
+#[test]
+fn a_project_already_open_is_switched_to_rather_than_added_twice() {
+    let mut app = app_with(demo_graph());
+    let first = app.add_workspace("http://127.0.0.1:7461".into(), Some("other".into()));
+    let again = app.add_workspace("http://127.0.0.1:7461".into(), Some("other".into()));
+
+    assert_eq!(first, again);
+    assert_eq!(app.workspaces.len(), 2, "the original plus one");
+    assert_eq!(app.workspace(again).map(|w| w.name.as_str()), Some("other"));
+}

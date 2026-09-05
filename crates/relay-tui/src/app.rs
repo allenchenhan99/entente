@@ -112,6 +112,8 @@ impl GraphView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Answer,
+    /// `n`: the path of a project to open beside this one, as its own daemon.
+    NewWorkspace,
     Reply,
     ReviewFailure,
     CancelConfirm,
@@ -333,6 +335,10 @@ pub enum Effect {
     /// Open a shell pane beside the agents. The runtime fills in the shell and the repo, since `App`
     /// knows neither the environment nor the filesystem.
     NewShellPane,
+    /// Open another project as its own workspace: `entente daemon --repo <path>` makes sure a relayd
+    /// is serving it and says where, then the runtime connects. `App` neither spawns processes nor
+    /// reads the filesystem, so it only carries the path the human typed.
+    OpenWorkspace(String),
     Quit,
 }
 
@@ -1050,6 +1056,10 @@ impl App {
                 };
                 Some(format!("{label}> {}", self.input_value))
             }
+            InputMode::NewWorkspace => Some(format!(
+                "open a project (path to its repo)> {}",
+                self.input_value
+            )),
             InputMode::Reply => Some(format!("reply> {}", self.input_value)),
             InputMode::ReviewFailure => Some(format!("observed failure> {}", self.input_value)),
             InputMode::CancelConfirm => Some("cancel task? y/N".to_string()),
@@ -1413,6 +1423,14 @@ impl App {
                     self.reset_input();
                     return Vec::new();
                 }
+                KeyCode::Enter if mode == InputMode::NewWorkspace => {
+                    let path = self.input_value.trim().to_string();
+                    self.reset_input();
+                    if path.is_empty() {
+                        return Vec::new();
+                    }
+                    return vec![Effect::OpenWorkspace(path)];
+                }
                 KeyCode::Enter => {
                     let value = self.input_value.trim().to_string();
                     let Some(action) = self.pending_action.clone() else {
@@ -1653,6 +1671,14 @@ impl App {
             (_, Some('t')) => {
                 self.set_notice("opening a shell pane…");
                 vec![Effect::NewShellPane]
+            }
+            // `n` opens another project. A workspace is a daemon, so this starts one for that repo —
+            // or joins the one already serving it.
+            (_, Some('n')) => {
+                self.input_value.clear();
+                self.input_mode = Some(InputMode::NewWorkspace);
+                self.error = None;
+                Vec::new()
             }
             // With several projects open the digits pick one; with one they are free for the panes.
             (_, Some(c)) if c.is_ascii_digit() && c != '0' && self.workspaces.len() > 1 => {
@@ -1932,6 +1958,22 @@ impl App {
     }
 
     /// Make a workspace the active one; the selection belongs to whichever that is.
+    /// Add a project that is now being served, and switch to it.
+    ///
+    /// Called once the runtime has a daemon to talk to: a workspace is a daemon, so there is nothing
+    /// to add until one is answering. Returns the index it took.
+    pub fn add_workspace(&mut self, url: String, name: Option<String>) -> usize {
+        if let Some(existing) = self.workspaces.iter().position(|w| w.url == url) {
+            return existing;
+        }
+        let mut workspace = Workspace::new(url, self.mode);
+        if let Some(name) = name {
+            workspace.name = name;
+        }
+        self.workspaces.push(workspace);
+        self.workspaces.len() - 1
+    }
+
     pub fn set_active(&mut self, index: usize) -> Vec<Effect> {
         if index >= self.workspaces.len() || index == self.active {
             return Vec::new();

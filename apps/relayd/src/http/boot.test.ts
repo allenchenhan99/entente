@@ -49,7 +49,9 @@ describe('boot', () => {
     try {
       expect(line).not.toMatch(/:0$/);
       const health = await fetch(`${line}/health`);
-      expect(await health.json()).toEqual({ ok: true, version: expect.any(String) });
+      // `repo` is what makes a daemon identifiable before it has done anything, so a client opening a
+      // second project can tell whether one is already serving that repo rather than starting a rival.
+      expect(await health.json()).toEqual({ ok: true, version: expect.any(String), repo });
       expect(fs.existsSync(path.join(repo, '.relay', 'runs', 'boot-test', 'events.jsonl'))).toBe(true);
       // Session token: printed once, written 0600, required on /runs (always) but not on /state (RELAY_AUTH default optional).
       const tokens = [...output.matchAll(/relayd token: ([0-9a-f]{32})/g)].map((m) => m[1]!);

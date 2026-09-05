@@ -23,6 +23,8 @@ export interface AppOptions {
   pingIntervalMs?: number;
   /** Skip mounting the MCP endpoint (tests of the plain HTTP surface). */
   withMcp?: boolean;
+  /** The repository this daemon serves, reported by `/health` so a client can tell daemons apart. */
+  repoRoot?: string;
   /**
    * Session-token guard (docs/security.md): always on `/panes*`, `/pty/*`, `/runs*`; also on `/state`, `/events*`,
    * `/missions*`, `/tasks*` when `auth.mode === 'required'`. Omitted → open (library use in tests).
@@ -65,7 +67,11 @@ export function createApp(opts: AppOptions): Hono {
     return c.json({ error: err.message }, 500);
   });
 
-  app.get(routes.health, (c) => c.json({ ok: true, version: RELAYD_VERSION }));
+  // `repo` is what makes a daemon identifiable before it has done anything. A workspace is a daemon,
+  // so a client opening a second project has to ask "is one already serving this repo" — and asking
+  // through the missions cannot answer it for a daemon that has none yet, which is every daemon in
+  // the moment that matters. Two relayds on one repo overwrite each other's session token.
+  app.get(routes.health, (c) => c.json({ ok: true, version: RELAYD_VERSION, repo: opts.repoRoot }));
   app.get(routes.state, (c) => c.json(store.state()));
 
   app.get(routes.eventsLog, (c) => {

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_PORT, routes } from '@relay/protocol';
 
-export type LauncherCommand = 'up' | 'status' | 'down';
+export type LauncherCommand = 'up' | 'status' | 'down' | 'daemon';
 export type LauncherHost = 'relay' | 'relayterm';
 /** Which client takes over the terminal: the Rust `relay-tui` (crates/relay-tui) or the Ink TUI (apps/tui). */
 export type LauncherTui = 'rust' | 'ink';
@@ -94,10 +94,13 @@ export interface HealthResult {
   healthy: boolean;
   responded: boolean;
   version?: string;
+  /** The repository this daemon serves; absent from relayd builds older than this field. */
+  repo?: string;
 }
 
 export const USAGE = `usage:
   entente [up] [--repo <path>] [--port N] [--host relay|relayterm] [--tui rust|ink] [--dir <relayDir>] [--replay <file|dir>] [--no-spawn]
+  entente daemon [--repo <path>] [--port N] [--dir <relayDir>]   ensure a relayd for this repo; prints {url, token}
   entente status [--repo <path>] [--port N] [--dir <relayDir>]
   entente down [--repo <path>] [--port N] [--dir <relayDir>]
 
@@ -108,6 +111,8 @@ const HOSTS: readonly LauncherHost[] = ['relay', 'relayterm'];
 const TUIS: readonly LauncherTui[] = ['rust', 'ink'];
 const HEALTH_TIMEOUT_MS = 1_000;
 const HEALTH_POLL_MS = 200;
+/** How many ports `entente daemon` will try before giving up looking for one it may use. */
+const DAEMON_PORT_SPAN = 32;
 const HEALTH_DEADLINE_MS = 15_000;
 const TOKEN_DEADLINE_MS = 2_000;
 const TOKEN_POLL_MS = 50;
@@ -150,7 +155,7 @@ export function parseArgs(argv: string[], cwd: string = process.cwd()): ParsedAr
   const first = positionals.shift();
   let command: LauncherCommand;
   if (first === undefined || first === 'up') command = 'up';
-  else if (first === 'status' || first === 'down') command = first;
+  else if (first === 'status' || first === 'down' || first === 'daemon') command = first;
   else if (first === 'help') return { command: 'help' };
   else throw new UsageError(`unknown command: ${first}`);
   if (positionals.length > 0) throw new UsageError(`unexpected argument: ${positionals[0]}`);
@@ -215,9 +220,10 @@ export async function checkHealth(
   }
   if (!response.ok) return { healthy: false, responded: true };
   try {
-    const value = await response.json() as { ok?: unknown; version?: unknown };
+    const value = await response.json() as { ok?: unknown; version?: unknown; repo?: unknown };
     if (value.ok === true && typeof value.version === 'string') {
-      return { healthy: true, responded: true, version: value.version };
+      const repo = typeof value.repo === 'string' ? value.repo : undefined;
+      return { healthy: true, responded: true, version: value.version, repo };
     }
   } catch {
     // A listener answered, but it did not provide relayd's health document.
@@ -457,6 +463,54 @@ export function resolveTerminalBase(
   return { host, ...(termd === undefined ? {} : { termd }), tui, ...(tuiBinary === undefined ? {} : { tuiBinary }) };
 }
 
+/**
+ * `entente daemon --repo <path>`: make sure a relayd is serving that repo, and say where it is.
+ *
+ * A workspace is a daemon, so opening a second project means starting a second one — and the client
+ * must not be the thing that decides whether one is needed. Two relayds on a single repo overwrite
+ * each other's `session.token` and lock out whichever clients were already connected, so exactly one
+ * place gets to answer "is there one already", and it is the place that has always answered it.
+ *
+ * Walks up from the requested port until it finds one that is either free or already serving this
+ * same repo, then prints `{"url":…,"token":…,"repo":…,"port":N}` for whatever asked.
+ */
+async function daemon(options: LauncherOptions, deps: LauncherDependencies): Promise<number> {
+  const base = resolveTerminalBase(options, deps);
+  for (let port = options.port; port < options.port + DAEMON_PORT_SPAN; port += 1) {
+    const url = baseUrl(port);
+    const health = await checkHealth(url, deps);
+    if (health.healthy) {
+      // Already a relayd here. Ours only if it is serving this repo; someone else's project otherwise.
+      // A daemon too old to report its repo cannot be told apart, and taking it would be the token
+      // clobber this whole dance exists to avoid — so it is left alone.
+      if (health.repo === undefined || !samePath(health.repo, options.repo)) continue;
+      const token = await readToken(options.relayDir, deps);
+      deps.stdout(JSON.stringify({ url, token, repo: options.repo, port, started: false }));
+      return 0;
+    }
+    // Something that is not relayd. Not ours to take, and not ours to kill.
+    if (health.responded) continue;
+    if (options.noSpawn) throw new LauncherError('relayd is not running; remove --no-spawn to start it');
+    spawnRelayd({ ...options, port, host: base.host, termd: base.termd, workspaceRoot: deps.workspaceRoot }, deps);
+    try {
+      await waitForHealth(url, deps);
+    } catch (error) {
+      throw new LauncherError(
+        error instanceof Error ? error.message : String(error),
+        lastLogLines(deps.fs, options.relayDir),
+      );
+    }
+    const token = await readToken(options.relayDir, deps);
+    deps.stdout(JSON.stringify({ url, token, repo: options.repo, port, started: true }));
+    return 0;
+  }
+  throw new LauncherError(
+    `no free port for a daemon between ${options.port} and ${options.port + DAEMON_PORT_SPAN - 1}`,
+  );
+}
+
+const samePath = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
+
 async function up(options: LauncherOptions, deps: LauncherDependencies): Promise<number> {
   const base = resolveTerminalBase(options, deps);
   if (options.replay !== undefined) {
@@ -561,6 +615,7 @@ export async function runLauncher(
       return 0;
     }
     if (options.command === 'up') return await up(options, deps);
+    if (options.command === 'daemon') return await daemon(options, deps);
     if (options.command === 'status') return await status(options, deps);
     return await down(options, deps);
   } catch (error) {
