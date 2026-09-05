@@ -41,9 +41,6 @@ pub fn action_keys(actions: &[ObjectAction]) -> String {
         .join(" · ")
 }
 
-/// Rows an item takes: its title, then the question or blocker underneath.
-const ROWS_PER_ITEM: usize = 2;
-
 /// One drawn row and the inbox item it stands for.
 pub type InboxRow = (Line<'static>, Option<GraphObjectRef>);
 
@@ -54,7 +51,10 @@ pub fn inbox_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         .collect()
 }
 
-pub fn inbox_rows(app: &App, height: usize) -> Vec<InboxRow> {
+/// Every row the inbox would draw if it had the room: a row per item saying who is asking about
+/// what, then one for each thing asked. Two questions on one line read as one; on their own rows
+/// they read as two.
+pub fn all_inbox_rows(app: &App) -> Vec<InboxRow> {
     let items = &app.ws().graph.inbox;
     if items.is_empty() {
         return vec![(
@@ -62,21 +62,14 @@ pub fn inbox_rows(app: &App, height: usize) -> Vec<InboxRow> {
             None,
         )];
     }
-    // Two rows an item: what is being asked, and who is asking about what. One line for both meant
-    // the question — the part that says what is actually wanted — was always the part cut off.
-    let max_items = (height / ROWS_PER_ITEM).max(1);
-    let selected_index = match &app.selected {
-        Some(r) if r.kind == RefKind::Inbox => items.iter().position(|i| i.id == r.id),
+    let selected = match &app.selected {
+        Some(r) if r.kind == RefKind::Inbox => Some(r.id.clone()),
         _ => None,
     };
-    let start = match selected_index {
-        Some(i) if i >= max_items => (i + 1 - max_items).min(items.len().saturating_sub(max_items)),
-        _ => 0,
-    };
     let mut rows: Vec<InboxRow> = Vec::new();
-    for item in items.iter().skip(start).take(max_items) {
+    for item in items {
         let reference = GraphObjectRef::inbox(&item.id);
-        let active = selected_index.is_some_and(|i| items[i].id == item.id);
+        let active = selected.as_deref() == Some(item.id.as_str());
         let mut title_style = Style::new().fg(Color::Yellow);
         if active {
             title_style = title_style.bold().reversed();
@@ -102,21 +95,44 @@ pub fn inbox_rows(app: &App, height: usize) -> Vec<InboxRow> {
         }
         rows.push((Line::from(spans), Some(reference.clone())));
 
-        // The question itself, on its own row where there is room for it. ←/→ read along it when it
-        // is longer than that.
-        let detail = item.detail.join(" · ");
-        rows.push((
-            Line::styled(
-                format!("    {}", if detail.is_empty() { "-" } else { &detail }),
-                Style::new().fg(if active { Color::Gray } else { Color::DarkGray }),
-            ),
-            Some(reference),
-        ));
+        let style = Style::new().fg(if active { Color::Gray } else { Color::DarkGray });
+        if item.detail.is_empty() {
+            rows.push((Line::styled("    -", style), Some(reference)));
+        } else {
+            for detail in &item.detail {
+                rows.push((
+                    Line::styled(format!("    {detail}"), style),
+                    Some(reference.clone()),
+                ));
+            }
+        }
     }
     rows
 }
 
+/// The first row of the selected item, so scrolling can be made to keep it in view.
+pub fn selected_row(app: &App) -> Option<usize> {
+    let selected = match &app.selected {
+        Some(r) if r.kind == RefKind::Inbox => r,
+        _ => return None,
+    };
+    all_inbox_rows(app)
+        .iter()
+        .position(|(_, r)| r.as_ref() == Some(selected))
+}
+
+/// The rows that fit, starting from where the panel is scrolled to.
+pub fn inbox_rows(app: &App, height: usize) -> Vec<InboxRow> {
+    let rows = all_inbox_rows(app);
+    let budget = height.max(1);
+    let start = app.inbox_scroll.min(rows.len().saturating_sub(1));
+    rows.into_iter().skip(start).take(budget).collect()
+}
+
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
+    // The selection is what j/k moves, so it has to be on screen whatever the panel is scrolled to.
+    let inner_height = area.height.saturating_sub(1) as usize;
+    app.reveal_selected_inbox(inner_height);
     let mut title = if app.ws().graph.inbox.is_empty() {
         Region::Inbox.title().to_string()
     } else {
@@ -124,6 +140,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     };
     if app.h_scroll > 0 {
         title.push_str(&format!("  →{}", app.h_scroll));
+    }
+    // Say what is out of sight, so a strip that has been read to the bottom looks different from one
+    // that merely ends there.
+    let total = all_inbox_rows(app).len();
+    let below = total.saturating_sub(app.inbox_scroll + inner_height);
+    if app.inbox_scroll > 0 || below > 0 {
+        title.push_str(&format!(
+            "  ↕ {}-{} of {total}",
+            app.inbox_scroll + 1,
+            total - below
+        ));
     }
     let block = panel_block(&title, region_active(app, Region::Inbox), Borders::TOP);
     let inner = block.inner(area);
@@ -166,13 +193,16 @@ mod snapshots {
         let rows = draw_rows(&mut app, 120, 40);
         let text = screen_text(&rows);
         assert!(text.contains("▶ INBOX (2)"), "{text}");
-        // Two rows an item: who is asking about what, then what is being asked.
+        // A row per item saying who is asking about what, then a row per thing asked.
         assert!(text.contains("? backend asks 2 questions (v1)"), "{text}");
         assert!(text.contains("[a answer · x cancel]"), "{text}");
+        assert!(text.contains("    Q1 Which auth method?"), "{text}");
         assert!(
-            text.contains("Q1 Which auth method? · Q2 Link expiry?"),
-            "{text}"
+            text.contains("    Q2 Link expiry?"),
+            "two questions are two rows:\n{text}"
         );
+        // The strip grew to hold both items, so nothing is out of sight and it says nothing about it.
+        assert!(!text.contains("↕"), "{text}");
         assert!(
             text.contains("◆ frontend needs a human review of AC-3"),
             "{text}"

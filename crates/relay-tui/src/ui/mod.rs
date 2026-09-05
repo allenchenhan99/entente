@@ -20,7 +20,17 @@ use ratatui::Frame;
 
 pub const MIN_WIDTH: u16 = 100;
 pub const MIN_HEIGHT: u16 = 30;
+/// The inbox strip: a heading plus its rows, between a floor and a cap. It grows with what is waiting
+/// — an item is a row plus one per thing asked — so a single question is not squeezed while an empty
+/// inbox does not hold five rows open for nothing. Past the cap it scrolls.
 pub const INBOX_ROWS: u16 = 5;
+const INBOX_MIN_ROWS: u16 = 3;
+const INBOX_MAX_ROWS: u16 = 9;
+
+fn inbox_rows_for(app: &App) -> u16 {
+    let content = crate::ui::inbox::all_inbox_rows(app).len() as u16;
+    (content + 1).clamp(INBOX_MIN_ROWS, INBOX_MAX_ROWS)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Areas {
@@ -34,10 +44,15 @@ pub struct Areas {
 }
 
 pub fn layout(area: Rect) -> Areas {
+    layout_with(area, INBOX_ROWS)
+}
+
+/// The layout with the inbox at a given height, so the strip can size itself to what is waiting.
+pub fn layout_with(area: Rect, inbox_rows: u16) -> Areas {
     let show_inbox = area.height >= 20;
     let [main, inbox, status] = Layout::vertical([
         Constraint::Min(1),
-        Constraint::Length(if show_inbox { INBOX_ROWS } else { 0 }),
+        Constraint::Length(if show_inbox { inbox_rows } else { 0 }),
         Constraint::Length(1),
     ])
     .areas(area);
@@ -110,7 +125,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         );
         return;
     }
-    let areas = layout(area);
+    let areas = layout_with(area, inbox_rows_for(app));
     tree::render(frame, areas.tree, app);
     graph::render(frame, areas.graph, app);
     if areas.panes.width > 0 {

@@ -414,6 +414,9 @@ pub struct App {
     pending_pane_close: Option<String>,
     /// Task the user is being asked about before it is deleted.
     pending_task_delete: Option<String>,
+    /// Rows the inbox is scrolled down. Two questions are two rows, so a couple of items outgrow the
+    /// strip, and what does not fit has to be reachable rather than simply gone.
+    pub inbox_scroll: usize,
     /// Columns the text panels are scrolled right. A question or a blocker is longer than any panel
     /// is wide, and cutting it off is not the same as having read it.
     pub h_scroll: u16,
@@ -474,6 +477,7 @@ impl App {
             graph_drag: None,
             pending_pane_close: None,
             pending_task_delete: None,
+            inbox_scroll: 0,
             h_scroll: 0,
             pane_scroll: BTreeMap::new(),
             dismissed_panes: std::collections::BTreeSet::new(),
@@ -1400,6 +1404,16 @@ impl App {
                     None => Vec::new(),
                 }
             }
+            MouseKind::ScrollUp if region == Region::Inbox => {
+                self.region = region;
+                self.scroll_inbox(-1);
+                Vec::new()
+            }
+            MouseKind::ScrollDown if region == Region::Inbox => {
+                self.region = region;
+                self.scroll_inbox(1);
+                Vec::new()
+            }
             MouseKind::ScrollUp => {
                 self.region = region;
                 self.move_selection(-1)
@@ -1509,6 +1523,28 @@ impl App {
     /// The stored position, readable without touching the pane map.
     pub fn pane_scroll_of(&self, pane_id: &str) -> usize {
         self.pane_scroll.get(pane_id).copied().unwrap_or(0)
+    }
+
+    /// Scroll the inbox. The end stop is the last row, so the panel can always show something.
+    pub fn scroll_inbox(&mut self, rows: i32) {
+        let last = crate::ui::inbox::all_inbox_rows(self)
+            .len()
+            .saturating_sub(1);
+        let next = (self.inbox_scroll as i32 + rows).clamp(0, last as i32);
+        self.inbox_scroll = next as usize;
+    }
+
+    /// Bring the selected item into view, so moving the selection is never a jump into nothing.
+    pub fn reveal_selected_inbox(&mut self, height: usize) {
+        let Some(row) = crate::ui::inbox::selected_row(self) else {
+            return;
+        };
+        let budget = height.max(1);
+        if row < self.inbox_scroll {
+            self.inbox_scroll = row;
+        } else if row >= self.inbox_scroll + budget {
+            self.inbox_scroll = row + 1 - budget;
+        }
     }
 
     /// Scroll the text panels sideways. Nothing knows how long the longest line is until it is drawn,

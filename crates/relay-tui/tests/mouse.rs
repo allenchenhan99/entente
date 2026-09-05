@@ -1077,3 +1077,100 @@ fn the_panel_says_when_you_are_not_at_the_left() {
         "a half-read line is never mistaken for a whole one:\n{text}"
     );
 }
+
+// --- an inbox with more than fits -----------------------------------------------------------------
+
+/// A graph whose inbox has many questions, so its rows outgrow any strip.
+fn crowded_inbox() -> Graph {
+    let mut g = graph("live-1");
+    g.inbox = (1..=6)
+        .map(|n| InboxItem {
+            id: format!("q{n}"),
+            kind: InboxKind::TaskQuestion,
+            mission_id: "m-1".to_string(),
+            task_id: Some(format!("t-{n}")),
+            title: format!("agent {n} asks a question"),
+            detail: vec![format!("Q1 question {n}"), format!("Q2 also {n}")],
+            since: None,
+            reference: GraphObjectRef::node(format!("t-{n}")),
+            actions: Vec::new(),
+        })
+        .collect();
+    g
+}
+
+#[test]
+fn every_question_gets_its_own_row() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(crowded_inbox());
+
+    let rows = relay_tui::ui::inbox::all_inbox_rows(&app);
+    let text: Vec<String> = rows.iter().map(|(l, _)| l.to_string()).collect();
+
+    assert!(text.iter().any(|l| l.contains("Q1 question 1")), "{text:?}");
+    assert!(text.iter().any(|l| l.contains("Q2 also 1")), "{text:?}");
+    assert!(
+        !text
+            .iter()
+            .any(|l| l.contains("Q1 question 1") && l.contains("Q2 also 1")),
+        "two questions are never one row: {text:?}"
+    );
+    // A row for the item, then one per question.
+    assert_eq!(rows.len(), 6 * 3);
+}
+
+#[test]
+fn the_inbox_scrolls_down_past_what_fits() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(crowded_inbox());
+    draw_rows(&mut app, 120, 32);
+    let first = String::from_iter(draw_rows(&mut app, 120, 32));
+    assert!(first.contains("↕"), "there is more than fits:\n{first}");
+
+    let rect = app.inbox_viewport;
+    for _ in 0..6 {
+        app.handle_mouse(Mouse::new(MouseKind::ScrollDown, rect.x + 2, rect.y + 1));
+    }
+    let later = String::from_iter(draw_rows(&mut app, 120, 32));
+
+    assert!(app.inbox_scroll > 0);
+    // What is on screen now was not before: that is the whole of what scrolling means.
+    assert!(
+        !first.contains("agent 5"),
+        "agent 5 was below the fold:\n{first}"
+    );
+    assert!(later.contains("agent 5"), "and is now in view:\n{later}");
+    assert!(
+        !later.contains("agent 1"),
+        "the first item scrolled away:\n{later}"
+    );
+}
+
+#[test]
+fn it_never_scrolls_past_the_last_row() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(crowded_inbox());
+
+    for _ in 0..200 {
+        app.scroll_inbox(1);
+    }
+
+    assert!(app.inbox_scroll < relay_tui::ui::inbox::all_inbox_rows(&app).len());
+}
+
+#[test]
+fn moving_the_selection_brings_it_back_into_view() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(crowded_inbox());
+    app.region = Region::Inbox;
+    app.select(Some(GraphObjectRef::inbox("q6")));
+
+    draw_rows(&mut app, 120, 32);
+
+    let shown = relay_tui::ui::inbox::inbox_rows(&app, 8);
+    let text: Vec<String> = shown.iter().map(|(l, _)| l.to_string()).collect();
+    assert!(
+        text.iter().any(|l| l.contains("agent 6")),
+        "the selected item is on screen: {text:?}"
+    );
+}
