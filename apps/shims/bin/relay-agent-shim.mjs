@@ -93,11 +93,46 @@ const paneId = process.env.RELAY_PANE_ID;
 const url = process.env.RELAY_URL ?? 'http://127.0.0.1:7420';
 const cwd = process.cwd();
 const token = sessionToken(cwd);
+/** The project this pane belongs to, which the daemon we talk to had better be serving. */
+const repo = process.env.RELAY_REPO;
+
+/**
+ * Is `url` the daemon for this pane's project?
+ *
+ * A workspace is a daemon, and `RELAY_URL` is how a pane is told which one is its own. Fall back to a
+ * default port and you register the agent against whatever happens to be listening there — silently,
+ * and in a second workspace that is somebody else's project. `/health` says which repo a daemon
+ * serves, so the guess can be checked instead of taken on faith.
+ */
+async function servesThisRepo() {
+  if (repo === undefined) return { ok: true };
+  try {
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return { ok: true };
+    const health = await res.json();
+    if (typeof health.repo !== 'string') return { ok: true };
+    if (path.resolve(health.repo) === path.resolve(repo)) return { ok: true };
+    return { ok: false, serving: health.repo };
+  } catch {
+    // Unreachable: the POST below reports that, with a message about the right thing.
+    return { ok: true };
+  }
+}
 
 // Not in an entente pane, or asked for something that is not a session (`--help`, `--version`):
 // nothing to adopt, so get out of the way entirely.
 const informational = args.some((a) => a === '--help' || a === '-h' || a === '--version' || a === '-V');
-if (!paneId || !token || informational) {
+const owner = !paneId || !token || informational ? { ok: true } : await servesThisRepo();
+if (!owner.ok) {
+  // Registering here would put this agent on another project's network. Better an unmanaged agent
+  // than one quietly attributed to the wrong workspace — and say which, because the cause is a pane
+  // older than the environment that names its daemon.
+  process.stderr.write(
+    `relay: starting ${TOOL} unmanaged — ${url} serves ${owner.serving}, but this pane is in ${repo}` +
+      ' · close this pane and open a new one\n',
+  );
+  run(binary, args, {});
+} else if (!paneId || !token || informational) {
   run(binary, args, {});
 } else {
   const body = JSON.stringify({ runtime: RUNTIME, pane_id: paneId, cwd, title: `${RUNTIME} session in ${path.basename(cwd)}` });
