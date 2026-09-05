@@ -171,6 +171,35 @@ describe('relay host prompt timings', () => {
     expect(host.metrics().prompt_failures).toBe(0);
   });
 
+  it('does not accept on a partial repaint: the footer moves first, the paste placeholder is painted later', async () => {
+    const { host, dir } = makeHost();
+    const capture = path.join(dir, 'capture.json');
+    const file = path.join(dir, 'agent.js');
+    fs.writeFileSync(file, `
+      const fs = require('fs'); let enters = 0;
+      process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (d) => { for (const ch of d) if (ch === '\\r') enters++; fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ enters }));
+        if (enters === 1) { process.stdout.write('\\r\\n  gpt-5.6-sol default · ~/x · 5 chars\\r\\n');
+          setTimeout(() => process.stdout.write('\\r\\n› [Pasted Content 5 chars]\\r\\n  gpt-5.6-sol default · ~/x · 5 chars\\r\\n'), 60); }
+        if (enters >= 2) process.stdout.write('\\r\\n• Working (1s • esc to interrupt)\\r\\n'); });
+      setTimeout(() => process.stdout.write('› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'), 100);
+      setTimeout(() => process.exit(0), 20000);
+    `);
+    const { paneId } = await host.spawn({ name: 'backend', cwd: dir, argv: [process.execPath, file], env: {}, prompt: 'hello' });
+    const cap = JSON.parse(fs.readFileSync(capture, 'utf8'));
+    expect(cap.enters).toBe(2);
+    expect(host.get(paneId)!.timings().prompt_retries).toBe(1);
+  });
+
+  it('an echoing shell keeps the submitted line visible above its reply; that is not "still in the composer"', async () => {
+    const { host, dir } = makeHost();
+    const t0 = Date.now();
+    const { paneId } = await host.spawn({ name: 'shell', cwd: dir, argv: ['sh', '-c', 'printf "> "; read x; echo "got:$x"; sleep 5'], env: {}, prompt: 'hello there' });
+    expect(Date.now() - t0).toBeLessThan(fastTimings.timeoutMs);
+    expect(host.get(paneId)!.timings().prompt_retries).toBe(0);
+    expect(host.get(paneId)!.lastLine()).toBe('got:hello there');
+  });
+
   it('counts the extra Enter presses as prompt_retries and includes them in prompt_accept_ms', async () => {
     const { host, dir } = makeHost();
     const file = path.join(dir, 'agent.js');

@@ -1,0 +1,9 @@
+{
+  "rules": [
+    { "match": "key|hash|sha|plaintext|lowercase|trim", "answer": "Keys are the SHA-256 hex of the lowercased, trimmed address; never plaintext." },
+    { "match": "window|60|second|boundary|exactly|backward|clock", "answer": "60 000 ms window; at exactly 60 s the next send is allowed; a clock going backwards counts as no time passed (false)." },
+    { "match": "test|fixture|address|example", "answer": "Tests use example.com addresses only." },
+    { "match": "bypass|admin|token|skip", "answer": "There is no bypass in this module. Do not add one." }
+  ],
+  "default": "Follow docs/TASK.md as written."
+}

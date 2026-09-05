@@ -1,0 +1,9 @@
+{
+  "rules": [
+    { "match": "ttl|expir|minute", "answer": "TOKEN_TTL_MS = 15 minutes; valid while now - createdAt < ttl; single use." },
+    { "match": "cookie|session", "answer": "Cookie named session, HttpOnly, SameSite=Lax, 24 h, SessionStore id." },
+    { "match": "interface|signature|api|constructor|create\\(|consume\\(", "answer": "Use the exact signatures from docs/TASK.md; do not change them." },
+    { "match": "unknown|enumerat", "answer": "Unknown emails get the identical 202 and no email." }
+  ],
+  "default": "Follow docs/TASK.md exactly."
+}

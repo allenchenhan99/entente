@@ -1,0 +1,41 @@
+tasks:
+  - id: t-login
+    recipient: login
+    runtime: codex
+    goal: Add passwordless login to the app (POST /auth/request, POST /auth/verify, GET /me with a session cookie) reusing UserRepo, SessionStore and EmailSender; the login mechanism (magic link vs 6-digit code) is a product-owner decision that has not been made
+    inputs:
+      - README.md
+      - src/app.ts
+      - src/models/user.ts
+      - src/session/store.ts
+      - src/email/stub.ts
+      - tests/app.test.ts
+    constraints:
+      - "POST /auth/request {email} → 202 {ok:true}; unknown emails get the identical 202 and no email is sent"
+      - "POST /auth/verify completes the login: 200 with the user {id,email,name} and an HttpOnly SameSite=Lax cookie named session (SessionStore id, 24 h TTL); invalid, expired or used credentials → 401 {error:'invalid or expired login'}"
+      - "GET /me returns 200 with the user for a valid session cookie, else the existing 401"
+      - "The login credential expires after 15 minutes and is single-use; store only its SHA-256 hash"
+      - "createApp accepts an options object { users?, emails?, now? } (defaults: seeded UserRepo, MemoryEmailSender, Date.now); the positional createApp(users) form must keep working"
+      - "Emails go through the EmailSender; tests read them from MemoryEmailSender.sent"
+      - "The login mechanism has NOT been decided by the product owner: either (a) magic link — email contains a URL with a token query parameter and POST /auth/verify takes {token} — or (b) 6-digit one-time code — email text contains the code and POST /auth/verify takes {email, code}. Exactly one must be implemented and it must match the product owner's decision."
+    non_goals:
+      - passwords, OAuth, account recovery, frontend, logout
+    scope:
+      allowed_paths:
+        - src/auth/**
+        - src/app.ts
+        - tests/auth/**
+    acceptance_criteria:
+      - id: AC-1
+        condition: The whole test suite passes, including new tests under tests/auth
+        check: { kind: command, run: "npx vitest run" }
+      - id: AC-2
+        condition: The project typechecks
+        check: { kind: command, run: "npm run typecheck" }
+      - id: AC-3
+        condition: Only files under the allowed paths changed
+        check: { kind: diff_scope }
+    output:
+      type: code_change
+      evidence_required: [git_diff, changed_files, check_outputs]
+    budget: { max_repairs: 1, stagnation_limit: 2 }

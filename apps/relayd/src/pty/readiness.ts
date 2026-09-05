@@ -37,6 +37,15 @@ export interface ReadinessInput {
   observedAt?: string;
 }
 
+/** The last non-empty line that is not footer chrome: where an agent TUI's composer sits. */
+export const lastMeaningfulLine = (lines: string[]): string | undefined => {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (line.trim().length > 0 && !CHROME.test(line)) return line;
+  }
+  return undefined;
+};
+
 export const lastNonEmptyLine = (lines: string[]): string | undefined => {
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;

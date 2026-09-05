@@ -1,0 +1,37 @@
+tasks:
+  - id: t-store
+    recipient: store
+    runtime: codex
+    goal: Implement src/auth/token-store.ts exactly per docs/TASK.md (Module A) with tests in tests/auth/token-store.test.ts
+    inputs: [README.md, docs/TASK.md, src/session/store.ts, tests/session-store.test.ts]
+    constraints:
+      - "export const TOKEN_TTL_MS = 15 * 60 * 1000; export class TokenStore { constructor(options?: { now?: () => number; ttlMs?: number }); create(email: string): string; consume(token: string): string | undefined }"
+      - "create returns a raw token of at least 32 random bytes (hex or base64url); only its SHA-256 hex hash is stored"
+      - "consume returns the email while now() - createdAt < ttlMs, else undefined; a second consume of the same token returns undefined"
+    non_goals: [HTTP routes, sessions, email sending — another agent owns those]
+    scope: { allowed_paths: [src/auth/token-store.ts, tests/auth/token-store.test.ts] }
+    acceptance_criteria:
+      - { id: AC-1, condition: token store tests pass, check: { kind: command, run: "npx vitest run tests/auth/token-store.test.ts" } }
+      - { id: AC-2, condition: typecheck passes, check: { kind: command, run: "npm run typecheck" } }
+      - { id: AC-3, condition: only the allowed files changed, check: { kind: diff_scope } }
+    output: { type: code_change, evidence_required: [git_diff, changed_files, check_outputs] }
+    budget: { max_repairs: 1, stagnation_limit: 2 }
+  - id: t-routes
+    recipient: routes
+    runtime: codex
+    goal: Implement the magic-link HTTP routes (Module B of docs/TASK.md) in src/auth/routes.ts and wire them in src/app.ts, coding against the TokenStore interface that another agent implements in parallel
+    inputs: [README.md, docs/TASK.md, src/app.ts, src/models/user.ts, src/session/store.ts, src/email/stub.ts, tests/app.test.ts]
+    constraints:
+      - "The TokenStore module (src/auth/token-store.ts) is being written by another agent right now with exactly this interface: export const TOKEN_TTL_MS; export class TokenStore { constructor(options?: { now?: () => number; ttlMs?: number }); create(email: string): string; consume(token: string): string | undefined }. Import it from './token-store.js'; if the file does not exist yet, write your tests against an in-memory fake with that interface and do NOT create the file."
+      - "createApp({ users?, emails?, tokens?, sessions?, now? }) with the defaults from docs/TASK.md; keep createApp(users) working"
+      - "POST /auth/request {email} → 202 {ok:true}; known users get an email whose text contains /auth/verify?token=<raw>; unknown emails identical 202, no email"
+      - "POST /auth/verify {token} → 200 user {id,email,name} + HttpOnly SameSite=Lax cookie session=<SessionStore id> (24 h); else 401 {error:'invalid or expired login'}"
+      - "GET /me → 200 user for a valid session cookie, else the existing 401"
+    non_goals: [the token store implementation, passwords, OAuth, logout]
+    scope: { allowed_paths: [src/auth/routes.ts, src/app.ts, tests/auth/routes.test.ts] }
+    acceptance_criteria:
+      - { id: AC-1, condition: route tests pass, check: { kind: command, run: "npx vitest run tests/auth/routes.test.ts" } }
+      - { id: AC-2, condition: typecheck passes, check: { kind: command, run: "npm run typecheck" } }
+      - { id: AC-3, condition: only the allowed files changed, check: { kind: diff_scope } }
+    output: { type: code_change, evidence_required: [git_diff, changed_files, check_outputs] }
+    budget: { max_repairs: 1, stagnation_limit: 2 }

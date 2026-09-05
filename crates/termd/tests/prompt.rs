@@ -116,6 +116,60 @@ async fn enter_is_pressed_again_while_the_composer_still_holds_the_paste() {
 }
 
 #[tokio::test]
+async fn does_not_accept_on_a_partial_repaint_before_the_paste_placeholder_is_painted() {
+    let srv = common::start().await;
+    let cap = srv.file("cap.txt");
+    // First Enter: the footer moves at once, the `[Pasted Content …]` placeholder only 60 ms later. Without a
+    // settle window the host would call that "accepted" (last line changed, no placeholder yet) and never retry.
+    let script = format!(
+        "stty -echo; printf '› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'; read a; \
+         printf '\\r\\n  gpt-5.6-sol default · ~/x · 5 chars\\r\\n'; sleep 0.06; \
+         printf '\\r\\n› [Pasted Content 5 chars]\\r\\n  gpt-5.6-sol default · ~/x · 5 chars\\r\\n'; read b; \
+         printf '%s|%s' \"$a\" \"$b\" > {}; printf '\\r\\n• Working (1s • esc to interrupt)\\r\\n'; sleep 3",
+        cap.display()
+    );
+    let res = srv.spawn(spawn_body(&srv, &script, "hello")).await;
+    assert_eq!(res.status, 201, "{}", res.text);
+    let id = res.body["pane_id"].as_str().unwrap().to_string();
+    srv.until(
+        || async { !common::read_file(&cap).is_empty() },
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(common::read_file(&cap), "hello|");
+    let info = srv.pane(&id).await;
+    assert_eq!(info["timings"]["prompt_retries"], 1, "{}", info["timings"]);
+    srv.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_echoing_shell_keeps_the_submitted_line_above_its_reply_and_that_is_accepted() {
+    let srv = common::start().await;
+    let t0 = Instant::now();
+    let res = srv
+        .spawn(spawn_body(
+            &srv,
+            "printf '> '; read x; echo \"got:$x\"; sleep 5",
+            "hello there",
+        ))
+        .await;
+    assert_eq!(res.status, 201, "{}", res.text);
+    assert!(
+        t0.elapsed() < Duration::from_millis(2500),
+        "{:?}",
+        t0.elapsed()
+    );
+    let id = res.body["pane_id"].as_str().unwrap().to_string();
+    let info = srv.pane(&id).await;
+    assert_eq!(info["timings"]["prompt_retries"], 0, "{}", info["timings"]);
+    assert_eq!(
+        srv.host().get(&id).unwrap().last_line().as_deref(),
+        Some("got:hello there")
+    );
+    srv.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_shell_that_never_prompts_fails_with_502_after_timeout_and_the_pane_stays_open() {
     let srv = common::start().await;
     let t0 = Instant::now();

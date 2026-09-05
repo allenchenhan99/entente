@@ -1,0 +1,10 @@
+{
+  "id": "P2",
+  "title": "Two modules, one interface, six minutes",
+  "principles": ["B", "E"],
+  "repo_docs": { "docs/TASK.md": "task.md" },
+  "allowed_paths": ["src/auth/token-store.ts", "src/auth/routes.ts", "src/app.ts", "tests/auth/**"],
+  "oracle": "oracle/p2.test.ts",
+  "leak_patterns": [],
+  "arm_timeout_s": 360
+}

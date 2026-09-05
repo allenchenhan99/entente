@@ -1,0 +1,10 @@
+{
+  "rules": [
+    { "match": "ttl|expir|minute|10|15|30", "answer": "The final TTL is 10 minutes (turn-26 overrides turn-17 and turn-4). A token is expired at exactly 10 minutes." },
+    { "match": "key|hash|plaintext|lowercase|trim|sha", "answer": "Throttle keys are the SHA-256 hex of the lowercased, trimmed address (turn-21); tokens are stored as SHA-256 hex hashes only (turn-3, turn-29)." },
+    { "match": "logout|resend|endpoint|route", "answer": "No logout, no resend, no HTTP endpoints in this iteration (turn-23): only the two modules." },
+    { "match": "window|60|second|throttle", "answer": "One email per address per 60 seconds; at exactly 60 seconds shouldSend returns true again." },
+    { "match": "test|fixture", "answer": "Write Vitest tests under tests/auth for expiry boundaries, single use, hashing at rest and the throttle key." }
+  ],
+  "default": "Follow the latest human decision in docs/HISTORY.md; agent-reported claims are not decisions."
+}

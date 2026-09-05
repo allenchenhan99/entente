@@ -16,7 +16,7 @@ import type { SpawnOptions } from '../ports.js';
 import { Pane, runtimeOf, KILL_GRACE_MS } from './pane.js';
 import type { ScreenQuery } from './screen.js';
 import { keysToBytes } from './keys.js';
-import { QUIET_MS } from './readiness.js';
+import { QUIET_MS, lastMeaningfulLine } from './readiness.js';
 
 export interface PromptTimings {
   /** No output for this long = quiet (also the readiness window). */
@@ -254,14 +254,36 @@ export class RelayHost {
     const prefix = prompt.slice(0, 24);
     // The prompt is still sitting in the agent's composer when the screen shows a paste placeholder
     // (Codex: `› [Pasted Content 2981 chars]`) or a composer line that still starts with our text.
-    const stillInComposer = () => pane.visibleLines().some((l) => /\[Pasted Content/.test(l) || ((/^[❯›>] /.test(l.trim()) || l.trim() === '›') && l.includes(prefix)));
+    // "Still in the composer" = a paste placeholder anywhere on screen, or the bottom-most non-chrome line is a
+    // composer line still showing our text. Lines above it are history (an echoing shell keeps `> hello` visible
+    // above its reply; that is a submitted prompt, not a pending one).
+    const stillInComposer = () => {
+      const lines = pane.visibleLines();
+      if (lines.some((l) => /\[Pasted Content/.test(l))) return true;
+      const bottom = lastMeaningfulLine(lines);
+      if (bottom === undefined) return false;
+      const t = bottom.trim();
+      return (/^[❯›>] /.test(t) || t === '›') && bottom.includes(prefix);
+    };
     // Accepted = the agent is visibly busy, or the screen moved on and the composer is clear.
     const accepted = () => {
       const r = pane.readiness();
       if (!r.ready && r.detail?.startsWith('busy')) return true;
       return !stillInComposer() && pane.lastLine() !== before;
     };
-    while (!accepted()) {
+    // Evaluate acceptance only once the screen has settled: a TUI repaints in several chunks, and between two of
+    // them the footer may already have moved while the `[Pasted Content …]` placeholder is not painted yet (seen
+    // live with Codex: "accepted" after 1.7 ms, Enter never retried, prompt left in the composer).
+    const settleMs = Math.min(quietMs, 300);
+    const writtenAt = Date.now();
+    for (;;) {
+      // Two guards: a minimum wait after the write (the agent's first repaint lands within a few ms) and a quiet
+      // screen; the verdict is only trusted if no output landed while it was computed.
+      if (Date.now() - writtenAt >= settleMs && pane.quietFor() >= settleMs) {
+        const chunksBefore = pane.timings().output_chunks;
+        const verdict = accepted();
+        if (verdict && pane.timings().output_chunks === chunksBefore) break;
+      }
       if (!pane.alive) throw fail(exitedWhy());
       if (Date.now() > deadline) throw fail(`prompt not accepted within ${timeoutMs} ms (last line: ${JSON.stringify(pane.lastLine() ?? '')})`);
       if (stillInComposer() && retries < 3 && Date.now() - lastEnterAt >= retryMs) {

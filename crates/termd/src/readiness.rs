@@ -60,6 +60,15 @@ pub struct ReadinessInput<'a> {
     pub observed_at: Option<String>,
 }
 
+/// The last non-empty line that is not footer chrome: where an agent TUI's composer sits.
+pub fn last_meaningful_line(lines: &[String]) -> Option<&str> {
+    lines
+        .iter()
+        .rev()
+        .find(|l| !l.trim().is_empty() && !CHROME.is_match(l))
+        .map(String::as_str)
+}
+
 pub fn last_non_empty_line(lines: &[String]) -> Option<&str> {
     lines
         .iter()

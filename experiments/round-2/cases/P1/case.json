@@ -1,0 +1,22 @@
+{
+  "id": "P1",
+  "title": "Sharded spec with superseded decisions",
+  "principles": [
+    "A",
+    "E"
+  ],
+  "planner": "codex",
+  "mission_title": "Implement the magic-link token store and email throttle exactly as decided in docs/TASK.md and docs/HISTORY.md",
+  "repo_docs": {
+    "docs/TASK.md": "task.md"
+  },
+  "allowed_paths": [
+    "src/auth/token-store.ts",
+    "src/auth/email-throttle.ts",
+    "tests/auth/**"
+  ],
+  "oracle": "oracle/p1.test.ts",
+  "leak_patterns": [],
+  "arm_timeout_s": 720,
+  "history_via": "mission"
+}

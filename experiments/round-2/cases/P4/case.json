@@ -1,0 +1,9 @@
+{
+  "id": "P4",
+  "title": "A decision the product owner has not made",
+  "principles": ["D", "E"],
+  "allowed_paths": ["src/auth/**", "src/app.ts", "tests/auth/**"],
+  "oracle_by_decision": { "link": "oracle/link.test.ts", "code": "oracle/code.test.ts" },
+  "leak_patterns": [],
+  "arm_timeout_s": 600
+}

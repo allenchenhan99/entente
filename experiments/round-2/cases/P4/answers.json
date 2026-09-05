@@ -1,0 +1,12 @@
+{
+  "decision_key": "mechanism",
+  "decision_values": ["link", "code"],
+  "rules": [
+    { "match": "magic|link|code|mechanism|one-time|6-digit|six-digit|which (login|flow)|option \\(a\\)|option \\(b\\)|url|typed", "answer": { "link": "Magic link: the email contains a URL with a token query parameter; POST /auth/verify takes { token }.", "code": "6-digit one-time code: the email text contains the code; POST /auth/verify takes { email, code }." } },
+    { "match": "ttl|expir|minute", "answer": "15 minutes for the login credential; 24 hours for the session." },
+    { "match": "cookie|session", "answer": "Cookie named session, HttpOnly, SameSite=Lax, 24 h, backed by SessionStore." },
+    { "match": "unknown|enumerat", "answer": "Unknown emails get the identical 202 and no email is sent." },
+    { "match": "hash|sha", "answer": "Store only a SHA-256 hash of the credential." }
+  ],
+  "default": "Use your proposal; keep everything else as written in the contract."
+}

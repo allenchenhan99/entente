@@ -418,6 +418,11 @@ impl Pane {
     }
 
     /// ms since the last output byte (infinity before the first).
+    /// Output chunks seen so far (the prompt deliverer uses it to detect a repaint racing its verdict).
+    pub fn output_chunks(&self) -> u64 {
+        self.with_marks(|m| m.output_chunks)
+    }
+
     pub fn quiet_for(&self) -> f64 {
         match self.lock().last_output_at {
             None => f64::INFINITY,

@@ -4,7 +4,7 @@
 use crate::keys::{keys_to_bytes, UnknownKey};
 use crate::metrics::{ms_between, HostMetrics, HostMetricsPane, HOST_KIND};
 use crate::pane::{now_iso, Pane, PaneInfo, PaneOptions, PaneSpawnError, KILL_GRACE_MS};
-use crate::readiness::QUIET_MS;
+use crate::readiness::{last_meaningful_line, QUIET_MS};
 use crate::screen::{ScreenQuery, ScreenSource};
 use regex::Regex;
 use serde::Serialize;
@@ -387,12 +387,21 @@ impl Host {
         let prefix: String = prompt.chars().take(24).collect();
         // The prompt is still sitting in the agent's composer when the screen shows a paste placeholder
         // (Codex: `› [Pasted Content 2981 chars]`) or a composer line that still starts with our text.
+        // "Still in the composer" = a paste placeholder anywhere on screen, or the bottom-most non-chrome line
+        // is a composer line still showing our text. Lines above it are history (an echoing shell keeps
+        // `> hello` visible above its reply; that is a submitted prompt, not a pending one).
         let still_in_composer = || {
-            pane.visible_lines().iter().any(|l| {
-                let trimmed = l.trim();
-                PASTED.is_match(l)
-                    || ((COMPOSER_LINE.is_match(trimmed) || trimmed == "›") && l.contains(&prefix))
-            })
+            let lines = pane.visible_lines();
+            if lines.iter().any(|l| PASTED.is_match(l)) {
+                return true;
+            }
+            match last_meaningful_line(&lines) {
+                None => false,
+                Some(bottom) => {
+                    let trimmed = bottom.trim();
+                    (COMPOSER_LINE.is_match(trimmed) || trimmed == "›") && bottom.contains(&prefix)
+                }
+            }
         };
         // Accepted = the agent is visibly busy, or the screen moved on and the composer is clear.
         let accepted = || {
@@ -402,7 +411,22 @@ impl Host {
             }
             !still_in_composer() && pane.last_line() != before
         };
-        while !accepted() {
+        // Evaluate acceptance only once the screen has settled: a TUI repaints in several chunks, and between
+        // two of them the footer may already have moved while the `[Pasted Content …]` placeholder is not
+        // painted yet (seen live with Codex: "accepted" after 1.7 ms, Enter never retried).
+        let settle_ms = quiet_ms.min(300.0);
+        let written_at = Instant::now();
+        loop {
+            // Two guards: a minimum wait after the write (the agent's first repaint lands within a few ms), and
+            // a quiet screen; then the verdict is only trusted if no output landed while it was computed.
+            let since_write = written_at.elapsed().as_secs_f64() * 1000.0;
+            if since_write >= settle_ms && pane.quiet_for() >= settle_ms {
+                let chunks_before = pane.output_chunks();
+                let verdict = accepted();
+                if verdict && pane.output_chunks() == chunks_before {
+                    break;
+                }
+            }
             if !pane.alive() {
                 return Err(exited_why());
             }
