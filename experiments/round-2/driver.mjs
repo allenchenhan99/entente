@@ -195,7 +195,7 @@ async function runEntente() {
         const res = await fetch(`${url}/tasks/${e.task_id}/clarify`, { method: 'POST', headers, body: JSON.stringify(body) });
         log(`answered ${qs.length} question(s) for ${e.task_id} → ${res.status}`);
       }
-      if (e.type === 'task_blocked' && e.payload.waiting_on === 'human') {
+      if (e.type === 'task_blocked' && !/never called relay|agent spawn failed/.test(e.payload.reason ?? '')) {
         const message = answers.blocker ?? 'Proceed with the contract as written; no additional requirements. If you cannot, state why in your evidence summary and submit.';
         record.replies.push({ task_id: e.task_id, reason: e.payload.reason, message });
         await fetch(`${url}/tasks/${e.task_id}/reply`, { method: 'POST', headers, body: JSON.stringify({ message }) });
