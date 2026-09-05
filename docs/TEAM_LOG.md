@@ -1,5 +1,21 @@
 # Agent team log
 
+## 2026-09-06 - Remove the obsolete presentation implementation
+
+- User requested deleting the old deck after seeing an old view at the root URL.
+  Read-only HTTP checks returned the same current seven-page deck for both root
+  and versioned URLs, so a client/cache cause remains possible; legacy source
+  removal is not claimed to directly clear an already cached browser page.
+- Removed the unused React entry, slides, components, hooks, Vite/TypeScript
+  configuration and dependency lockfile. The Pages workflow now uses a no-dependency
+  static build with one HTML entry. It clears only resolved presentation/dist,
+  checks inline JavaScript and image references, and stamps the deployment SHA
+  for direct public-version verification. Standalone Archify links are preserved.
+- Main worktree and original main are used within the user's explicit deletion
+  and deployment authorization. No temporary branches or worktrees introduced.
+  The previous full CI failure is an existing replay-path snapshot mismatch in
+  graph.test.ts after anonymization; runtime/test fixtures are outside this task.
+
 ## 2026-09-06 - Publish the approved two-minute pitch v2
 
 - Owner: primary agent. User explicitly requested replacing original GitHub

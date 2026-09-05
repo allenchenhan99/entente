@@ -1,39 +1,27 @@
 ﻿# Entente hackathon presentation
 
-Seven slides, 120 seconds. Team: **Atrophied Intelligence**.
-Published at https://allenchenhan99.github.io/entente/.
+The only presentation entry is `index.html`: the seven-slide, 120-second pitch
+by Atrophied Intelligence. The old React presentation and entry were removed.
+Public URL: https://allenchenhan99.github.io/entente/
 
-The current entry is `index.html`, adopted from the approved pitch v2. It contains
-layouts, diagram animations, navigation and speaker notes. Images live in
-`public/`. The existing Archify viewer at `public/diagrams/handoff.html` remains
-available to the presentation and repository README.
-
-## Run and build
-
-Use Node.js 22.13 or later:
+## Build
 
 ```bash
 cd presentation
-npm ci
-npm run dev
+npm run build
 ```
 
-Open the printed URL with `/entente/` appended. `npm run build` checks TypeScript
-and builds `dist/`; `npm start` previews the production build. The previous React
-presentation source remains but is not imported by this entry.
+Requires Node 22; no dependency installation. The build validates the seven
+slides, inline JavaScript syntax and image references, clears only the generated
+`presentation/dist` directory, and copies the current HTML and public assets.
+GitHub Pages uploads that directory. The standalone Archify handoff diagram
+remains available at `diagrams/handoff.html` for existing README links.
 
 ## Present
 
-- Slide durations: 5 / 20 / 30 / 20 / 25 / 10 / 10 seconds.
-- Arrows navigate; N toggles speaker notes; F enters fullscreen.
-- The playback button starts/resumes timed navigation. Diagrams animate automatically.
-- Slide 3 displays the Contract beside the session tree and context packet.
-- Slide 4 uses the unchanged team terminal screenshot with automatic annotations.
-- The Demo links to the team's Drive folder; no video is downloaded or embedded.
-- Provenance Engineering is introduced on the final slide.
+Arrows navigate; N toggles notes; F enters fullscreen. The playback button starts
+or resumes the 120-second presentation. Diagrams animate automatically.
+Slide 4 shows the team's real Demo screenshot. Video is linked, not embedded.
 
-## Publish
-
-The existing Pages workflow builds and deploys presentation changes on `main`.
-Asset paths use the `/entente/` base. Keep the standalone handoff diagram path
-stable because the repository README links to it.
+To preview the built project URL locally, place `dist` beneath an HTTP server's
+`entente/` path, matching the deployed image paths.
