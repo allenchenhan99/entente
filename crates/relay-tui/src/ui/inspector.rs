@@ -253,9 +253,9 @@ mod snapshots {
     fn inspector_on_an_edge_shows_the_contract_facts_of_live_7() {
         let mut app = replay_app("live-7");
         app.handle_key(Key::TAB);
-        for _ in 0..6 {
-            app.handle_key(Key::char('j'));
-        }
+        // Ask for the edge rather than counting keystrokes to it: this is about what the inspector
+        // shows, and the graph region's object list changes as the network's own rules change.
+        app.select(Some(GraphObjectRef::edge("contract:t-token-store")));
         let r = open_with_fixture(&mut app, "live-7");
         assert_eq!(r, GraphObjectRef::edge("contract:t-token-store"));
         let rows = draw_rows(&mut app, 120, 40);

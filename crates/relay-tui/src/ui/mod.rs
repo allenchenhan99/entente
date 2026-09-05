@@ -5,6 +5,7 @@
 pub mod graph;
 pub mod inbox;
 pub mod inspector;
+pub mod network;
 pub mod panes;
 pub mod status;
 pub mod tree;

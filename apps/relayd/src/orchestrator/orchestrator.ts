@@ -485,6 +485,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       throw conflict(`task ${parentTaskId} is ${parent.taskState}; it cannot delegate any more work`);
     }
     if (input.id === parentTaskId) throw new RelayError(400, `subtask ${input.id} cannot be its own parent (cycle)`);
+    // Two layers, by design: you prompt an agent, and that agent may call others. A called agent works
+    // rather than delegating further, so the network stays a thing a human can hold in their head.
+    const parentContractNow = current(parent);
+    if (parentContractNow.parent_task !== undefined) {
+      throw new RelayError(
+        400,
+        `task ${parentTaskId} is itself a subtask of ${parentContractNow.parent_task}, so it cannot delegate: `
+        + 'the network is two layers deep (an agent you prompted, and the agents it calls). '
+        + 'Do this work yourself, or report a blocker asking the human to widen your contract.',
+      );
+    }
     const existing = tasks.get(input.id);
     if (existing && current(existing).parent_task !== parentTaskId) {
       throw conflict(`task ${input.id} already exists and is not a subtask of ${parentTaskId}`);

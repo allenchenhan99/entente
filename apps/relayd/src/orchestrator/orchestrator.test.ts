@@ -440,6 +440,25 @@ describe('integration', () => {
 describe('subtask (agent networking)', () => {
   const child = (over = {}) => sampleContract('t-a-schema', over);
 
+  it('a subtask cannot delegate: the network is two layers, not a tree', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    r.orchestrator.respond('t-a-schema', accept);
+
+    // The sub tries to call an agent of its own.
+    await expect(
+      r.orchestrator.proposeSubtask('t-a-schema', sampleContract('t-a-schema-deeper')),
+    ).rejects.toThrow(/two layers/);
+
+    // Nothing was created, and the refusal says what to do instead.
+    expect(r.ofType('task_proposed').map((e) => e.task_id)).not.toContain('t-a-schema-deeper');
+    await expect(
+      r.orchestrator.proposeSubtask('t-a-schema', sampleContract('t-a-schema-deeper')),
+    ).rejects.toThrow(/report a blocker/);
+  });
+
   it('proposeSubtask: task_proposed by agent:<parent role>, parent_task stored, lint runs, child spawns, no tasks_planned', async () => {
     const r = createTestRelay();
     const mission_id = await spawnedTask(r);

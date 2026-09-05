@@ -60,7 +60,8 @@ fn keys_tab_cycles_tree_graph_panes_inbox_and_selects_the_first_object() {
     assert_eq!(app.region, Region::Tree);
     app.handle_key(Key::TAB);
     assert_eq!(app.region, Region::Graph);
-    assert_eq!(app.selected, Some(GraphObjectRef::node("human")));
+    // The human is not an agent on the network, so the first object is the first brain.
+    assert_eq!(app.selected, Some(GraphObjectRef::node("planner")));
     app.handle_key(Key::TAB);
     assert_eq!(app.region, Region::Panes);
     assert_eq!(app.focused_pane.as_deref(), Some("relay:1"));

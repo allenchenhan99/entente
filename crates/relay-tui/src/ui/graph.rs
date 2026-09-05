@@ -1,5 +1,6 @@
 //! The agent network: nodes as discs on a ratatui `Canvas`, edges as lines between their rims, drawn in
-//! three tiers (you / planner · agents · verifier) so the whole graph fits the narrow left column.
+//! two layers of agents and the verifier under them — the brains you prompted, the subs they called —
+//! so the whole network fits the narrow left column.
 //!
 //! Layout is in a fixed world box and never force-directed: a disc must not move under the pointer when
 //! relayd spawns or reaps a neighbour. The view (pan and zoom) maps that world onto the panel, correcting
@@ -11,6 +12,7 @@
 
 use crate::app::{App, GraphView, Region, Viewport};
 use crate::model::*;
+use crate::ui::network::{name_nodes, Naming};
 use crate::ui::tree::{enum_name, status_color};
 use crate::ui::{panel_block, region_active, viewport_of};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -57,6 +59,11 @@ pub struct Disc {
 /// task has produced something to check. Until then its status is `pending` and it is a lifeless dot
 /// taking space a 40-column panel does not have.
 pub fn is_visible(node: &GraphNode) -> bool {
+    // The human is not an agent on the network: you are the one reading it. What you asked for is
+    // drawn as the brain you asked it of.
+    if node.kind == GraphNodeKind::Human {
+        return false;
+    }
     !(node.kind == GraphNodeKind::Verifier && node.status == VisualStatus::Pending)
 }
 
@@ -134,28 +141,43 @@ pub fn slot_width(count: usize) -> f64 {
 
 /// Where each node sits. Nodes of a tier are spread evenly across the world's width, in protocol order.
 pub fn layout_net(graph: &Graph, unattached: &[GraphNode]) -> Vec<Disc> {
-    let mut tiers: [Vec<&GraphNode>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    // Two layers of agents and the verifier under them: who you prompted, who they called, and what
+    // checks the result. The protocol's `column` is not used for agents — an agent's layer is who gave
+    // it its contract, not which column the object model happens to put it in.
+    let naming = name_nodes(graph, unattached);
+    let mut tiers: [Vec<(&GraphNode, Option<&Naming>)>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     for node in graph
         .nodes
         .iter()
         .chain(unattached.iter())
         .filter(|n| is_visible(n))
     {
-        // The protocol's fourth column (`done`) has no object behind it yet; fold it into the verifier tier
-        // rather than leaving a dead band in a panel this narrow.
-        let tier = (node.column as usize).min(2);
-        tiers[tier].push(node);
+        let named = naming.get(&node.id);
+        // The protocol's fourth column (`done`) has no object behind it yet; fold it into the verifier
+        // tier rather than leaving a dead band in a panel this narrow.
+        let tier = named
+            .map(|n| n.tier)
+            .unwrap_or((node.column as usize).min(2));
+        tiers[tier.min(2)].push((node, named));
     }
+    // A layer nobody is using leaves no gap: with no delegation the verifier moves up under the
+    // brains rather than floating below an empty band, which a 40-column panel cannot spare.
+    let occupied: Vec<usize> = (0..3).filter(|t| !tiers[*t].is_empty()).collect();
+    let row_of = |tier: usize| occupied.iter().position(|t| *t == tier).unwrap_or(tier);
+
     let mut discs = Vec::new();
     for (tier, nodes) in tiers.iter().enumerate() {
         let count = nodes.len();
-        for (index, node) in nodes.iter().enumerate() {
+        for (index, (node, named)) in nodes.iter().enumerate() {
             let step = WORLD / (count as f64 + 1.0);
             discs.push(Disc {
                 id: node.id.clone(),
-                label: node.label.clone(),
+                // `brain 1` / `sub 1.2`; the role stays on the detail line, which has room for it.
+                label: named
+                    .map(|n| n.label.clone())
+                    .unwrap_or_else(|| node.label.clone()),
                 x: step * (index as f64 + 1.0),
-                y: TIER_Y[tier],
+                y: TIER_Y[row_of(tier)],
                 radius: if node.kind == GraphNodeKind::Agent {
                     R_AGENT
                 } else {
@@ -330,6 +352,20 @@ pub fn detail_line(app: &App) -> Line<'static> {
                 Style::new().fg(Color::DarkGray),
             ));
             spans.push(Span::raw(value));
+        }
+        // A brain has no incoming edge to carry its contract — nobody called it, you did — so the
+        // version and its state come here instead of being lost with the human node.
+        if let Some(edge) = app
+            .graph
+            .edges
+            .iter()
+            .find(|e| e.kind == GraphEdgeKind::Contract && e.to == node.id)
+        {
+            spans.push(Span::styled(" · ", Style::new().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                edge.label.clone(),
+                Style::new().fg(status_color(edge.status)),
+            ));
         }
     } else if let Some(badge) = node.badge.clone() {
         spans.push(Span::styled(
@@ -545,22 +581,35 @@ mod tests {
         graph
     }
 
+    /// live-1's tasks were both proposed by the human, so they are two brains; give one a caller so
+    /// the network has a brain, a sub and an edge between them.
+    fn graph_with_a_sub(name: &str) -> Graph {
+        let mut graph = graph_with_verifier(name);
+        for edge in graph.edges.iter_mut() {
+            if edge.kind == GraphEdgeKind::Contract && edge.to == "t-frontend-login" {
+                edge.from = "t-backend-auth".to_string();
+            }
+        }
+        graph
+    }
+
     #[test]
-    fn nodes_sit_in_three_tiers_with_agents_between_the_human_and_the_verifier() {
-        let discs = layout_net(&graph_with_verifier("live-1"), &[]);
-        let human = discs.iter().find(|d| d.id == "human").unwrap();
-        let agent = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
+    fn brains_sit_above_their_subs_and_the_verifier_below_both() {
+        let discs = layout_net(&graph_with_a_sub("live-1"), &[]);
+        let brain = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
+        let sub = discs.iter().find(|d| d.id == "t-frontend-login").unwrap();
         let verifier = discs.iter().find(|d| d.id == "verifier").unwrap();
 
         assert!(
-            human.y > agent.y,
-            "the human tier is drawn above the agents"
+            !discs.iter().any(|d| d.id == "human"),
+            "the human is not an agent on the network"
         );
         assert!(
-            agent.y > verifier.y,
-            "the verifier tier is below the agents"
+            brain.y > sub.y,
+            "the agent you prompted is drawn above the one it called"
         );
-        assert!(agent.radius > verifier.radius, "agents are the big discs");
+        assert!(sub.y > verifier.y, "the verifier is below both layers");
+        assert!(sub.radius > verifier.radius, "agents are the big discs");
     }
 
     #[test]
@@ -587,9 +636,13 @@ mod tests {
 
     #[test]
     fn edges_start_and_end_on_the_rims_not_the_centres() {
-        let graph = fixture("live-1").graph;
+        let graph = graph_with_a_sub("live-1");
         let discs = layout_net(&graph, &[]);
-        let edge = graph.edges.first().unwrap();
+        let edge = graph
+            .edges
+            .iter()
+            .find(|e| disc(&discs, &e.from).is_some() && disc(&discs, &e.to).is_some())
+            .expect("an edge between two drawn nodes");
         let (a, b) = edge_ends(&discs, edge).unwrap();
         let from = disc(&discs, &edge.from).unwrap();
 
@@ -641,13 +694,17 @@ mod tests {
 
     #[test]
     fn clicking_between_two_discs_finds_the_edge_that_runs_there() {
-        let graph = fixture("live-1").graph;
+        let graph = graph_with_a_sub("live-1");
         let discs = layout_net(&graph, &[]);
         let edge = graph
             .edges
             .iter()
-            .find(|e| e.kind == GraphEdgeKind::Contract)
-            .unwrap();
+            .find(|e| {
+                e.kind == GraphEdgeKind::Contract
+                    && disc(&discs, &e.from).is_some()
+                    && disc(&discs, &e.to).is_some()
+            })
+            .expect("a contract edge between two drawn nodes");
         let (a, b) = edge_ends(&discs, edge).unwrap();
         let middle = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
 
