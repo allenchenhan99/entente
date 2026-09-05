@@ -44,11 +44,11 @@ fn cell_of(app: &App, node_id: &str) -> (u16, u16) {
 fn clicking_a_node_selects_it_and_focuses_the_graph() {
     let mut app = app_with_canvas();
     app.region = Region::Tree;
-    let (col, row) = cell_of(&app, "verifier");
+    let (col, row) = cell_of(&app, "planner");
 
     app.handle_mouse(Mouse::new(MouseKind::Down, col, row));
 
-    assert_eq!(app.selected, Some(GraphObjectRef::node("verifier")));
+    assert_eq!(app.selected, Some(GraphObjectRef::node("planner")));
     assert_eq!(
         app.region,
         Region::Graph,
@@ -208,7 +208,7 @@ fn m_hands_the_mouse_back_to_the_terminal_and_takes_it_again() {
     );
 
     // While the terminal has it, the app ignores what it is sent.
-    let (col, row) = cell_of(&app, "verifier");
+    let (col, row) = cell_of(&app, "planner");
     app.selected = None;
     assert!(app
         .handle_mouse(Mouse::new(MouseKind::Down, col, row))
@@ -228,7 +228,7 @@ fn an_open_overlay_keeps_the_mouse_out_of_the_graph() {
     let mut app = app_with_canvas();
     app.help_open = true;
     app.selected = None;
-    let (col, row) = cell_of(&app, "verifier");
+    let (col, row) = cell_of(&app, "planner");
 
     assert!(app
         .handle_mouse(Mouse::new(MouseKind::Down, col, row))

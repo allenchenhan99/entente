@@ -405,6 +405,8 @@ impl App {
                 .graph
                 .nodes
                 .iter()
+                // Only what the network actually draws, so j/k never lands on an invisible node.
+                .filter(|n| crate::ui::graph::is_visible(n))
                 .map(|n| GraphObjectRef::node(n.id.clone()))
                 .chain(
                     self.graph

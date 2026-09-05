@@ -42,11 +42,43 @@ pub struct Disc {
     pub status: VisualStatus,
     pub is_agent: bool,
     pub badge: Option<String>,
+    /// False when no process is running for this node: drawn as a broken rim, not a solid one.
+    pub live: bool,
     /// World units this node owns horizontally.
     pub slot: f64,
     /// Draw this node's label a row lower. Neighbours in a tier are only ~8 columns apart, so
     /// alternating rows is what lets both keep their whole name.
     pub stagger: bool,
+}
+
+/// Is this node worth drawing?
+///
+/// relayd is the verifier — no agent ever fills that role — so the node only means something once a
+/// task has produced something to check. Until then its status is `pending` and it is a lifeless dot
+/// taking space a 40-column panel does not have.
+pub fn is_visible(node: &GraphNode) -> bool {
+    !(node.kind == GraphNodeKind::Verifier && node.status == VisualStatus::Pending)
+}
+
+/// Is a coding shell actually running for this agent?
+///
+/// Only agents have one. `human`, `planner` and the verifier are roles, not processes — relayd is the
+/// verifier — so they are never drawn as "not running".
+///
+/// The pane is the truth when there is one — an agent exists as a contract long before anything is
+/// spawned for it, and its pane can die while the task stays open. The event-derived runtime state is
+/// the fallback for panes this client has not been told about.
+pub fn runtime_is_live(node: &GraphNode, pane_alive: Option<bool>) -> bool {
+    if node.kind != GraphNodeKind::Agent {
+        return true;
+    }
+    if let Some(alive) = pane_alive {
+        return alive;
+    }
+    matches!(
+        node.runtime,
+        Some(RuntimeState::Idle) | Some(RuntimeState::Working) | Some(RuntimeState::Blocked)
+    )
 }
 
 /// World units a tier gives each of its nodes — the widest a label may be before it runs into the
@@ -58,7 +90,7 @@ pub fn slot_width(count: usize) -> f64 {
 /// Where each node sits. Nodes of a tier are spread evenly across the world's width, in protocol order.
 pub fn layout_net(graph: &Graph) -> Vec<Disc> {
     let mut tiers: [Vec<&GraphNode>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-    for node in &graph.nodes {
+    for node in graph.nodes.iter().filter(|n| is_visible(n)) {
         // The protocol's fourth column (`done`) has no object behind it yet; fold it into the verifier tier
         // rather than leaving a dead band in a panel this narrow.
         let tier = (node.column as usize).min(2);
@@ -82,6 +114,8 @@ pub fn layout_net(graph: &Graph) -> Vec<Disc> {
                 status: node.status,
                 is_agent: node.kind == GraphNodeKind::Agent,
                 badge: node.badge.clone(),
+                // From the events; `render` refines it with the pane, which is the better witness.
+                live: runtime_is_live(node, None),
                 slot: slot_width(count),
                 stagger: index % 2 == 1,
             });
@@ -92,6 +126,18 @@ pub fn layout_net(graph: &Graph) -> Vec<Disc> {
 
 fn disc<'a>(discs: &'a [Disc], id: &str) -> Option<&'a Disc> {
     discs.iter().find(|d| d.id == id)
+}
+
+/// A broken rim, for a node with no process behind it. Drawn as points rather than a line so it reads
+/// as "not running" without depending on colour.
+fn dashed_rim(cx: f64, cy: f64, radius: f64) -> Vec<(f64, f64)> {
+    (0..48)
+        .filter(|i| (i / 3) % 2 == 0)
+        .map(|i| {
+            let angle = i as f64 / 48.0 * std::f64::consts::TAU;
+            (cx + radius * angle.cos(), cy + radius * angle.sin())
+        })
+        .collect()
 }
 
 /// Where an edge starts and ends: the rims of its two discs, never their centres.
@@ -260,7 +306,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     app.graph_viewport = viewport_of(canvas_area);
 
     let graph = app.graph.clone();
-    let discs = layout_net(&graph);
+    let mut discs = layout_net(&graph);
+    // The pane is the better witness than the event-derived runtime state: an agent's contract exists
+    // long before a coding shell is spawned for it, and the shell can die while the task stays open.
+    for disc in &mut discs {
+        if let Some(node) = graph.nodes.iter().find(|n| n.id == disc.id) {
+            let pane_alive = app
+                .pane_states
+                .values()
+                .find(|p| p.info.task_id.as_deref() == Some(disc.id.as_str()))
+                .map(|p| p.alive());
+            disc.live = runtime_is_live(node, pane_alive);
+        }
+    }
     let selected = app.selected.clone();
     let (x_bounds, y_bounds) = view_bounds(&app.graph_view, app.graph_viewport);
     // World units per printed character and per row, so labels can be centred and staggered.
@@ -307,12 +365,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
 
             for d in &discs {
                 let color = status_color(d.status);
-                ctx.draw(&Circle {
-                    x: d.x,
-                    y: d.y,
-                    radius: d.radius,
-                    color,
-                });
+                if d.live {
+                    ctx.draw(&Circle {
+                        x: d.x,
+                        y: d.y,
+                        radius: d.radius,
+                        color,
+                    });
+                } else {
+                    // No process behind this node: a broken rim, whatever its task state says.
+                    let rim = dashed_rim(d.x, d.y, d.radius);
+                    ctx.draw(&Points {
+                        coords: &rim,
+                        color,
+                    });
+                }
                 // Attention doubles the rim, so colour is never the only signal.
                 if matches!(d.status, VisualStatus::Attention | VisualStatus::Blocked) {
                     ctx.draw(&Circle {
@@ -409,9 +476,20 @@ mod tests {
         }
     }
 
+    /// The fixture with a verifier that has something to do, so it is drawn.
+    fn graph_with_verifier(name: &str) -> Graph {
+        let mut graph = fixture(name).graph;
+        for node in graph.nodes.iter_mut() {
+            if node.kind == GraphNodeKind::Verifier {
+                node.status = VisualStatus::Working;
+            }
+        }
+        graph
+    }
+
     #[test]
     fn nodes_sit_in_three_tiers_with_agents_between_the_human_and_the_verifier() {
-        let discs = layout_net(&fixture("live-1").graph);
+        let discs = layout_net(&graph_with_verifier("live-1"));
         let human = discs.iter().find(|d| d.id == "human").unwrap();
         let agent = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
         let verifier = discs.iter().find(|d| d.id == "verifier").unwrap();
@@ -564,8 +642,115 @@ mod tests {
     }
 
     #[test]
+    fn the_verifier_is_hidden_until_there_is_something_to_verify() {
+        let mut graph = fixture("live-1").graph;
+        for node in graph.nodes.iter_mut() {
+            if node.kind == GraphNodeKind::Verifier {
+                node.status = VisualStatus::Pending;
+            }
+        }
+        assert!(
+            !layout_net(&graph).iter().any(|d| d.id == "verifier"),
+            "relayd verifies; the node means nothing until a task has produced something"
+        );
+
+        for node in graph.nodes.iter_mut() {
+            if node.kind == GraphNodeKind::Verifier {
+                node.status = VisualStatus::Working;
+            }
+        }
+        assert!(layout_net(&graph).iter().any(|d| d.id == "verifier"));
+    }
+
+    #[test]
+    fn an_edge_into_a_hidden_node_is_not_drawn_either() {
+        let mut graph = fixture("live-1").graph;
+        for node in graph.nodes.iter_mut() {
+            if node.kind == GraphNodeKind::Verifier {
+                node.status = VisualStatus::Pending;
+            }
+        }
+        let discs = layout_net(&graph);
+        for edge in graph.edges.iter().filter(|e| e.to == "verifier") {
+            assert!(edge_ends(&discs, edge).is_none());
+        }
+    }
+
+    #[test]
+    fn a_role_is_never_drawn_as_a_dead_process() {
+        for id in ["human", "planner", "verifier"] {
+            let node = fixture("live-8")
+                .graph
+                .nodes
+                .into_iter()
+                .find(|n| n.id == id)
+                .unwrap();
+            assert!(
+                runtime_is_live(&node, None),
+                "{id} is a role, not a process — relayd is the verifier"
+            );
+        }
+    }
+
+    #[test]
+    fn a_node_with_no_process_is_not_live() {
+        let mut node = fixture("live-1")
+            .graph
+            .nodes
+            .into_iter()
+            .find(|n| n.kind == GraphNodeKind::Agent)
+            .unwrap();
+
+        node.runtime = Some(RuntimeState::Unspawned);
+        assert!(
+            !runtime_is_live(&node, None),
+            "no coding shell has been launched"
+        );
+        node.runtime = Some(RuntimeState::Exited);
+        assert!(!runtime_is_live(&node, None), "its shell is gone");
+        node.runtime = Some(RuntimeState::Working);
+        assert!(runtime_is_live(&node, None));
+        node.runtime = Some(RuntimeState::Blocked);
+        assert!(
+            runtime_is_live(&node, None),
+            "blocked is a running process waiting"
+        );
+    }
+
+    #[test]
+    fn a_pane_outranks_the_event_derived_runtime_state() {
+        let mut node = fixture("live-1")
+            .graph
+            .nodes
+            .into_iter()
+            .find(|n| n.kind == GraphNodeKind::Agent)
+            .unwrap();
+        node.runtime = Some(RuntimeState::Working);
+
+        assert!(
+            !runtime_is_live(&node, Some(false)),
+            "the events say working, but its pane is dead: believe the pane"
+        );
+        node.runtime = Some(RuntimeState::Unspawned);
+        assert!(runtime_is_live(&node, Some(true)));
+    }
+
+    #[test]
+    fn a_broken_rim_is_drawn_in_pieces_and_a_live_one_is_not() {
+        let rim = dashed_rim(50.0, 50.0, 9.0);
+
+        assert!(!rim.is_empty());
+        assert!(rim.len() < 48, "gaps, or it would be a solid circle");
+        for (x, y) in &rim {
+            let r = ((x - 50.0f64).powi(2) + (y - 50.0f64).powi(2)).sqrt();
+            assert!((r - 9.0).abs() < 0.001, "every point sits on the rim");
+        }
+    }
+
+    #[test]
     fn the_panel_draws_the_network_and_its_labels() {
         let mut app = replay_app("live-1");
+        app.set_graph(graph_with_verifier("live-1"));
         app.select(Some(GraphObjectRef::node("t-backend-auth")));
         let rows = draw_rows(&mut app, 100, 30);
         let text = screen_text(&rows);
@@ -577,5 +762,16 @@ mod tests {
         );
         assert!(text.contains("verifier"), "{text}");
         assert!(text.contains("run "), "the detail line is drawn:\n{text}");
+    }
+
+    #[test]
+    fn a_mission_with_nothing_verified_yet_draws_no_verifier() {
+        // live-1 was abandoned mid-flight: one task cancelled, nothing checked, so relayd has
+        // verified nothing and the node would be a lifeless dot.
+        let mut app = replay_app("live-1");
+        let text = screen_text(&draw_rows(&mut app, 100, 30));
+
+        assert!(text.contains("HANDOFFS"), "{text}");
+        assert!(!text.contains("verifier"), "{text}");
     }
 }
