@@ -126,14 +126,19 @@ pub fn unattached_agents<'a>(
     panes
         .filter(|pane| pane.runtime.is_some())
         .filter(|pane| {
+            // A pane the graph already accounts for is not a loose agent. `pane_id` is the certain
+            // answer — the planner node carries the pane its agent runs in — and without it opening
+            // one agent drew two nodes: the node the server knows about, and the pane hosting it.
             !graph.nodes.iter().any(|node| {
-                node.kind == GraphNodeKind::Agent
-                    && (Some(node.id.as_str()) == pane.task_id.as_deref()
-                        || node.label == pane.role)
+                node.pane_id.as_deref() == Some(pane.pane_id.as_str())
+                    || (node.kind == GraphNodeKind::Agent
+                        && (Some(node.id.as_str()) == pane.task_id.as_deref()
+                            || node.label == pane.role))
             })
         })
         .map(|pane| GraphNode {
             id: pane.pane_id.clone(),
+            pane_id: Some(pane.pane_id.clone()),
             kind: GraphNodeKind::Agent,
             label: pane.role.clone(),
             task_id: None,

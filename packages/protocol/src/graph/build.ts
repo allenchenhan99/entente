@@ -415,7 +415,14 @@ export function buildGraph(state: State): Graph {
 
   const nodes: GraphNode[] = [
     { id: HUMAN, kind: 'human', label: 'human', column: 0, status: inbox.length > 0 ? 'attention' : 'pending' },
-    { id: PLANNER, kind: 'planner', label: 'planner', column: 0, status: plannerStatus(missions) },
+    {
+      id: PLANNER,
+      kind: 'planner',
+      label: 'planner',
+      column: 0,
+      status: plannerStatus(missions),
+      pane_id: missions.find((m) => m.planner_pane !== undefined)?.planner_pane,
+    },
     ...agents,
     { id: VERIFIER, kind: 'verifier', label: 'verifier', column: 2, status: verifierStatus(tasks, missions) },
   ];

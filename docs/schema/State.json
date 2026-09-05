@@ -111,6 +111,9 @@
           "questions_asked_at": {
             "type": "string"
           },
+          "planner_pane": {
+            "type": "string"
+          },
           "clarifications": {
             "type": "array",
             "items": {

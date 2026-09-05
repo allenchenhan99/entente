@@ -179,6 +179,14 @@ function missionTransition(mission: MissionView, event: Event): Partial<MissionV
       return { status: 'failed' };
     case 'mission_canceled':
       return { status: 'canceled' };
+    case 'agent_spawned':
+      // No task id: this is the mission's planner, however it was started — relayd spawning one, or
+      // a human opening an agent in a terminal and it being adopted.
+      return event.task_id === undefined ? { planner_pane: event.payload.pane_id } : undefined;
+    case 'agent_exited':
+      return event.task_id === undefined && mission.planner_pane === event.payload.pane_id
+        ? { planner_pane: undefined }
+        : undefined;
     case 'mission_clarification_requested':
       return { open_questions: event.payload.questions, questions_asked_at: event.ts };
     case 'mission_clarification_answered': {

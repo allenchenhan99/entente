@@ -72,6 +72,12 @@ export const MissionView = z.object({
   open_questions: z.array(Question).optional(),
   /** When the planner last asked, so the inbox can say how long the mission has been stopped here. */
   questions_asked_at: z.string().optional(),
+  /**
+   * The pane the planner is running in. Without it the graph cannot tell that its `planner` node and
+   * a pane hosting an agent are the same agent, and a client draws both — so opening one agent puts
+   * two nodes on the network.
+   */
+  planner_pane: z.string().optional(),
   /** Mission-level answers given by the human, in order. */
   clarifications: z.array(Clarification).optional(),
   integration: z.object({ branch: z.string(), order: z.array(z.string()), conflict: z.object({ task_id: z.string(), files: z.array(z.string()) }).optional() }).optional(),

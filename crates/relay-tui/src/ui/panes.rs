@@ -95,7 +95,19 @@ pub fn pane_label(app: &App, pane: &PaneState) -> Option<crate::ui::network::Nam
         .task_id
         .as_deref()
         .and_then(|task| naming.get(task).cloned());
-    by_task.or_else(|| naming.get(&pane.info.pane_id).cloned())
+    by_task
+        .or_else(|| naming.get(&pane.info.pane_id).cloned())
+        // The node that claims this pane: the planner runs in one, and it is named there under its
+        // own id rather than the pane's.
+        .or_else(|| {
+            let node = app
+                .ws()
+                .graph
+                .nodes
+                .iter()
+                .find(|n| n.pane_id.as_deref() == Some(pane.info.pane_id.as_str()))?;
+            naming.get(&node.id).cloned()
+        })
 }
 
 /// Every pane in the order the list shows them: brains first, each followed by the subs it called, and
@@ -317,6 +329,7 @@ mod ordering {
     fn fleet() -> App {
         let mut app = App::new(Mode::Replay);
         let agent = |id: &str, role: &str| GraphNode {
+            pane_id: None,
             id: id.into(),
             kind: GraphNodeKind::Agent,
             label: role.into(),

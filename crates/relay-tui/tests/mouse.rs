@@ -525,6 +525,7 @@ fn a_fresh_launch_with_no_agents_draws_no_brain() {
     app.set_graph(Graph {
         nodes: vec![
             GraphNode {
+                pane_id: None,
                 id: "planner".into(),
                 kind: GraphNodeKind::Planner,
                 label: "planner".into(),
@@ -537,6 +538,7 @@ fn a_fresh_launch_with_no_agents_draws_no_brain() {
                 badge: None,
             },
             GraphNode {
+                pane_id: None,
                 id: "verifier".into(),
                 kind: GraphNodeKind::Verifier,
                 label: "verifier".into(),
@@ -1672,4 +1674,43 @@ fn a_pane_the_daemon_no_longer_lists_stops_being_an_agent_on_the_network() {
     app.set_panes(Vec::new(), None);
     assert!(app.unattached_agents().is_empty());
     assert!(app.ws().pane_states.is_empty());
+}
+
+#[test]
+fn an_agent_the_graph_already_knows_about_is_not_drawn_twice() {
+    let mut app = App::new(Mode::Replay);
+    let mut graph = graph("live-1");
+    // The server says its planner is running in this pane — which is what adoption records when you
+    // open an agent in a terminal.
+    if let Some(planner) = graph
+        .nodes
+        .iter_mut()
+        .find(|n| n.kind == GraphNodeKind::Planner)
+    {
+        planner.pane_id = Some("relay:3".into());
+    }
+    app.set_graph(graph);
+    app.set_panes(
+        vec![loose_agent("relay:3", "brain", true)],
+        Some("relay:3".into()),
+    );
+
+    // Without the link the pane looked like an agent nobody had accounted for, so opening one agent
+    // put two nodes on the network: the planner the server knows about, and the pane hosting it.
+    assert!(
+        app.unattached_agents().is_empty(),
+        "the pane is the planner, not a second agent: {:?}",
+        app.unattached_agents()
+    );
+
+    // A pane no node claims is still drawn — that is the whole point of the loose-agent tier.
+    app.set_panes(
+        vec![
+            loose_agent("relay:3", "brain", true),
+            loose_agent("relay:4", "brain", true),
+        ],
+        Some("relay:3".into()),
+    );
+    let loose: Vec<String> = app.unattached_agents().into_iter().map(|n| n.id).collect();
+    assert_eq!(loose, vec!["relay:4".to_string()]);
 }

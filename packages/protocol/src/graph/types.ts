@@ -30,6 +30,12 @@ export interface GraphNode {
   status: VisualStatus;
   /** Tiny annotation next to the label, e.g. `a2` (attempt 2), `? 2`, `◐ blocked`. */
   badge?: string;
+  /**
+   * The pane this node's agent is running in, when one is known. A client hosting terminals draws an
+   * agent for every pane it has; without this it cannot tell that a pane and a node are the same
+   * agent, and draws it twice.
+   */
+  pane_id?: string;
 }
 
 export type GraphEdgeKind =

@@ -144,6 +144,7 @@ mod tests {
 
     fn agent(id: &str, label: &str) -> GraphNode {
         GraphNode {
+            pane_id: None,
             id: id.to_string(),
             kind: GraphNodeKind::Agent,
             label: label.to_string(),

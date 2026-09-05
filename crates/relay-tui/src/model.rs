@@ -92,6 +92,9 @@ pub struct GraphNode {
     pub handoff_state: Option<HandoffState>,
     pub column: GraphColumn,
     pub status: VisualStatus,
+    /// The pane this node's agent runs in, when the server knows one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
     /// Tiny annotation next to the label, e.g. `a2` (attempt 2), `? 2`, `◐ blocked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub badge: Option<String>,
