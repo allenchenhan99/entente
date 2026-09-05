@@ -3,7 +3,7 @@
 
 mod support;
 
-use relay_tui::app::{App, Effect, Mode, Region, Viewport};
+use relay_tui::app::{App, Command, Effect, Mode, Region, Viewport};
 use relay_tui::keys::{Key, KeyCode, Mouse, MouseKind};
 use relay_tui::model::*;
 use support::*;
@@ -1104,7 +1104,7 @@ fn every_question_gets_its_own_row() {
     let mut app = App::new(Mode::Replay);
     app.set_graph(crowded_inbox());
 
-    let rows = relay_tui::ui::inbox::all_inbox_rows(&app);
+    let rows = relay_tui::ui::inbox::all_inbox_rows(&app, 120);
     let text: Vec<String> = rows.iter().map(|(l, _)| l.to_string()).collect();
 
     assert!(text.iter().any(|l| l.contains("Q1 question 1")), "{text:?}");
@@ -1155,7 +1155,7 @@ fn it_never_scrolls_past_the_last_row() {
         app.scroll_inbox(1);
     }
 
-    assert!(app.inbox_scroll < relay_tui::ui::inbox::all_inbox_rows(&app).len());
+    assert!(app.inbox_scroll < relay_tui::ui::inbox::all_inbox_rows(&app, 120).len());
 }
 
 #[test]
@@ -1177,46 +1177,89 @@ fn moving_the_selection_brings_it_back_into_view() {
 
 // --- answering questions one at a time ------------------------------------------------------------
 
-/// An item whose action carries two open questions, as a task with two of them produces.
+/// The demo graph's `t-backend-auth` asks two questions, with the wording in the inbox item's
+/// detail rows — the shape `a` has to walk.
 fn two_question_app() -> App {
     let mut app = App::new(Mode::Replay);
-    app.set_graph(graph("live-1"));
-    app.select(Some(GraphObjectRef::node("t-backend-auth")));
-    app.set_actions(
-        &GraphObjectRef::node("t-backend-auth"),
-        vec![ObjectAction {
-            key: "a".into(),
-            kind: ActionKind::Clarify,
-            label: "answer".into(),
-            target: ActionTarget {
-                task_id: Some("t-backend-auth".into()),
-                question_ids: Some(vec!["Q1".into(), "Q2".into()]),
-                ..Default::default()
-            },
-        }],
-    );
+    app.set_graph(demo_graph());
+    app.select(Some(GraphObjectRef::inbox("question:t-backend-auth")));
     app
 }
 
 #[test]
-fn the_editor_names_the_question_it_is_answering() {
+fn answering_walks_every_question_the_item_asked() {
     let mut app = two_question_app();
 
     app.handle_key(Key::char('a'));
-
     let prompt = app.prompt_line().expect("an editor");
-    assert!(
-        prompt.contains("Q1"),
-        "the answer goes to Q1, and says so: {prompt}"
+    assert_eq!(
+        prompt, "1/2 Which auth method?> ",
+        "the question in its own words, and where it is in the sequence"
     );
-    assert!(
-        prompt.contains("1 more after this"),
-        "and says the other is still waiting: {prompt}"
+
+    for c in "magic links".chars() {
+        app.handle_key(Key::char(c));
+    }
+    let effects = app.handle_key(Key::ENTER);
+    assert_eq!(
+        effects,
+        vec![Effect::Post(Command::Clarify {
+            task_id: "t-backend-auth".into(),
+            question_id: "Q1".into(),
+            answer: "magic links".into(),
+        })]
     );
+
+    // The item asked two, so the work is not done and the editor does not close. Answering Q1 and
+    // dropping Q2 wrote one answer into an append-only log and told the human it was finished.
+    assert_eq!(
+        app.prompt_line().as_deref(),
+        Some("2/2 Link expiry?> "),
+        "moved on to the second, empty"
+    );
+    for c in "15m".chars() {
+        app.handle_key(Key::char(c));
+    }
+    let effects = app.handle_key(Key::ENTER);
+    assert_eq!(
+        effects,
+        vec![Effect::Post(Command::Clarify {
+            task_id: "t-backend-auth".into(),
+            question_id: "Q2".into(),
+            answer: "15m".into(),
+        })]
+    );
+    assert_eq!(app.input_mode, None, "and now it closes");
 }
 
 #[test]
-fn a_single_question_is_named_without_a_count() {
+fn the_strip_marks_which_questions_you_have_already_answered() {
+    let mut app = two_question_app();
+    app.handle_key(Key::char('a'));
+
+    let marks = |app: &App| -> Vec<String> {
+        relay_tui::ui::inbox::all_inbox_rows(app, 120)
+            .into_iter()
+            .map(|(line, _)| line.to_string())
+            .filter(|l| l.contains("Which auth method?") || l.contains("Link expiry?"))
+            .collect()
+    };
+    let before = marks(&app);
+    assert!(before[0].trim_start().starts_with('▸'), "{before:?}");
+    assert!(before[1].trim_start().starts_with('·'), "{before:?}");
+
+    for c in "magic links".chars() {
+        app.handle_key(Key::char(c));
+    }
+    app.handle_key(Key::ENTER);
+
+    let after = marks(&app);
+    assert!(after[0].trim_start().starts_with('✓'), "{after:?}");
+    assert!(after[1].trim_start().starts_with('▸'), "{after:?}");
+}
+
+#[test]
+fn a_single_question_closes_the_editor_once_it_is_answered() {
     let mut app = App::new(Mode::Replay);
     app.set_graph(graph("live-1"));
     app.select(Some(GraphObjectRef::node("t-backend-auth")));
@@ -1235,11 +1278,46 @@ fn a_single_question_is_named_without_a_count() {
     );
 
     app.handle_key(Key::char('a'));
-
+    // Nothing in this fixture's inbox spells Q1 out, so the prompt falls back to naming the id
+    // rather than pretending to quote a question it cannot find.
     let prompt = app.prompt_line().expect("an editor");
-    assert!(prompt.contains("answer Q1"), "{prompt}");
+    assert_eq!(prompt, "Q1> ", "one question, so no count");
+
+    for c in "yes".chars() {
+        app.handle_key(Key::char(c));
+    }
+    app.handle_key(Key::ENTER);
+    assert_eq!(app.input_mode, None);
+}
+
+/// Selecting an inbox item points the other panels at what it is about, instead of leaving them
+/// showing nothing while you read the list.
+#[test]
+fn an_inbox_selection_lights_up_the_network_it_came_from() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(demo_graph());
+    app.select(Some(GraphObjectRef::inbox("question:t-backend-auth")));
+
+    assert_eq!(
+        app.highlighted(),
+        Some(GraphObjectRef::edge("contract:t-backend-auth")),
+        "an inbox item is a pointer at a graph object"
+    );
+    assert!(app.highlights_edge("contract:t-backend-auth"));
+    let agent = app
+        .ws()
+        .graph
+        .nodes
+        .iter()
+        .find(|n| n.task_id.as_deref() == Some("t-backend-auth"))
+        .expect("the agent doing the task");
     assert!(
-        !prompt.contains("more after"),
-        "there is no other: {prompt}"
+        app.highlights_node(agent),
+        "and at the agent that is waiting on you"
+    );
+    assert_ne!(
+        relay_tui::ui::graph::detail_line(&app).to_string().trim(),
+        "",
+        "the line under the network explains the selection rather than going blank"
     );
 }

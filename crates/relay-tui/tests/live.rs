@@ -487,7 +487,7 @@ async fn live_actions_post_the_ink_bodies_and_errors_reach_the_status_line() {
     let mut rt = Runtime::new(terminal, Source::Live(vec![Arc::new(client)]));
     rt.start().await.unwrap();
     until(&mut rt, "actions fetched", |rt| !rt.app.actions.is_empty()).await;
-    assert!(screen(&rt).contains("r reply"), "{}", screen(&rt));
+    assert!(screen(&rt).contains("[r] reply"), "{}", screen(&rt));
 
     // Enter opens the inspector with describe + story from the server.
     press(&rt, Key::ENTER);
@@ -502,7 +502,7 @@ async fn live_actions_post_the_ink_bodies_and_errors_reach_the_status_line() {
         "{text}"
     );
     assert!(text.contains("backend completes t-backend-auth"), "{text}");
-    assert!(text.contains("actions: r reply · Esc close"), "{text}");
+    assert!(text.contains("actions: [r] reply · Esc close"), "{text}");
 
     // r → reply editor → Enter posts { message } to /tasks/:id/reply.
     press(&rt, Key::char('r'));

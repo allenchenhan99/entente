@@ -322,14 +322,13 @@ fn glyph(status: VisualStatus) -> &'static str {
     }
 }
 
-fn selected_is(selected: Option<&GraphObjectRef>, kind: RefKind, id: &str) -> bool {
-    selected.is_some_and(|r| r.kind == kind && r.id == id)
-}
-
 /// The line under the network: the three independent state layers of the selected agent, spelled out — an
 /// idle runtime says nothing about the task. For an edge it is the edge's own label instead.
 pub fn detail_line(app: &App) -> Line<'static> {
-    let Some(reference) = app.selected.as_ref() else {
+    // Through the inbox item to what it is about: an inbox ref matched no node and no edge, so this
+    // line went blank exactly while you were reading the thing it should have been explaining.
+    let resolved = app.highlighted();
+    let Some(reference) = resolved.as_ref() else {
         return Line::styled(
             "nothing selected · click a node, or j/k",
             Style::new().fg(Color::DarkGray),
@@ -441,7 +440,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
             disc.live = runtime_is_live(node, pane_alive);
         }
     }
-    let selected = app.selected.clone();
+    // Resolved once, out here: an inbox selection points at a contract edge and the agent it is
+    // about, so walking the inbox lights up the network instead of blanking it.
+    let lit_nodes: Vec<String> = app
+        .ws()
+        .graph
+        .nodes
+        .iter()
+        .filter(|n| app.highlights_node(n))
+        .map(|n| n.id.clone())
+        .collect();
+    let lit_edge: Option<String> = app
+        .highlighted()
+        .filter(|r| r.kind == RefKind::Edge)
+        .map(|r| r.id);
     let (x_bounds, y_bounds) = view_bounds(&app.graph_view, app.graph_viewport);
     // World units per printed character and per row, so labels can be centred and staggered.
     let x_span = x_bounds[1] - x_bounds[0];
@@ -461,7 +473,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                 let quiet = [&edge.from, &edge.to]
                     .iter()
                     .all(|id| discs.iter().any(|d| d.id == **id && d.finished));
-                let color = if quiet {
+                // The selected contract is the one edge drawn in the selection colour, so an inbox
+                // item you are reading has a visible line to the agent it came from.
+                let color = if lit_edge.as_deref() == Some(edge.id.as_str()) {
+                    Color::Cyan
+                } else if quiet {
                     Color::DarkGray
                 } else {
                     status_color(edge.status)
@@ -523,7 +539,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                         color,
                     });
                 }
-                if selected_is(selected.as_ref(), RefKind::Node, &d.id) {
+                if lit_nodes.contains(&d.id) {
                     ctx.draw(&Circle {
                         x: d.x,
                         y: d.y,
@@ -585,7 +601,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                     d.y - d.radius - LABEL_GAP - if d.stagger { per_row } else { 0.0 },
                     Line::styled(
                         label,
-                        if selected_is(selected.as_ref(), RefKind::Node, &d.id) {
+                        if lit_nodes.contains(&d.id) {
                             Style::new()
                                 .fg(Color::Cyan)
                                 .add_modifier(ratatui::style::Modifier::BOLD)

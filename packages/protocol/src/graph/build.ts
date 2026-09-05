@@ -243,6 +243,9 @@ function inboxFor(state: State, mission: MissionView, tasks: TaskView[]): InboxI
       mission_id: missionId,
       title: `planner asks you ${plural(mq.length, 'question')} before decomposing`,
       detail: mq.map((q) => `${q.id}: ${q.text}`),
+      // A planner that cannot decompose has stopped the whole mission, so of everything in the inbox
+      // this is the item whose age matters most. It had none until now, and sorted by an empty string.
+      since: mission.questions_asked_at,
       ref: { kind: 'edge', id: missionQuestionEdgeId(state, missionId) },
       actions: [missionClarifyAction(state, missionId)!, inspectAction()],
     });

@@ -4,6 +4,7 @@
 
 pub mod api;
 pub mod app;
+pub mod clock;
 pub mod keys;
 pub mod metrics;
 pub mod model;

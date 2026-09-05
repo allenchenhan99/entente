@@ -222,7 +222,10 @@ mod snapshots {
         // The action list is the fixture's actions.json entry for the node.
         let expected = &f.actions["node:t-backend-auth"];
         assert_eq!(app.inspector.actions, *expected);
-        assert!(text.contains("actions: Enter focus · Esc close"), "{text}");
+        assert!(
+            text.contains("actions: [Enter] focus · Esc close"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -246,14 +249,11 @@ mod snapshots {
         }
         let rows = draw_rows(&mut app, 120, 40);
         let text = screen_text(&rows);
-        // The editor names the question its answer goes to, and says the other is still waiting —
-        // this fixture's task has two open.
+        // The editor names the question its answer goes to, in its own words, and says where it is in
+        // the sequence — this fixture's task asks two, and `a` walks both.
+        assert!(text.contains("1/2 Which auth method?> magic"), "{text}");
         assert!(
-            text.contains("answer Q1 (1 more after this)> magic"),
-            "{text}"
-        );
-        assert!(
-            text.contains("actions: a answer · x cancel · Esc close"),
+            text.contains("actions: [a] answer  [x] kill task · Esc close"),
             "{text}"
         );
         app.set_error("POST /tasks/t-backend-auth/clarify failed: 400");

@@ -108,6 +108,9 @@
               "additionalProperties": false
             }
           },
+          "questions_asked_at": {
+            "type": "string"
+          },
           "clarifications": {
             "type": "array",
             "items": {

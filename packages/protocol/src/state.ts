@@ -62,6 +62,8 @@ export const MissionView = z.object({
   task_ids: z.array(z.string()),
   /** Mission-level questions the planner asked the human and that are still unanswered. */
   open_questions: z.array(Question).optional(),
+  /** When the planner last asked, so the inbox can say how long the mission has been stopped here. */
+  questions_asked_at: z.string().optional(),
   /** Mission-level answers given by the human, in order. */
   clarifications: z.array(Clarification).optional(),
   integration: z.object({ branch: z.string(), order: z.array(z.string()), conflict: z.object({ task_id: z.string(), files: z.array(z.string()) }).optional() }).optional(),

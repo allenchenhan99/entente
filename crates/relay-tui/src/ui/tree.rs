@@ -221,8 +221,7 @@ fn workspace_rows(app: &App, height: usize) -> Vec<TreeRow> {
             continue;
         }
         for node in agents.iter().take(per_workspace.saturating_sub(1)) {
-            let selected = active
-                && matches!(&app.selected, Some(r) if r.kind == RefKind::Node && r.id == node.id);
+            let selected = active && app.highlights_node(node);
             let mut style = Style::new().fg(status_color(node.status));
             if selected {
                 style = style.bold().reversed();
@@ -273,7 +272,8 @@ fn agent_lines(app: &App, height: usize) -> Vec<TreeRow> {
     let mut lines = Vec::new();
     for node in agents.iter().skip(start).take(max_agents) {
         let task = node.task_id.as_deref().and_then(|t| app.task_view(t));
-        let active = matches!(&app.selected, Some(r) if r.kind == RefKind::Node && r.id == node.id);
+        // Resolved through the task, so selecting an inbox item lights up the agent row it is about.
+        let active = app.highlights_node(node);
         let color = status_color(node.status);
         let mut style = Style::new().fg(color);
         if active {

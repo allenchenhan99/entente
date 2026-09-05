@@ -61,7 +61,17 @@ pub fn status_text(app: &App) -> String {
         parts.push(t);
     }
     if !app.ws().graph.inbox.is_empty() {
-        parts.push(format!("inbox:{}", app.ws().graph.inbox.len()));
+        // The strip's header can be scrolled off a short terminal; this line cannot, so it carries the
+        // worst wait too rather than only the count.
+        let waiting = match crate::ui::inbox::oldest_age(app) {
+            Some(age) => format!(
+                "inbox:{} oldest {}",
+                app.ws().graph.inbox.len(),
+                crate::clock::age_label(age)
+            ),
+            None => format!("inbox:{}", app.ws().graph.inbox.len()),
+        };
+        parts.push(waiting);
     }
     let hints = app.action_hints();
     if !hints.is_empty() {
@@ -162,11 +172,11 @@ mod snapshots {
         let last = rows.last().unwrap();
         assert!(last.contains("frame p50"), "{last}");
         assert!(last.contains("inbox:2"), "{last}");
-        assert!(last.contains("a answer · x cancel"), "{last}");
+        assert!(last.contains("[a] answer  [x] kill task"), "{last}");
         app.handle_key(Key::char('j'));
         let rows = draw_rows(&mut app, 120, 40);
         assert!(
-            rows.last().unwrap().contains("p pass · f fail"),
+            rows.last().unwrap().contains("[p] pass  [f] fail"),
             "{}",
             rows.last().unwrap()
         );

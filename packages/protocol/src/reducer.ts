@@ -177,7 +177,7 @@ function missionTransition(mission: MissionView, event: Event): Partial<MissionV
     case 'mission_canceled':
       return { status: 'canceled' };
     case 'mission_clarification_requested':
-      return { open_questions: event.payload.questions };
+      return { open_questions: event.payload.questions, questions_asked_at: event.ts };
     case 'mission_clarification_answered': {
       const answered = new Set(event.payload.answers.map((a) => a.question_id));
       return {

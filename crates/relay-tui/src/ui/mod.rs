@@ -27,9 +27,16 @@ pub const INBOX_ROWS: u16 = 5;
 const INBOX_MIN_ROWS: u16 = 3;
 const INBOX_MAX_ROWS: u16 = 9;
 
-fn inbox_rows_for(app: &App) -> u16 {
-    let content = crate::ui::inbox::all_inbox_rows(app).len() as u16;
-    (content + 1).clamp(INBOX_MIN_ROWS, INBOX_MAX_ROWS)
+fn inbox_rows_for(app: &App, width: u16) -> u16 {
+    let content = crate::ui::inbox::all_inbox_rows(app, width).len() as u16;
+    // An empty inbox is one line of good news under its heading; holding a third row open for it
+    // takes a row off the pane grid to show nothing.
+    let floor = if app.ws().graph.inbox.is_empty() {
+        2
+    } else {
+        INBOX_MIN_ROWS
+    };
+    (content + 1).clamp(floor, INBOX_MAX_ROWS)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +132,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         );
         return;
     }
-    let areas = layout_with(area, inbox_rows_for(app));
+    let areas = layout_with(area, inbox_rows_for(app, area.width));
     tree::render(frame, areas.tree, app);
     graph::render(frame, areas.graph, app);
     if areas.panes.width > 0 {

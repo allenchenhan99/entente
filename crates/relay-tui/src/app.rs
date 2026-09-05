@@ -389,6 +389,17 @@ pub struct App {
     pub input_mode: Option<InputMode>,
     pub input_value: String,
     pending_action: Option<ObjectAction>,
+    /// The questions `a` has still to put to you, the current one first. An item can ask several at
+    /// once but the clarify command carries a single id, so answering is a walk: Enter posts this
+    /// question's answer and moves to the next, Esc leaves the rest open. Answering one and dropping
+    /// the others silently would write your words against a question you were not looking at, into a
+    /// log that is the only state and does not take them back.
+    pending_questions: Vec<String>,
+    /// How many `a` started with, so the prompt can say `Q2 of 4` rather than a bare countdown.
+    answer_total: usize,
+    /// Test seam: what this client believes the time is, in seconds since the epoch. `None` asks the
+    /// system clock. Ages are drawn from it, and a drawn age has to be reproducible in a snapshot.
+    pub now_override: Option<i64>,
     pub help_open: bool,
     pub error: Option<String>,
     pub notice: Option<String>,
@@ -461,6 +472,9 @@ impl App {
             input_mode: None,
             input_value: String::new(),
             pending_action: None,
+            pending_questions: Vec::new(),
+            answer_total: 0,
+            now_override: None,
             help_open: false,
             error: None,
             notice: None,
@@ -767,26 +781,86 @@ impl App {
     }
 
     /// The Ink footer: `a answer · r reply · p pass · f fail · x cancel` for the current actions.
+    /// The keys of the selection's actions, in the same words and the same shape the inbox uses. One
+    /// vocabulary: a key that reads `[x] kill task` in the strip must not read `x cancel` here.
     pub fn action_hints(&self) -> String {
-        let mut parts = Vec::new();
-        for action in self.current_actions() {
-            let label = match action.kind {
-                ActionKind::Clarify | ActionKind::MissionClarify => "answer",
-                ActionKind::Reply => "reply",
-                ActionKind::Review if action.key == "p" => "pass",
-                ActionKind::Review => "fail",
-                ActionKind::Cancel => "cancel",
-                ActionKind::Focus => "focus",
-                ActionKind::Inspect => continue,
-            };
-            let key = if action.kind == ActionKind::Focus {
-                "f".to_string()
-            } else {
-                action.key.clone()
-            };
-            parts.push(format!("{key} {label}"));
+        crate::ui::inbox::action_keys(self.current_actions())
+    }
+
+    /// The wording of a question, found on the inbox item that asked it. A detail row reads
+    /// `Q2: Link expiry?` — the id, then the question — so the id is a prefix to strip.
+    fn question_text(&self, id: &str) -> Option<String> {
+        self.ws()
+            .graph
+            .inbox
+            .iter()
+            .flat_map(|item| item.detail.iter())
+            .find_map(|d| crate::model::question_of(d).filter(|q| *q == id).map(|_| d))
+            .map(|d| d[id.len()..].trim_start_matches([':', ' ']).to_string())
+    }
+
+    /// The questions still to be put, if `a` is walking some. The inbox marks its detail rows from
+    /// this, so you can see what you have already answered without leaving the strip.
+    pub fn pending_questions(&self) -> &[String] {
+        if self.input_mode == Some(InputMode::Answer) {
+            &self.pending_questions
+        } else {
+            &[]
         }
-        parts.join(" · ")
+    }
+
+    /// What the selection points at in the network.
+    ///
+    /// An inbox item is a pointer, not a place: it carries the graph object it is about. Panels that
+    /// only know how to highlight a node or an edge went blank while you walked the inbox — the one
+    /// panel that resolved through the item was the pane grid — so walking the list told you what
+    /// needed you and nothing about where it lived.
+    pub fn highlighted(&self) -> Option<GraphObjectRef> {
+        let r = self.selected.as_ref()?;
+        match r.kind {
+            RefKind::Inbox => self
+                .ws()
+                .graph
+                .inbox_item(&r.id)
+                .map(|i| i.reference.clone()),
+            _ => Some(r.clone()),
+        }
+    }
+
+    /// Does the selection point at this node — directly, or through the task it is about?
+    pub fn highlights_node(&self, node: &GraphNode) -> bool {
+        let Some(r) = self.selected.as_ref() else {
+            return false;
+        };
+        if r.kind == RefKind::Node && r.id == node.id {
+            return true;
+        }
+        match node.task_id.as_deref() {
+            Some(task) => same_task(&self.ws().graph, r, task),
+            None => false,
+        }
+    }
+
+    /// Does the selection point at this edge?
+    pub fn highlights_edge(&self, edge_id: &str) -> bool {
+        matches!(self.highlighted(), Some(r) if r.kind == RefKind::Edge && r.id == edge_id)
+    }
+
+    /// This client's idea of now, in seconds since the epoch.
+    pub fn now_seconds(&self) -> i64 {
+        self.now_override.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0)
+        })
+    }
+
+    /// How long an inbox item has been waiting on a human, in seconds. `None` when the server sent no
+    /// `since` — an item with no age is not an item with age zero, and must not sort as one.
+    pub fn inbox_age(&self, item: &InboxItem) -> Option<i64> {
+        let since = item.since.as_deref().filter(|s| !s.is_empty())?;
+        Some(self.now_seconds() - crate::clock::parse_rfc3339(since)?)
     }
 
     pub fn prompt_line(&self) -> Option<String> {
@@ -795,15 +869,17 @@ impl App {
             // single question_id — so an editor that just said `answer>` sent your words to the first
             // of them and told you nothing about it.
             InputMode::Answer => {
-                let ids = self
-                    .pending_action
-                    .as_ref()
-                    .and_then(|a| a.target.question_ids.clone())
-                    .unwrap_or_default();
-                let label = match ids.split_first() {
-                    Some((first, [])) => format!("answer {first}"),
-                    Some((first, rest)) => {
-                        format!("answer {first} ({} more after this)", rest.len())
+                let label = match self.pending_questions.first() {
+                    // The question itself, not its id: `Q2` names a row you would have to go and read
+                    // when the whole point of the prompt is that you do not have to.
+                    Some(id) => {
+                        let done = self.answer_total - self.pending_questions.len() + 1;
+                        let text = self.question_text(id).unwrap_or_else(|| id.clone());
+                        if self.answer_total > 1 {
+                            format!("{done}/{} {text}", self.answer_total)
+                        } else {
+                            text
+                        }
                     }
                     None => "answer".to_string(),
                 };
@@ -964,6 +1040,8 @@ impl App {
         self.input_mode = None;
         self.input_value.clear();
         self.pending_action = None;
+        self.pending_questions.clear();
+        self.answer_total = 0;
         self.pending_pane_close = None;
         self.pending_task_delete = None;
     }
@@ -971,6 +1049,12 @@ impl App {
     fn begin_input(&mut self, action: ObjectAction, mode: InputMode) -> Vec<Effect> {
         self.input_value.clear();
         self.input_mode = Some(mode);
+        self.pending_questions = if mode == InputMode::Answer {
+            action.target.question_ids.clone().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        self.answer_total = self.pending_questions.len();
         self.pending_action = Some(action);
         self.error = None;
         // The inline editor lives in the inspector, like the Ink overlay tabs.
@@ -1107,7 +1191,16 @@ impl App {
                     if value.is_empty() {
                         return Vec::new();
                     }
-                    let command = submit_command(&action, mode, value);
+                    let question = self.pending_questions.first().cloned();
+                    let command = submit_command(&action, mode, question, value);
+                    // More questions on this item means the editor stays open on the next one: the
+                    // work is "answer what backend asked", not "answer one of the things it asked".
+                    if mode == InputMode::Answer && self.pending_questions.len() > 1 {
+                        self.pending_questions.remove(0);
+                        self.input_value.clear();
+                        self.error = None;
+                        return command.map(|c| vec![Effect::Post(c)]).unwrap_or_default();
+                    }
                     self.reset_input();
                     return command.map(|c| vec![Effect::Post(c)]).unwrap_or_default();
                 }
@@ -1146,6 +1239,15 @@ impl App {
                             action.target.criterion_id.clone(),
                         ) {
                             self.error = None;
+                            // `p` fires straight away while `f` stops for the observed failure, so
+                            // the direction that puts an unverified pass into the evidence log was
+                            // the unguarded one. It says what it just did instead of asking first:
+                            // there is no undo to offer, because reversing it means posting a
+                            // failure, and a failure nobody observed is exactly the self-report this
+                            // whole project refuses. `f` is the correction, and it is a real one.
+                            self.set_notice(format!(
+                                "{criterion_id} marked passed on {task_id} · f records a failure if that was wrong"
+                            ));
                             return vec![Effect::Post(Command::Review {
                                 task_id,
                                 criterion_id,
@@ -1244,11 +1346,11 @@ impl App {
             }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => self.cycle_region(),
             // While you are reading, the arrows move the text; the graph gets them the rest of the time.
-            (KeyCode::Left, _) if self.inspector_open || self.region == Region::Inbox => {
+            (KeyCode::Left, _) if self.inspector_open => {
                 self.scroll_horizontally(-H_SCROLL_COLUMNS);
                 Vec::new()
             }
-            (KeyCode::Right, _) if self.inspector_open || self.region == Region::Inbox => {
+            (KeyCode::Right, _) if self.inspector_open => {
                 self.scroll_horizontally(H_SCROLL_COLUMNS);
                 Vec::new()
             }
@@ -1544,7 +1646,7 @@ impl App {
 
     /// Scroll the inbox. The end stop is the last row, so the panel can always show something.
     pub fn scroll_inbox(&mut self, rows: i32) {
-        let last = crate::ui::inbox::all_inbox_rows(self)
+        let last = crate::ui::inbox::all_inbox_rows(self, self.inbox_viewport.width.max(80))
             .len()
             .saturating_sub(1);
         let next = (self.inbox_scroll as i32 + rows).clamp(0, last as i32);
@@ -1552,8 +1654,8 @@ impl App {
     }
 
     /// Bring the selected item into view, so moving the selection is never a jump into nothing.
-    pub fn reveal_selected_inbox(&mut self, height: usize) {
-        let Some(row) = crate::ui::inbox::selected_row(self) else {
+    pub fn reveal_selected_inbox(&mut self, height: usize, width: u16) {
+        let Some(row) = crate::ui::inbox::selected_row(self, width) else {
             return;
         };
         let budget = height.max(1);
@@ -1736,12 +1838,14 @@ impl App {
     }
 }
 
-fn submit_command(action: &ObjectAction, mode: InputMode, value: String) -> Option<Command> {
-    let question_id = action
-        .target
-        .question_ids
-        .as_ref()
-        .and_then(|q| q.first().cloned());
+/// The POST one Enter makes. `question_id` is the question the editor was on, passed in rather than
+/// re-derived, so the answer lands against what the prompt said it would.
+fn submit_command(
+    action: &ObjectAction,
+    mode: InputMode,
+    question_id: Option<String>,
+    value: String,
+) -> Option<Command> {
     match (action.kind, mode) {
         (ActionKind::Clarify, InputMode::Answer) => Some(Command::Clarify {
             task_id: action.target.task_id.clone()?,
