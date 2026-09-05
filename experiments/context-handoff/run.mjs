@@ -94,6 +94,33 @@ async function callClaude(prompt, cwd, { allowWrite }) {
   };
 }
 
+// ---------------------------------------------------------------- self-report
+
+/**
+ * What the child says about its own work. Paired with the oracle result this gives the
+ * four-way outcome the experiment is really about:
+ *
+ *   done + pass        it knew, and it was right
+ *   done + FAIL        SILENT WRONGNESS — the whole run is waste and nobody is told
+ *   uncertain + fail   cheap: visible, catchable, a human can intervene
+ *   uncertain + pass   over-cautious, mildly wasteful
+ *
+ * The second row is the failure the handoff design exists to prevent. A child that never
+ * learned a standing requirement does not experience itself as guessing.
+ */
+function parseClaim(text) {
+  const m = String(text ?? '').match(/CLAIM:\s*(done|uncertain)\s*(?:[—:-]\s*(.*))?/i);
+  if (!m) return { claim: 'absent', about: null };
+  return { claim: m[1].toLowerCase(), about: (m[2] ?? '').trim() || null };
+}
+
+const outcomeOf = (claim, passed) =>
+  claim === 'done' && passed ? 'knew_and_right'
+  : claim === 'done' && !passed ? 'silent_wrongness'
+  : claim === 'uncertain' && !passed ? 'flagged_and_wrong'
+  : claim === 'uncertain' && passed ? 'over_cautious'
+  : 'unparseable';
+
 // ---------------------------------------------------------------- context construction
 
 const contractOf = (task, common) => [
@@ -296,11 +323,22 @@ async function runArm() {
         'You have no access to any prior conversation. Do not ask questions.',
         'Write the file and stop. Do not write tests.',
         '',
+        // The self-report is the measurement that matters. The expensive failure is not a
+        // child that fails, it is a child that is confidently wrong: it never knew a
+        // standing requirement, so it does not experience itself as guessing, reports
+        // "done", and its whole run is waste that nobody catches at the time.
+        'Finish your reply with exactly one of these lines, and nothing after it:',
+        '  CLAIM: done',
+        '  CLAIM: uncertain — <the specific thing you had to guess>',
+        'Answer honestly. "uncertain" is the correct answer if you had to pick a value',
+        '(a duration, a key, a status code, a name) that the task did not pin down.',
+        '',
         context ? `${context}\n` : '',
         contract,
       ].join('\n');
 
       const child = await callClaude(childPrompt, demo, { allowWrite: true });
+      const claim = parseClaim(child.text);
       const firstPass = await verify(demo, task);
 
       // One repair round, given only the failure output — the cost an uninformed child imposes.
@@ -320,14 +358,30 @@ async function runArm() {
         afterRepair = await verify(demo, task);
       }
 
+      const passedFirst = Boolean(firstPass.checks_passed && firstPass.typecheck_passed);
       const total = [mainUsage, child.usage, repair?.usage ?? ZERO].reduce(addUsage, ZERO);
+
+      /**
+       * The cost of information asymmetry. When the first pass fails, the child's ENTIRE
+       * first run is waste — not just the repair afterwards. It spent a full development
+       * run building against an assumption nobody had told it was wrong. That first run is
+       * the loss the handoff design is meant to prevent, and it dwarfs any difference in
+       * how the brief was written.
+       */
+      const wasted = passedFirst ? { ...ZERO } : addUsage(child.usage, repair?.usage ?? ZERO);
+
       await write({
         kind: 'task', run_id: runId, arm, task: task.id, history_tokens: historyTokens,
         context_chars: context.length,
         selected_item_ids: selected?.chosen.map((i) => i.id) ?? null,
         main_usage: mainUsage, child_usage: child.usage, repair_usage: repair?.usage ?? null,
         total_usage: total,
-        check_passed_first: Boolean(firstPass.checks_passed && firstPass.typecheck_passed),
+        wasted_usage: wasted,
+        child_claim: claim.claim,
+        child_uncertain_about: claim.about,
+        outcome: outcomeOf(claim.claim, passedFirst),
+        required_facts: task.requires,
+        check_passed_first: passedFirst,
         check_passed_after_repair: afterRepair
           ? Boolean(afterRepair.checks_passed && afterRepair.typecheck_passed)
           : null,
@@ -338,8 +392,10 @@ async function runArm() {
         child_failure: child.failure,
       });
 
-      const mark = (afterRepair ?? firstPass).checks_passed ? 'pass' : 'FAIL';
-      console.log(`  ${task.id} ${mark}${repair ? ' (after repair)' : ''}`);
+      const outcome = outcomeOf(claim.claim, passedFirst);
+      const mark = passedFirst ? 'pass' : 'FAIL';
+      const flag = outcome === 'silent_wrongness' ? '  ← claimed done, was wrong' : '';
+      console.log(`  ${task.id} ${mark} [${claim.claim}]${repair ? ' (repaired)' : ''}${flag}`);
       await resetWorktree(demo);
     }
   } finally {
