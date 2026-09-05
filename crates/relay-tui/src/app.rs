@@ -34,7 +34,7 @@ const PAGE_ROWS: i32 = 10;
 impl Region {
     pub fn title(self) -> &'static str {
         match self {
-            Region::Tree => "MISSION / WORKTREES",
+            Region::Tree => "WORKSPACES",
             Region::Graph => "HANDOFFS",
             Region::Panes => "PANES",
             Region::Inbox => "INBOX",
@@ -567,6 +567,9 @@ impl App {
     pub fn set_state(&mut self, state: State) {
         self.ws_mut().last_seq = self.ws().last_seq.max(state.last_seq);
         self.ws_mut().state = state;
+        // A workspace is named after its repo as soon as its state says which one that is; until then
+        // it goes by the port it was addressed on.
+        self.ws_mut().refresh_name();
     }
 
     /// New `/panes` listing: new panes get a screen model sized like the PTY; known ones keep theirs.
@@ -1424,7 +1427,6 @@ impl App {
     pub fn set_state_for(&mut self, index: usize, state: State) {
         if index == self.active {
             self.set_state(state);
-            self.ws_mut().refresh_name();
             return;
         }
         if let Some(ws) = self.workspaces.get_mut(index) {

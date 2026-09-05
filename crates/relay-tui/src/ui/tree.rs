@@ -1,4 +1,7 @@
-//! Mission tree: `MISSION <title> <status>`, the lint counts, then one agent per two rows with the runtime glyph
+//! The workspaces panel: one block per open project — its name and what the mission there is doing,
+//! then its agents. A workspace is a daemon, so several projects are several relayds; with one open
+//! the block still names it, because the panel is about projects either way.
+//! Originally the mission tree: `MISSION <title> <status>`, the lint counts, then one agent per two rows with the runtime glyph
 //! and the three states (port of `apps/tui/src/panels/Tree.tsx`).
 
 use crate::app::{App, Region};
@@ -91,6 +94,27 @@ pub fn tree_rows(app: &App, height: usize) -> Vec<TreeRow> {
     if app.workspaces.len() > 1 {
         return workspace_rows(app, height);
     }
+    // One project: name it, then show what it is doing in full — there is room, and the mission line
+    // and the lint counts are worth the two rows they take.
+    let ws = app.ws();
+    // The mission's own status when there is one; the connection only matters while there is not.
+    let status = ws
+        .state
+        .mission()
+        .map(|m| m.status.clone())
+        .unwrap_or_else(|| ws.connection.label());
+    let mut lines: Vec<TreeRow> = vec![(
+        Line::styled(
+            format!("▶ 1  {}  {}", ws.name, status),
+            Style::new().fg(Color::Cyan).bold(),
+        ),
+        None,
+    )];
+    lines.extend(mission_rows(app, height.saturating_sub(1)));
+    lines
+}
+
+fn mission_rows(app: &App, height: usize) -> Vec<TreeRow> {
     let mut lines: Vec<TreeRow> = Vec::new();
     let Some(mission) = app.ws().state.mission() else {
         if app.ws().graph.nodes.is_empty() {
@@ -331,9 +355,12 @@ mod snapshots {
         let rows = draw_rows(&mut app, 120, 40);
         let text = screen_text(&rows);
         assert!(text.contains("MISSION  Add secure login to this"), "{text}");
-        let header = tree_lines(&app, 40)[0].to_string();
+        // The panel is about projects now: the workspace names itself first, and the mission it is
+        // running follows.
+        let lines = tree_lines(&app, 40);
+        assert!(lines[0].to_string().starts_with("▶ 1  "), "{}", lines[0]);
         assert_eq!(
-            header,
+            lines[1].to_string(),
             "MISSION  Add secure login to this application.  executing"
         );
         for task in app.ws().state.tasks.keys() {

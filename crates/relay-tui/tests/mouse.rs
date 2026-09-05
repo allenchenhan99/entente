@@ -988,3 +988,24 @@ fn selecting_an_agent_with_no_pane_changes_no_focus() {
 
     assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:1"));
 }
+
+#[test]
+fn the_panel_is_about_projects_even_with_one_open() {
+    let mut app = App::new(Mode::Replay);
+    app.set_state(state("live-1"));
+    app.set_graph(graph("live-1"));
+
+    let text = String::from_iter(draw_rows(&mut app, 120, 32));
+
+    assert!(text.contains("WORKSPACES"), "{text}");
+    assert!(!text.contains("MISSION / WORKTREES"), "{text}");
+    // Named after its repo, which the mission says, rather than the port it was addressed on.
+    assert_eq!(app.ws().name, "app", "{}", app.ws().name);
+}
+
+#[test]
+fn a_workspace_goes_by_its_port_until_its_daemon_says_which_repo() {
+    let app = App::with_urls(Mode::Live, &["http://127.0.0.1:7421".to_string()]);
+
+    assert_eq!(app.ws().name, ":7421");
+}
