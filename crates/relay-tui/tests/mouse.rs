@@ -180,7 +180,7 @@ fn typing_into_a_pane_sends_the_keys_there() {
 }
 
 #[test]
-fn ctrl_bracket_leaves_a_pane_so_the_keys_are_the_apps_again() {
+fn a_second_escape_leaves_a_pane_so_the_keys_are_the_apps_again() {
     let mut app = app_with_panes();
     let rect = *app.pane_rects.get("relay:1").unwrap();
     click(&mut app, rect.x + 2, rect.y + rect.height / 2);
@@ -191,7 +191,7 @@ fn ctrl_bracket_leaves_a_pane_so_the_keys_are_the_apps_again() {
     app.handle_key(Key::ESC);
     assert!(app.terminal_input, "Esc goes to the agent");
 
-    app.handle_key(Key::ctrl(']'));
+    app.handle_key(Key::ESC);
     assert!(!app.terminal_input);
 }
 
@@ -1524,4 +1524,49 @@ fn a_plain_shell_still_scrolls_its_own_history() {
         "nothing is sent to the pane"
     );
     assert_eq!(app.pane_scroll("relay:1"), 3);
+}
+
+#[test]
+fn two_escapes_far_apart_are_two_interruptions_not_a_chord() {
+    let mut app = app_with_panes();
+    let rect = *app.pane_rects.get("relay:1").unwrap();
+    click(&mut app, rect.x + 2, rect.y + rect.height / 2);
+    assert!(app.terminal_input);
+    app.now_millis_override = Some(1_000_000);
+
+    // Esc, then Esc again a minute later. Both are attempts to stop the agent — ejecting you on the
+    // second would be the original bug with extra steps.
+    assert!(matches!(
+        app.handle_key(Key::ESC)[0],
+        Effect::PaneInput { .. }
+    ));
+    app.now_millis_override = Some(1_060_000);
+    assert!(matches!(
+        app.handle_key(Key::ESC)[0],
+        Effect::PaneInput { .. }
+    ));
+    assert!(app.terminal_input, "still typing into the pane");
+
+    // And straight after, it is one gesture.
+    app.now_millis_override = Some(1_060_200);
+    assert!(app.handle_key(Key::ESC).is_empty());
+    assert!(!app.terminal_input);
+}
+
+#[test]
+fn a_key_between_the_two_escapes_breaks_the_gesture() {
+    let mut app = app_with_panes();
+    let rect = *app.pane_rects.get("relay:1").unwrap();
+    click(&mut app, rect.x + 2, rect.y + rect.height / 2);
+    app.now_millis_override = Some(2_000_000);
+
+    app.handle_key(Key::ESC);
+    app.handle_key(Key::char('y'));
+    app.now_millis_override = Some(2_000_100);
+    // Esc, y, Esc is answering a prompt and then interrupting — not a request to leave.
+    assert!(matches!(
+        app.handle_key(Key::ESC)[0],
+        Effect::PaneInput { .. }
+    ));
+    assert!(app.terminal_input);
 }

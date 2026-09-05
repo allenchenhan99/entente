@@ -328,8 +328,8 @@ fn keys_f_focuses_the_selected_tasks_pane_and_i_routes_input_to_it() {
     ));
     assert!(app.terminal_input, "Esc did not leave the pane");
 
-    // Ctrl+] does, the way telnet's escape character always has — a chord no full-screen app binds.
-    app.handle_key(Key::ctrl(']'));
+    // A second Esc straight after does: near enough together to read as one gesture.
+    app.handle_key(Key::ESC);
     assert!(!app.terminal_input);
     assert_eq!(app.handle_key(Key::char('q')), vec![Effect::Quit]);
 }

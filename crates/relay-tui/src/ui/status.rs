@@ -78,7 +78,7 @@ pub fn status_text(app: &App) -> String {
         parts.push(hints);
     }
     if app.terminal_input {
-        parts.push("typing → pane (Ctrl+] leaves)".to_string());
+        parts.push("typing → pane (Esc Esc leaves)".to_string());
     } else {
         parts.push("? help".to_string());
     }

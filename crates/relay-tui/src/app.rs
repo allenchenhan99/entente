@@ -28,6 +28,8 @@ pub enum Region {
 const REGIONS: [Region; 4] = [Region::Tree, Region::Graph, Region::Panes, Region::Inbox];
 
 /// Rows a wheel notch or a page key moves a pane's scrollback.
+/// How long after an Esc a second one still counts as the same gesture.
+const ESC_DOUBLE_TAP_MS: i64 = 600;
 const SCROLL_ROWS: i32 = 3;
 const PAGE_ROWS: i32 = 10;
 /// Columns an arrow moves the text panels, and how far right they will go at all.
@@ -435,6 +437,11 @@ pub struct App {
     /// Test seam: what this client believes the time is, in seconds since the epoch. `None` asks the
     /// system clock. Ages are drawn from it, and a drawn age has to be reproducible in a snapshot.
     pub now_override: Option<i64>,
+    /// The same, in milliseconds — the double-tap window is far too short for whole seconds.
+    pub now_millis_override: Option<i64>,
+    /// When the last Esc was sent to a pane, so a second one soon after means "give me the keyboard
+    /// back". Cleared by any other key: two Escs a minute apart are two interruptions, not a chord.
+    esc_sent_at: Option<i64>,
     pub help_open: bool,
     pub error: Option<String>,
     pub notice: Option<String>,
@@ -525,6 +532,8 @@ impl App {
             answered_questions: Vec::new(),
             answering_item: None,
             now_override: None,
+            now_millis_override: None,
+            esc_sent_at: None,
             help_open: false,
             error: None,
             notice: None,
@@ -967,6 +976,16 @@ impl App {
         matches!(self.highlighted(), Some(r) if r.kind == RefKind::Edge && r.id == edge_id)
     }
 
+    /// This client's idea of now, in milliseconds since the epoch.
+    pub fn now_millis(&self) -> i64 {
+        self.now_millis_override.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0)
+        })
+    }
+
     /// This client's idea of now, in seconds since the epoch.
     pub fn now_seconds(&self) -> i64 {
         self.now_override.unwrap_or_else(|| {
@@ -1246,13 +1265,26 @@ impl App {
     /// Port of `useInput` in `keys.ts`, plus the pane grid.
     pub fn handle_key(&mut self, key: Key) -> Vec<Effect> {
         if self.terminal_input {
-            // Esc is the agent's key, not ours. In Claude Code and Codex it stops what the agent is
-            // doing, and swallowing it to leave the pane meant the one key you reach for to interrupt
-            // a run instead quietly took your keyboard away. Ctrl+] leaves, the way telnet's escape
-            // character has always worked, and it is a chord no full-screen app binds.
-            if key.ctrl && matches!(key.code, KeyCode::Char(']')) {
-                self.terminal_input = false;
-                return Vec::new();
+            // Esc is the agent's key first. In Claude Code and Codex it stops what the agent is doing,
+            // and swallowing it to leave the pane meant the one key you reach for to interrupt a run
+            // instead quietly took your keyboard away. So the first Esc goes through, and a second one
+            // straight after leaves — near enough together to be one gesture. The window matters: two
+            // Escs a minute apart are two interruptions, and ejecting you on the second would be the
+            // original bug with extra steps.
+            let is_esc = key.code == KeyCode::Esc && !key.ctrl && !key.alt;
+            if is_esc {
+                let now = self.now_millis();
+                if self
+                    .esc_sent_at
+                    .is_some_and(|sent| now.saturating_sub(sent) <= ESC_DOUBLE_TAP_MS)
+                {
+                    self.esc_sent_at = None;
+                    self.terminal_input = false;
+                    return Vec::new();
+                }
+                self.esc_sent_at = Some(now);
+            } else {
+                self.esc_sent_at = None;
             }
             return match self.ws().focused_pane.clone() {
                 Some(pane_id) => {

@@ -227,7 +227,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         if honoured > 0 {
             title.push_str(&format!("  [↑{honoured} · PgDn for live]"));
         } else if app.terminal_input {
-            title.push_str("  [typing · Ctrl+] leaves]");
+            title.push_str("  [typing · Esc Esc leaves]");
         } else if active {
             title.push_str("  [i to type]");
         }
@@ -548,7 +548,7 @@ mod snapshots {
         assert!(screen_text(&rows).contains("[i to type]"));
         app.handle_key(Key::char('i'));
         let rows = draw_rows(&mut app, 120, 40);
-        assert!(screen_text(&rows).contains("[typing · Ctrl+] leaves]"));
+        assert!(screen_text(&rows).contains("[typing · Esc Esc leaves]"));
         let mut empty = replay_app("live-1");
         let rows = draw_rows(&mut empty, 120, 40);
         assert!(screen_text(&rows).contains("<no panes in this fixture>"));
