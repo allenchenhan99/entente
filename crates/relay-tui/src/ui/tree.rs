@@ -32,7 +32,8 @@ pub fn status_color(status: VisualStatus) -> Color {
     }
 }
 
-fn enum_name<T: serde::Serialize>(value: &Option<T>) -> String {
+/// The serde name of an optional state enum (`working`, `repairing`, …), or `-`.
+pub fn enum_name<T: serde::Serialize>(value: &Option<T>) -> String {
     value
         .as_ref()
         .and_then(|v| serde_json::to_value(v).ok())

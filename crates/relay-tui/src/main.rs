@@ -87,7 +87,11 @@ async fn main() -> Result<()> {
 
     crossterm::terminal::enable_raw_mode().context("raw mode (is stdout a terminal?)")?;
     let mut stdout = std::io::stdout();
-    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
+    crossterm::execute!(
+        stdout,
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
     let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
     let mut runtime = Runtime::new(terminal, source);
     let tx = runtime.sender();
@@ -97,6 +101,13 @@ async fn main() -> Result<()> {
                 Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => {
                     if tx.send(Msg::Key(key.into())).is_err() {
                         return;
+                    }
+                }
+                Ok(Event::Mouse(mouse)) => {
+                    if let Some(m) = relay_tui::keys::Mouse::from_crossterm(mouse) {
+                        if tx.send(Msg::Mouse(m)).is_err() {
+                            return;
+                        }
                     }
                 }
                 Ok(Event::Resize(_, _)) => {
@@ -123,7 +134,11 @@ async fn main() -> Result<()> {
     runtime.shutdown();
     let summary = runtime.app.frames.summary();
     drop(runtime);
-    let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        crossterm::event::DisableMouseCapture,
+        crossterm::terminal::LeaveAlternateScreen
+    );
     let _ = crossterm::terminal::disable_raw_mode();
     result?;
     if args.metrics_json {

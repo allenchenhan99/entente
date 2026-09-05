@@ -4,7 +4,7 @@
 
 use crate::api::Client;
 use crate::app::{App, Command, Connection, Effect, Mode};
-use crate::keys::Key;
+use crate::keys::{Key, Mouse};
 use crate::model::*;
 use crate::replay::Fixture;
 use crate::ui;
@@ -31,6 +31,7 @@ pub const STORY_TAIL: usize = 50;
 #[derive(Debug)]
 pub enum Msg {
     Key(Key),
+    Mouse(Mouse),
     Resize,
     Tick,
     /// An SSE event arrived (its seq).
@@ -319,6 +320,7 @@ impl<B: Backend> Runtime<B> {
                 self.app.notice = None;
                 self.app.handle_key(key)
             }
+            Msg::Mouse(mouse) => self.app.handle_mouse(mouse),
             Msg::Resize => Vec::new(),
             Msg::Tick => {
                 self.app.tick = self.app.tick.wrapping_add(1);
@@ -453,6 +455,16 @@ impl<B: Backend> Runtime<B> {
                 if let Some(sender) = self.pane_senders.get(&pane_id) {
                     let _ = sender.send(PtyClientMessage::Resize { cols, rows });
                 }
+            }
+            // Handing the mouse back to the terminal is the terminal's business, not the app's; the
+            // runtime owns the escape sequences.
+            Effect::SetMouseCapture(on) => {
+                let mut out = std::io::stdout();
+                let _ = if on {
+                    crossterm::execute!(out, crossterm::event::EnableMouseCapture)
+                } else {
+                    crossterm::execute!(out, crossterm::event::DisableMouseCapture)
+                };
             }
             Effect::FocusPane(pane_id) => {
                 if let Source::Live(client) = &self.source {

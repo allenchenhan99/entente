@@ -1,518 +1,559 @@
-//! The explainable graph: four columns (human / planner · agents · verifier · done) of nodes with their status
-//! glyph and badge, then one row per edge drawn with box characters and its label, attention edges highlighted.
-//! Port of `apps/tui/src/graph/{layout,edges,canvas,Graph}.ts` onto a ratatui buffer.
+//! The agent network: nodes as discs on a ratatui `Canvas`, edges as lines between their rims, drawn in
+//! three tiers (you / planner · agents · verifier) so the whole graph fits the narrow left column.
+//!
+//! Layout is in a fixed world box and never force-directed: a disc must not move under the pointer when
+//! relayd spawns or reaps a neighbour. The view (pan and zoom) maps that world onto the panel, correcting
+//! for the terminal's 2:1 cell aspect so a circle reads as a circle.
+//!
+//! Interaction lives in `App` (click, drag, wheel, keys); this module owns the geometry both sides share:
+//! `layout_net` places the discs, `view_bounds` maps world to canvas, and `hit_test` turns a cell back into
+//! the object under it.
 
-use crate::app::{App, Region};
+use crate::app::{App, GraphView, Region, Viewport};
 use crate::model::*;
-use crate::ui::tree::status_color;
+use crate::ui::tree::{enum_name, status_color};
 use crate::ui::{panel_block, region_active};
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
+use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
+use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
 use ratatui::widgets::{Borders, Paragraph};
 use ratatui::Frame;
 
-/// A character grid with a style per cell (the Ink `Canvas`).
-pub struct Canvas {
-    pub width: usize,
-    pub height: usize,
-    cells: Vec<Vec<(char, Style)>>,
+/// The world box every layout is expressed in. Panning and zooming move the view over it, not the nodes.
+pub const WORLD: f64 = 100.0;
+// Braille gives 2×4 dots per cell, so a small circle degenerates into fragments: these radii are the
+// smallest that still draw a closed rim in a 40-column panel.
+const R_AGENT: f64 = 9.0;
+const R_ROLE: f64 = 7.0;
+/// Tier centres, top to bottom, in world units (y grows upward), spaced to leave a row for each label.
+const TIER_Y: [f64; 3] = [84.0, 50.0, 16.0];
+/// Clearance between a disc's rim and its label, in world units.
+const LABEL_GAP: f64 = 5.5;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Disc {
+    pub id: String,
+    pub label: String,
+    pub x: f64,
+    pub y: f64,
+    pub radius: f64,
+    pub status: VisualStatus,
+    pub is_agent: bool,
+    pub badge: Option<String>,
 }
 
-impl Canvas {
-    pub fn new(width: usize, height: usize) -> Self {
-        Self {
-            width,
-            height,
-            cells: vec![vec![(' ', Style::new()); width]; height],
+/// Where each node sits. Nodes of a tier are spread evenly across the world's width, in protocol order.
+pub fn layout_net(graph: &Graph) -> Vec<Disc> {
+    let mut tiers: [Vec<&GraphNode>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    for node in &graph.nodes {
+        // The protocol's fourth column (`done`) has no object behind it yet; fold it into the verifier tier
+        // rather than leaving a dead band in a panel this narrow.
+        let tier = (node.column as usize).min(2);
+        tiers[tier].push(node);
+    }
+    let mut discs = Vec::new();
+    for (tier, nodes) in tiers.iter().enumerate() {
+        let count = nodes.len();
+        for (index, node) in nodes.iter().enumerate() {
+            let step = WORLD / (count as f64 + 1.0);
+            discs.push(Disc {
+                id: node.id.clone(),
+                label: node.label.clone(),
+                x: step * (index as f64 + 1.0),
+                y: TIER_Y[tier],
+                radius: if node.kind == GraphNodeKind::Agent {
+                    R_AGENT
+                } else {
+                    R_ROLE
+                },
+                status: node.status,
+                is_agent: node.kind == GraphNodeKind::Agent,
+                badge: node.badge.clone(),
+            });
         }
     }
-
-    pub fn text(&mut self, x: usize, y: usize, value: &str, style: Style) {
-        if y >= self.height {
-            return;
-        }
-        for (offset, ch) in value.chars().enumerate() {
-            let cx = x + offset;
-            if cx >= self.width {
-                break;
-            }
-            self.cells[y][cx] = (ch, style);
-        }
-    }
-
-    pub fn render(&self) -> Vec<Line<'static>> {
-        self.cells
-            .iter()
-            .map(|row| {
-                let mut spans: Vec<Span<'static>> = Vec::new();
-                let mut current: Option<(String, Style)> = None;
-                for (ch, style) in row {
-                    match &mut current {
-                        Some((text, s)) if s == style => text.push(*ch),
-                        _ => {
-                            if let Some((text, s)) = current.take() {
-                                spans.push(Span::styled(text, s));
-                            }
-                            current = Some((ch.to_string(), *style));
-                        }
-                    }
-                }
-                if let Some((text, s)) = current.take() {
-                    spans.push(Span::styled(text, s));
-                }
-                Line::from(spans)
-            })
-            .collect()
-    }
+    discs
 }
 
-pub struct StatusVisual {
-    pub color: Color,
-    pub bold: bool,
-    pub dim: bool,
-    pub glyph: &'static str,
-    pub line: &'static str,
+fn disc<'a>(discs: &'a [Disc], id: &str) -> Option<&'a Disc> {
+    discs.iter().find(|d| d.id == id)
 }
 
-/// Port of `statusVisual` (`edges.ts`): glyph, line pattern and colour per status, animated by `tick`.
-pub fn status_visual(status: VisualStatus, tick: u64) -> StatusVisual {
-    let color = status_color(status);
-    match status {
-        VisualStatus::Pending => StatusVisual {
-            color,
-            bold: false,
-            dim: tick % 8 < 4,
-            glyph: "·",
-            line: if tick.is_multiple_of(2) {
-                "╌ ╌"
-            } else {
-                " ╌ "
-            },
-        },
-        VisualStatus::Attention => StatusVisual {
-            color,
-            bold: tick % 4 < 2,
-            dim: false,
-            glyph: "!",
-            line: "?──",
-        },
-        VisualStatus::Blocked => StatusVisual {
-            color,
-            bold: true,
-            dim: false,
-            glyph: "◐",
-            line: "◐──",
-        },
-        VisualStatus::Working => StatusVisual {
-            color,
-            bold: false,
-            dim: false,
-            glyph: "●",
-            line: if tick.is_multiple_of(2) {
-                "╌─╌"
-            } else {
-                "─╌─"
-            },
-        },
-        VisualStatus::Done | VisualStatus::Verified => StatusVisual {
-            color,
-            bold: status == VisualStatus::Verified,
-            dim: false,
-            glyph: "✓",
-            line: "───",
-        },
-        VisualStatus::Failed => StatusVisual {
-            color,
-            bold: true,
-            dim: false,
-            glyph: "✗",
-            line: "─✗─",
-        },
-    }
+/// Where an edge starts and ends: the rims of its two discs, never their centres.
+pub fn edge_ends(discs: &[Disc], edge: &GraphEdge) -> Option<((f64, f64), (f64, f64))> {
+    let (from, to) = (disc(discs, &edge.from)?, disc(discs, &edge.to)?);
+    let (dx, dy) = (to.x - from.x, to.y - from.y);
+    let len = (dx * dx + dy * dy).sqrt().max(0.001);
+    let (ux, uy) = (dx / len, dy / len);
+    Some((
+        (from.x + ux * from.radius, from.y + uy * from.radius),
+        (to.x - ux * (to.radius + 1.0), to.y - uy * (to.radius + 1.0)),
+    ))
 }
 
-fn status_style(status: VisualStatus, tick: u64, selected: bool) -> Style {
-    let visual = status_visual(status, tick);
-    let mut style = Style::new().fg(visual.color);
-    if selected || visual.bold {
-        style = style.bold();
-    }
-    if visual.dim {
-        style = style.dim();
-    }
-    if selected {
-        style = style.reversed();
-    }
-    style
-}
-
-pub const HEADINGS: [&str; 4] = ["HUMAN / PLANNER", "AGENTS", "VERIFIER", "DONE"];
-
-/// Column x positions for a canvas of `width` cells.
-pub fn columns(width: usize) -> [usize; 4] {
-    let w = width.max(40);
-    [0, w * 30 / 100, w * 62 / 100, w.saturating_sub(10)]
-}
-
-/// One line per edge: `from ──label──▶ to`, prefixed by the status glyph (`!` for attention).
-pub fn edge_text(edge: &GraphEdge, tick: u64) -> String {
-    let visual = status_visual(edge.status, tick);
-    let marker = if edge.attention { "!" } else { visual.glyph };
-    format!(
-        "{marker} {} {}{}{} ▶ {}",
-        edge.from, visual.line, edge.label, visual.line, edge.to
+/// Canvas bounds for a view over the world, corrected for the terminal's 2:1 cell aspect: a row is about
+/// twice as tall as a column is wide, so the vertical span must be twice as large per cell to keep circles round.
+pub fn view_bounds(view: &GraphView, viewport: Viewport) -> ([f64; 2], [f64; 2]) {
+    let (w, h) = (viewport.width.max(1) as f64, viewport.height.max(1) as f64);
+    let fit_x = WORLD.max(WORLD * w / (2.0 * h));
+    let span_x = fit_x / view.zoom;
+    let span_y = 2.0 * h * span_x / w;
+    let (cx, cy) = (WORLD / 2.0 + view.pan_x, WORLD / 2.0 + view.pan_y);
+    (
+        [cx - span_x / 2.0, cx + span_x / 2.0],
+        [cy - span_y / 2.0, cy + span_y / 2.0],
     )
 }
 
-/// Below this width the four columns overlap; nodes are then listed under their column heading instead.
-pub const COLUMN_LAYOUT_MIN_WIDTH: usize = 70;
-
-/// Logical rows of the graph: `(row, column, node index)` per node; edge rows start after the deepest column.
-struct Rows {
-    node_rows: Vec<usize>,
-    heading_rows: [usize; 4],
-    first_edge_row: usize,
-    columns: bool,
+/// World coordinates of a terminal cell inside the graph viewport.
+pub fn cell_to_world(view: &GraphView, viewport: Viewport, col: u16, row: u16) -> (f64, f64) {
+    let (x_bounds, y_bounds) = view_bounds(view, viewport);
+    let fx = (col.saturating_sub(viewport.x)) as f64 / viewport.width.max(1) as f64;
+    let fy = (row.saturating_sub(viewport.y)) as f64 / viewport.height.max(1) as f64;
+    (
+        x_bounds[0] + fx * (x_bounds[1] - x_bounds[0]),
+        // rows run down the screen, the canvas runs up
+        y_bounds[1] - fy * (y_bounds[1] - y_bounds[0]),
+    )
 }
 
-fn plan_rows(graph: &Graph, width: usize) -> Rows {
-    let columns = width >= COLUMN_LAYOUT_MIN_WIDTH;
-    let mut node_rows = vec![0; graph.nodes.len()];
-    let mut heading_rows = [0; 4];
-    let first_edge_row = if columns {
-        // Ink layout: headings on row 0, nodes stacked per column from row 1.
-        let mut counts = [0usize; 4];
-        for (index, node) in graph.nodes.iter().enumerate() {
-            let column = (node.column as usize).min(3);
-            counts[column] += 1;
-            node_rows[index] = counts[column];
-        }
-        counts.iter().copied().max().unwrap_or(0) + 2
+fn distance_to_segment(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 <= f64::EPSILON {
+        0.0
     } else {
-        // Narrow: one group per column (heading row, then its nodes), columns without nodes are skipped.
-        let mut row = 0;
-        for (column, heading_row) in heading_rows.iter_mut().enumerate() {
-            let members: Vec<usize> = graph
-                .nodes
-                .iter()
-                .enumerate()
-                .filter(|(_, n)| (n.column as usize).min(3) == column)
-                .map(|(i, _)| i)
-                .collect();
-            if members.is_empty() {
-                continue;
-            }
-            *heading_row = row;
-            row += 1;
-            for index in members {
-                node_rows[index] = row;
-                row += 1;
-            }
-        }
-        row + 1
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0)
     };
-    Rows {
-        node_rows,
-        heading_rows,
-        first_edge_row,
-        columns,
-    }
+    let (cx, cy) = (a.0 + t * dx, a.1 + t * dy);
+    ((p.0 - cx).powi(2) + (p.1 - cy).powi(2)).sqrt()
 }
 
-/// The graph as styled lines (port of `renderGraph`): headings, nodes by column, then the edge rows.
-/// The rows scroll so the selected object is visible.
-pub fn graph_lines(
-    graph: &Graph,
-    width: usize,
-    height: usize,
-    tick: u64,
-    selected: Option<&GraphObjectRef>,
-) -> Vec<Line<'static>> {
-    let mut canvas = Canvas::new(width, height);
-    if graph.nodes.is_empty() && graph.edges.is_empty() {
-        canvas.text(
-            0,
-            0,
-            "<empty graph>",
-            Style::new().fg(Color::DarkGray).dim(),
-        );
-        return canvas.render();
-    }
-    let rows = plan_rows(graph, width);
-    let cols = columns(width);
-    let edge_row = |index: usize| rows.first_edge_row + index;
-
-    let selected_row = selected.and_then(|r| match r.kind {
-        RefKind::Node => graph
-            .nodes
-            .iter()
-            .position(|n| n.id == r.id)
-            .map(|i| rows.node_rows[i]),
-        RefKind::Edge => graph.edges.iter().position(|e| e.id == r.id).map(edge_row),
-        RefKind::Inbox => None,
-    });
-    let content_height = height.saturating_sub(1);
-    let offset = match selected_row {
-        Some(row) if row > content_height && content_height > 0 => row - content_height,
-        _ => 0,
-    };
-    // Row 0 (the column headings) stays; scrolled-away rows are dropped.
-    let visible = |row: usize| {
-        if row == 0 {
-            Some(0)
-        } else {
-            row.checked_sub(offset).filter(|r| *r > 0)
-        }
-    };
-
-    let heading_style = Style::new().fg(Color::DarkGray).bold();
-    if rows.columns {
-        for (column, heading) in HEADINGS.iter().enumerate() {
-            canvas.text(cols[column], 0, heading, heading_style);
-        }
-    } else {
-        for (column, heading) in HEADINGS.iter().enumerate() {
-            let used = graph
-                .nodes
-                .iter()
-                .any(|n| (n.column as usize).min(3) == column);
-            if !used {
-                continue;
-            }
-            let row = rows.heading_rows[column];
-            let y = if row == 0 { Some(0) } else { visible(row) };
-            if let Some(y) = y {
-                canvas.text(0, y, heading, heading_style);
-            }
+/// The object under a world point: a disc first (they sit above the wiring), then an edge within reach of it.
+pub fn hit_test(graph: &Graph, discs: &[Disc], point: (f64, f64)) -> Option<GraphObjectRef> {
+    let mut best: Option<(f64, &Disc)> = None;
+    for d in discs {
+        let distance = ((point.0 - d.x).powi(2) + (point.1 - d.y).powi(2)).sqrt();
+        if distance <= d.radius * 1.35 && best.as_ref().is_none_or(|(b, _)| distance < *b) {
+            best = Some((distance, d));
         }
     }
-    for (index, node) in graph.nodes.iter().enumerate() {
-        let row = rows.node_rows[index];
-        let Some(y) = visible(row) else { continue };
-        let is_selected = matches!(selected, Some(r) if r.kind == RefKind::Node && r.id == node.id);
-        let visual = status_visual(node.status, tick);
-        let identity = if node.label == node.id {
-            node.id.clone()
-        } else {
-            format!("{} ({})", node.id, node.label)
-        };
-        let badge = node
-            .badge
-            .as_ref()
-            .map(|b| format!(" {b}"))
-            .unwrap_or_default();
-        let x = if rows.columns {
-            cols[(node.column as usize).min(3)]
-        } else {
-            2
-        };
-        canvas.text(
-            x,
-            y,
-            &format!("{} {identity}{badge}", visual.glyph),
-            status_style(node.status, tick, is_selected),
-        );
+    if let Some((_, d)) = best {
+        return Some(GraphObjectRef::node(&d.id));
     }
-    for (index, edge) in graph.edges.iter().enumerate() {
-        let Some(y) = visible(edge_row(index)) else {
+    let mut closest: Option<(f64, &GraphEdge)> = None;
+    for edge in &graph.edges {
+        let Some((a, b)) = edge_ends(discs, edge) else {
             continue;
         };
-        let is_selected = matches!(selected, Some(r) if r.kind == RefKind::Edge && r.id == edge.id);
-        let mut style = status_style(edge.status, tick, is_selected);
-        if edge.attention {
-            style = style.fg(Color::Yellow).bold();
+        let distance = distance_to_segment(point, a, b);
+        if distance <= 2.5 && closest.as_ref().is_none_or(|(c, _)| distance < *c) {
+            closest = Some((distance, edge));
         }
-        canvas.text(0, y, &edge_text(edge, tick), style);
     }
-    canvas.render()
+    closest.map(|(_, e)| GraphObjectRef::edge(&e.id))
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let block = panel_block(
-        Region::Graph.title(),
-        region_active(app, Region::Graph),
-        Borders::TOP,
-    );
+fn glyph(status: VisualStatus) -> &'static str {
+    match status {
+        VisualStatus::Pending => "·",
+        VisualStatus::Working => "●",
+        VisualStatus::Attention => "!",
+        VisualStatus::Blocked => "◐",
+        VisualStatus::Done | VisualStatus::Verified => "✓",
+        VisualStatus::Failed => "✗",
+    }
+}
+
+fn selected_is(selected: Option<&GraphObjectRef>, kind: RefKind, id: &str) -> bool {
+    selected.is_some_and(|r| r.kind == kind && r.id == id)
+}
+
+/// The line under the network: the three independent state layers of the selected agent, spelled out — an
+/// idle runtime says nothing about the task. For an edge it is the edge's own label instead.
+pub fn detail_line(app: &App) -> Line<'static> {
+    let Some(reference) = app.selected.as_ref() else {
+        return Line::styled(
+            "nothing selected · click a node, or j/k",
+            Style::new().fg(Color::DarkGray),
+        );
+    };
+    if reference.kind == RefKind::Edge {
+        if let Some(edge) = app.graph.edges.iter().find(|e| e.id == reference.id) {
+            let mut spans = vec![
+                Span::styled(edge.id.clone(), Style::new().fg(Color::Gray)),
+                Span::raw("  "),
+                Span::styled(
+                    edge.label.clone(),
+                    Style::new().fg(status_color(edge.status)),
+                ),
+            ];
+            if edge.attention {
+                spans.push(Span::styled(
+                    "  needs you",
+                    Style::new()
+                        .fg(Color::Yellow)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ));
+            }
+            return Line::from(spans);
+        }
+    }
+    let Some(node) = app.graph.nodes.iter().find(|n| n.id == reference.id) else {
+        return Line::raw("");
+    };
+    let mut spans = vec![Span::styled(
+        node.label.clone(),
+        Style::new()
+            .fg(status_color(node.status))
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    )];
+    if node.kind == GraphNodeKind::Agent {
+        for (name, value) in [
+            ("run", enum_name(&node.runtime)),
+            ("task", enum_name(&node.task_state)),
+            ("handoff", enum_name(&node.handoff_state)),
+        ] {
+            spans.push(Span::styled(
+                format!(" · {name} "),
+                Style::new().fg(Color::DarkGray),
+            ));
+            spans.push(Span::raw(value));
+        }
+    } else if let Some(badge) = node.badge.clone() {
+        spans.push(Span::styled(
+            format!(" · {badge}"),
+            Style::new().fg(Color::DarkGray),
+        ));
+    }
+    Line::from(spans)
+}
+
+/// Draw the network. Records the canvas area on `app` so a click can be turned back into an object.
+pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
+    let active = region_active(app, Region::Graph);
+    let block = panel_block(Region::Graph.title(), active, Borders::TOP);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let lines = graph_lines(
-        &app.graph,
-        inner.width as usize,
-        inner.height as usize,
-        app.tick,
-        app.selected.as_ref(),
-    );
-    frame.render_widget(Paragraph::new(lines), inner);
+    if inner.height == 0 || inner.width == 0 {
+        app.graph_viewport = Viewport::EMPTY;
+        return;
+    }
+
+    let [canvas_area, detail] =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
+    app.graph_viewport = Viewport {
+        x: canvas_area.x,
+        y: canvas_area.y,
+        width: canvas_area.width,
+        height: canvas_area.height,
+    };
+
+    let graph = app.graph.clone();
+    let discs = layout_net(&graph);
+    let selected = app.selected.clone();
+    let (x_bounds, y_bounds) = view_bounds(&app.graph_view, app.graph_viewport);
+    // World units per printed character, so labels can be centred under their disc.
+    let per_char = (x_bounds[1] - x_bounds[0]) / canvas_area.width.max(1) as f64;
+
+    let widget = Canvas::default()
+        .marker(Marker::Braille)
+        .x_bounds(x_bounds)
+        .y_bounds(y_bounds)
+        .paint(move |ctx| {
+            for edge in &graph.edges {
+                let Some((a, b)) = edge_ends(&discs, edge) else {
+                    continue;
+                };
+                let color = status_color(edge.status);
+                match edge.kind {
+                    // Evidence and replies are dotted, so an edge's kind survives losing its colour.
+                    GraphEdgeKind::Evidence | GraphEdgeKind::Reply => {
+                        let steps = 24;
+                        let coords: Vec<(f64, f64)> = (0..=steps)
+                            .filter(|i| i % 2 == 0)
+                            .map(|i| {
+                                let t = i as f64 / steps as f64;
+                                (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
+                            })
+                            .collect();
+                        ctx.draw(&Points {
+                            coords: &coords,
+                            color,
+                        });
+                    }
+                    _ => ctx.draw(&CanvasLine {
+                        x1: a.0,
+                        y1: a.1,
+                        x2: b.0,
+                        y2: b.1,
+                        color,
+                    }),
+                }
+            }
+            ctx.layer();
+
+            for d in &discs {
+                let color = status_color(d.status);
+                ctx.draw(&Circle {
+                    x: d.x,
+                    y: d.y,
+                    radius: d.radius,
+                    color,
+                });
+                // Attention doubles the rim, so colour is never the only signal.
+                if matches!(d.status, VisualStatus::Attention | VisualStatus::Blocked) {
+                    ctx.draw(&Circle {
+                        x: d.x,
+                        y: d.y,
+                        radius: d.radius - 1.2,
+                        color,
+                    });
+                }
+                if selected_is(selected.as_ref(), RefKind::Node, &d.id) {
+                    ctx.draw(&Circle {
+                        x: d.x,
+                        y: d.y,
+                        radius: d.radius + 2.5,
+                        color: Color::Cyan,
+                    });
+                }
+            }
+            ctx.layer();
+
+            for edge in &graph.edges {
+                if !edge.attention {
+                    continue;
+                }
+                if let Some((a, b)) = edge_ends(&discs, edge) {
+                    ctx.print(
+                        (a.0 + b.0) / 2.0,
+                        (a.1 + b.1) / 2.0,
+                        Line::styled(
+                            "!",
+                            Style::new()
+                                .fg(Color::Yellow)
+                                .add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                    );
+                }
+            }
+            for d in &discs {
+                let color = status_color(d.status);
+                ctx.print(
+                    d.x - per_char / 2.0,
+                    d.y,
+                    Line::styled(
+                        glyph(d.status).to_string(),
+                        Style::new()
+                            .fg(color)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    ),
+                );
+                let label = d.label.clone();
+                ctx.print(
+                    d.x - label.chars().count() as f64 * per_char / 2.0,
+                    d.y - d.radius - LABEL_GAP,
+                    Line::styled(
+                        label,
+                        if selected_is(selected.as_ref(), RefKind::Node, &d.id) {
+                            Style::new()
+                                .fg(Color::Cyan)
+                                .add_modifier(ratatui::style::Modifier::BOLD)
+                        } else {
+                            Style::new().fg(color)
+                        },
+                    ),
+                );
+            }
+        });
+    frame.render_widget(widget, canvas_area);
+    frame.render_widget(Paragraph::new(detail_line(app)), detail);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn canvas_merges_equal_styles_into_spans() {
-        let mut c = Canvas::new(6, 1);
-        c.text(0, 0, "ab", Style::new().fg(Color::Red));
-        c.text(2, 0, "cd", Style::new().fg(Color::Red));
-        c.text(4, 0, "ef", Style::new());
-        let line = &c.render()[0];
-        assert_eq!(line.spans.len(), 2);
-        assert_eq!(line.to_string(), "abcdef");
-    }
-
-    #[test]
-    fn attention_edges_get_the_bang_and_the_question_line() {
-        let edge = GraphEdge {
-            id: "contract:t".into(),
-            kind: GraphEdgeKind::Contract,
-            from: "planner".into(),
-            to: "t".into(),
-            task_id: None,
-            label: "v1 ? 2".into(),
-            status: VisualStatus::Attention,
-            attention: true,
-            version: Some(1),
-        };
-        assert_eq!(edge_text(&edge, 0), "! planner ?──v1 ? 2?── ▶ t");
-    }
-}
-
-#[cfg(test)]
-mod snapshots {
-    use super::*;
-    use crate::keys::Key;
     use crate::testkit::*;
 
-    fn plain(lines: &[Line<'static>]) -> Vec<String> {
-        lines
-            .iter()
-            .map(|l| l.to_string().trim_end().to_string())
-            .collect()
-    }
-
-    #[test]
-    fn graph_draws_columns_nodes_and_labelled_contract_edges_for_live_1() {
-        let g = fixture("live-1").graph;
-        let rows = plain(&graph_lines(
-            &g,
-            100,
-            12,
-            0,
-            Some(&GraphObjectRef::node("t-backend-auth")),
-        ));
-        assert!(
-            rows[0].contains("HUMAN / PLANNER")
-                && rows[0].contains("AGENTS")
-                && rows[0].contains("VERIFIER"),
-            "{rows:?}"
-        );
-        let text = rows.join("\n");
-        assert!(text.contains("✓ t-backend-auth (backend) a2"), "{text}");
-        assert!(text.contains("✗ t-frontend-login (frontend)"), "{text}");
-        assert!(text.contains("human ───v1 ✓─── ▶ t-backend-auth"), "{text}");
-        assert!(text.contains("t-backend-auth ───✓─── ▶ verifier"), "{text}");
-        // Nodes sit in their columns: human/planner at x=0, agents at 30 %, verifier at 62 %.
-        let cols = columns(100);
-        let agent_row = rows
-            .iter()
-            .find(|r| r.contains("t-backend-auth (backend)"))
-            .unwrap();
-        assert_eq!(
-            agent_row.chars().position(|c| c == '✓'),
-            Some(cols[1]),
-            "{agent_row}"
-        );
-    }
-
-    #[test]
-    fn graph_shows_the_delegation_edge_of_live_7() {
-        let g = fixture("live-7").graph;
-        let text = plain(&graph_lines(&g, 100, 14, 0, None)).join("\n");
-        assert!(
-            text.contains("t-backend-auth ───sub ✓ merged─── ▶ t-token-store"),
-            "{text}"
-        );
-        assert!(text.contains("human ───↩ 1─── ▶ t-backend-auth"), "{text}");
-    }
-
-    #[test]
-    fn graph_highlights_attention_edges_and_the_selection() {
-        let g = demo_graph();
-        let lines = graph_lines(
-            &g,
-            100,
-            16,
-            0,
-            Some(&GraphObjectRef::edge("contract:t-backend-auth")),
-        );
-        let attention = lines
-            .iter()
-            .find(|l| l.to_string().contains("?──v1 ? 2?──"))
-            .expect("attention edge row");
-        let span = attention
-            .spans
-            .iter()
-            .find(|s| s.content.contains("planner"))
-            .unwrap();
-        assert_eq!(span.style.fg, Some(Color::Yellow));
-        assert!(span
-            .style
-            .add_modifier
-            .contains(ratatui::style::Modifier::BOLD));
-        assert!(
-            span.style
-                .add_modifier
-                .contains(ratatui::style::Modifier::REVERSED),
-            "selected edge is inverse"
-        );
-        assert!(
-            attention.to_string().starts_with("! planner"),
-            "{attention}"
-        );
-        let done = lines
-            .iter()
-            .find(|l| l.to_string().contains("───v2 ✓───"))
-            .unwrap();
-        let span = done
-            .spans
-            .iter()
-            .find(|s| s.content.contains("planner"))
-            .unwrap();
-        assert_eq!(span.style.fg, Some(Color::Green));
-    }
-
-    #[test]
-    fn graph_groups_nodes_under_their_heading_when_narrow() {
-        let g = fixture("live-1").graph;
-        let rows = plain(&graph_lines(&g, 40, 14, 0, None));
-        assert_eq!(rows[0], "HUMAN / PLANNER");
-        assert_eq!(rows[1], "  · human");
-        assert_eq!(rows[2], "  ✓ planner");
-        assert_eq!(rows[3], "AGENTS");
-        assert_eq!(rows[4], "  ✓ t-backend-auth (backend) a2");
-        assert_eq!(rows[6], "VERIFIER");
-        assert_eq!(rows[7], "  · verifier");
-        assert_eq!(rows[9], "✓ human ───v1 ✓─── ▶ t-backend-auth");
-    }
-
-    #[test]
-    fn graph_renders_inside_the_layout_and_scrolls_to_the_selected_edge() {
-        let mut app = replay_app("live-7");
-        app.handle_key(Key::TAB); // graph region
-        for _ in 0..9 {
-            app.handle_key(Key::char('j'));
+    fn area(width: u16, height: u16) -> Viewport {
+        Viewport {
+            x: 0,
+            y: 0,
+            width,
+            height,
         }
-        assert_eq!(
-            app.selected,
-            Some(GraphObjectRef::edge("reply:t-backend-auth"))
+    }
+
+    #[test]
+    fn nodes_sit_in_three_tiers_with_agents_between_the_human_and_the_verifier() {
+        let discs = layout_net(&fixture("live-1").graph);
+        let human = discs.iter().find(|d| d.id == "human").unwrap();
+        let agent = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
+        let verifier = discs.iter().find(|d| d.id == "verifier").unwrap();
+
+        assert!(
+            human.y > agent.y,
+            "the human tier is drawn above the agents"
         );
+        assert!(
+            agent.y > verifier.y,
+            "the verifier tier is below the agents"
+        );
+        assert!(agent.radius > verifier.radius, "agents are the big discs");
+    }
+
+    #[test]
+    fn a_tier_spreads_its_nodes_evenly_and_never_stacks_them() {
+        let discs = layout_net(&fixture("live-1").graph);
+        let agents: Vec<&Disc> = discs.iter().filter(|d| d.is_agent).collect();
+        assert!(agents.len() >= 2, "fixture has two agents");
+        for pair in agents.windows(2) {
+            assert!(
+                (pair[0].x - pair[1].x).abs() > pair[0].radius,
+                "agents do not overlap: {:?}",
+                agents.iter().map(|d| d.x).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn placement_does_not_move_when_the_view_does() {
+        let graph = fixture("live-1").graph;
+        let before = layout_net(&graph);
+        let after = layout_net(&graph);
+        assert_eq!(before, after, "layout is fixed, never force-directed");
+    }
+
+    #[test]
+    fn edges_start_and_end_on_the_rims_not_the_centres() {
+        let graph = fixture("live-1").graph;
+        let discs = layout_net(&graph);
+        let edge = graph.edges.first().unwrap();
+        let (a, b) = edge_ends(&discs, edge).unwrap();
+        let from = disc(&discs, &edge.from).unwrap();
+
+        let gap = ((a.0 - from.x).powi(2) + (a.1 - from.y).powi(2)).sqrt();
+        assert!(
+            (gap - from.radius).abs() < 0.001,
+            "the line leaves the rim, {gap} vs {}",
+            from.radius
+        );
+        assert!(a != b);
+    }
+
+    #[test]
+    fn the_vertical_span_keeps_circles_round_on_2_to_1_cells() {
+        let view = GraphView::default();
+        let (x, y) = view_bounds(&view, area(60, 20));
+        let (span_x, span_y) = (x[1] - x[0], y[1] - y[0]);
+        // A disc must cover twice as many columns as rows to look round.
+        let columns = 2.0 * R_AGENT / span_x * 60.0;
+        let rows = 2.0 * R_AGENT / span_y * 20.0;
+        assert!(
+            (columns / rows - 2.0).abs() < 0.01,
+            "{columns} columns vs {rows} rows"
+        );
+    }
+
+    #[test]
+    fn zooming_in_shows_less_of_the_world() {
+        let wide = view_bounds(&GraphView::default(), area(60, 20));
+        let close = view_bounds(
+            &GraphView {
+                zoom: 2.0,
+                ..GraphView::default()
+            },
+            area(60, 20),
+        );
+        assert!((close.0[1] - close.0[0]) < (wide.0[1] - wide.0[0]));
+    }
+
+    #[test]
+    fn clicking_a_disc_finds_its_node() {
+        let graph = fixture("live-1").graph;
+        let discs = layout_net(&graph);
+        let target = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
+
+        let hit = hit_test(&graph, &discs, (target.x, target.y)).unwrap();
+        assert_eq!(hit, GraphObjectRef::node("t-backend-auth"));
+    }
+
+    #[test]
+    fn clicking_between_two_discs_finds_the_edge_that_runs_there() {
+        let graph = fixture("live-1").graph;
+        let discs = layout_net(&graph);
+        let edge = graph
+            .edges
+            .iter()
+            .find(|e| e.kind == GraphEdgeKind::Contract)
+            .unwrap();
+        let (a, b) = edge_ends(&discs, edge).unwrap();
+        let middle = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+
+        assert_eq!(
+            hit_test(&graph, &discs, middle),
+            Some(GraphObjectRef::edge(&edge.id))
+        );
+    }
+
+    #[test]
+    fn clicking_empty_space_selects_nothing() {
+        let graph = fixture("live-1").graph;
+        let discs = layout_net(&graph);
+        assert_eq!(hit_test(&graph, &discs, (-40.0, -40.0)), None);
+    }
+
+    #[test]
+    fn a_cell_maps_to_the_world_point_under_it() {
+        let view = GraphView::default();
+        let rect = area(60, 20);
+        let (x_bounds, y_bounds) = view_bounds(&view, rect);
+        let centre = cell_to_world(&view, rect, 30, 10);
+
+        assert!((centre.0 - (x_bounds[0] + x_bounds[1]) / 2.0).abs() < 1.0);
+        assert!((centre.1 - (y_bounds[0] + y_bounds[1]) / 2.0).abs() < 2.0);
+        // The top row is the top of the canvas, not the bottom.
+        assert!(cell_to_world(&view, rect, 30, 0).1 > centre.1);
+    }
+
+    #[test]
+    fn the_detail_line_spells_out_the_three_layers_of_the_selected_agent() {
+        let mut app = replay_app("live-1");
+        app.select(Some(GraphObjectRef::node("t-backend-auth")));
+        let text = detail_line(&app).to_string();
+
+        assert!(text.contains("run "), "{text}");
+        assert!(text.contains("task "), "{text}");
+        assert!(text.contains("handoff "), "{text}");
+    }
+
+    #[test]
+    fn the_detail_line_describes_a_selected_edge_instead() {
+        let mut app = replay_app("live-1");
+        let edge = app.graph.edges.first().unwrap().clone();
+        app.select(Some(GraphObjectRef::edge(&edge.id)));
+        let text = detail_line(&app).to_string();
+
+        assert!(text.contains(&edge.id), "{text}");
+        assert!(text.contains(&edge.label), "{text}");
+    }
+
+    #[test]
+    fn the_panel_draws_the_network_and_its_labels() {
+        let mut app = replay_app("live-1");
+        app.select(Some(GraphObjectRef::node("t-backend-auth")));
         let rows = draw_rows(&mut app, 100, 30);
         let text = screen_text(&rows);
-        assert!(text.contains("▶ HANDOFFS"), "{text}");
+
+        assert!(text.contains("HANDOFFS"), "{text}");
         assert!(
-            text.contains("↩ 1"),
-            "the selected edge is scrolled into view:\n{text}"
+            text.contains("backend"),
+            "the agent's label is drawn:\n{text}"
         );
+        assert!(text.contains("verifier"), "{text}");
+        assert!(text.contains("run "), "the detail line is drawn:\n{text}");
     }
 }

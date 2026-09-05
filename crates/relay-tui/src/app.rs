@@ -3,7 +3,7 @@
 //! WebSocket frames, fetches) come out — so every rule here is unit-testable without a terminal or a server.
 //! The rules mirror `apps/tui/src/keys.ts` and `App.tsx` (see `keys.rs` for the map).
 
-use crate::keys::{Key, KeyCode};
+use crate::keys::{Key, KeyCode, Mouse, MouseKind};
 use crate::metrics::FrameStats;
 use crate::model::*;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -35,6 +35,68 @@ impl Region {
             Region::Panes => "PANES",
             Region::Inbox => "INBOX",
         }
+    }
+}
+
+/// A screen rectangle, in `App`'s own terms so the state machine never depends on a terminal library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Viewport {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl Viewport {
+    pub const EMPTY: Viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
+
+    pub fn contains(&self, col: u16, row: u16) -> bool {
+        self.width > 0
+            && self.height > 0
+            && col >= self.x
+            && row >= self.y
+            && col < self.x + self.width
+            && row < self.y + self.height
+    }
+}
+
+/// Pan and zoom over the graph's fixed world box. The nodes never move; this does.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GraphView {
+    pub pan_x: f64,
+    pub pan_y: f64,
+    pub zoom: f64,
+}
+
+impl Default for GraphView {
+    fn default() -> Self {
+        Self {
+            pan_x: 0.0,
+            pan_y: 0.0,
+            zoom: 1.0,
+        }
+    }
+}
+
+impl GraphView {
+    pub const MIN_ZOOM: f64 = 0.5;
+    pub const MAX_ZOOM: f64 = 6.0;
+    /// Panning stops here, so the network can never be dragged off screen and lost.
+    pub const MAX_PAN: f64 = 90.0;
+
+    pub fn zoom_by(&mut self, factor: f64) {
+        self.zoom = (self.zoom * factor).clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
+    }
+
+    /// Pan in world units; the step shrinks as you zoom in, so it always feels the same on screen.
+    pub fn pan_by(&mut self, dx: f64, dy: f64) {
+        self.pan_x = (self.pan_x + dx / self.zoom).clamp(-Self::MAX_PAN, Self::MAX_PAN);
+        self.pan_y = (self.pan_y + dy / self.zoom).clamp(-Self::MAX_PAN, Self::MAX_PAN);
     }
 }
 
@@ -220,6 +282,8 @@ pub enum Effect {
     },
     /// `POST /panes/:id/focus`.
     FocusPane(String),
+    /// Grab the mouse for the app, or hand it back to the terminal so the user can select text.
+    SetMouseCapture(bool),
     Quit,
 }
 
@@ -251,6 +315,13 @@ pub struct App {
     pub frames: FrameStats,
     /// (cols, rows) each pane widget was last drawn with; filled by `ui::panes`.
     pub pane_areas: BTreeMap<String, (u16, u16)>,
+    /// Where the graph canvas was last drawn; filled by `ui::graph`, read to turn a click into an object.
+    pub graph_viewport: Viewport,
+    pub graph_view: GraphView,
+    /// True while the app holds the mouse; `m` hands it back so the terminal can select text.
+    pub mouse_capture: bool,
+    /// Where a background drag started, in cells.
+    graph_drag: Option<(u16, u16)>,
     pub tick: u64,
 }
 
@@ -287,6 +358,10 @@ impl App {
             last_seq: 0,
             frames: FrameStats::default(),
             pane_areas: BTreeMap::new(),
+            graph_viewport: Viewport::EMPTY,
+            graph_view: GraphView::default(),
+            mouse_capture: true,
+            graph_drag: None,
             tick: 0,
         }
     }
@@ -897,6 +972,45 @@ impl App {
                 }
             }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => self.cycle_region(),
+            // In the graph the arrows pan the network; j/k still walk the objects.
+            (KeyCode::Left, _) if self.region == Region::Graph => {
+                self.graph_view.pan_by(-8.0, 0.0);
+                Vec::new()
+            }
+            (KeyCode::Right, _) if self.region == Region::Graph => {
+                self.graph_view.pan_by(8.0, 0.0);
+                Vec::new()
+            }
+            (KeyCode::Up, _) if self.region == Region::Graph => {
+                self.graph_view.pan_by(0.0, 8.0);
+                Vec::new()
+            }
+            (KeyCode::Down, _) if self.region == Region::Graph => {
+                self.graph_view.pan_by(0.0, -8.0);
+                Vec::new()
+            }
+            (_, Some('+')) | (_, Some('=')) => {
+                self.graph_view.zoom_by(1.25);
+                Vec::new()
+            }
+            (_, Some('-')) | (_, Some('_')) => {
+                self.graph_view.zoom_by(1.0 / 1.25);
+                Vec::new()
+            }
+            (_, Some('0')) => {
+                self.graph_view = GraphView::default();
+                Vec::new()
+            }
+            (_, Some('m')) => {
+                self.mouse_capture = !self.mouse_capture;
+                self.graph_drag = None;
+                self.set_notice(if self.mouse_capture {
+                    "mouse: the app has it (m releases it to the terminal)"
+                } else {
+                    "mouse: the terminal has it — select text as usual (m takes it back)"
+                });
+                vec![Effect::SetMouseCapture(self.mouse_capture)]
+            }
             (KeyCode::Down, _) | (_, Some('j')) => self.move_selection(1),
             (KeyCode::Up, _) | (_, Some('k')) => self.move_selection(-1),
             (_, Some('?')) => {
@@ -906,6 +1020,84 @@ impl App {
             (_, Some('q')) => vec![Effect::Quit],
             _ => Vec::new(),
         }
+    }
+
+    // --- the graph's own input ---------------------------------------------------------------------
+
+    /// A click, drag or wheel over the network. Anything outside the graph's viewport is ignored, so the
+    /// other panels keep their own meaning and the terminal keeps everything the app does not use.
+    pub fn handle_mouse(&mut self, mouse: Mouse) -> Vec<Effect> {
+        if !self.mouse_capture || self.help_open || self.inspector_open || self.input_mode.is_some()
+        {
+            return Vec::new();
+        }
+        if !self.graph_viewport.contains(mouse.col, mouse.row) {
+            // A press elsewhere ends a drag that started on the canvas; nothing else.
+            if mouse.kind == MouseKind::Up {
+                self.graph_drag = None;
+            }
+            return Vec::new();
+        }
+        match mouse.kind {
+            MouseKind::Down => {
+                self.region = Region::Graph;
+                let hit = self.hit_at(mouse.col, mouse.row);
+                match hit {
+                    // A press on an object selects it; a press on the background begins a pan.
+                    Some(reference) => {
+                        self.graph_drag = None;
+                        self.select(Some(reference))
+                    }
+                    None => {
+                        self.graph_drag = Some((mouse.col, mouse.row));
+                        Vec::new()
+                    }
+                }
+            }
+            MouseKind::Drag => {
+                let Some((from_col, from_row)) = self.graph_drag else {
+                    return Vec::new();
+                };
+                let cells_x = mouse.col as f64 - from_col as f64;
+                let cells_y = mouse.row as f64 - from_row as f64;
+                let (world_x, world_y) = self.world_per_cell();
+                // Drag moves the world with the pointer, so the view moves the other way.
+                self.graph_view
+                    .pan_by(-cells_x * world_x, cells_y * world_y);
+                self.graph_drag = Some((mouse.col, mouse.row));
+                Vec::new()
+            }
+            MouseKind::Up => {
+                self.graph_drag = None;
+                Vec::new()
+            }
+            MouseKind::ScrollUp => {
+                self.graph_view.zoom_by(1.2);
+                Vec::new()
+            }
+            MouseKind::ScrollDown => {
+                self.graph_view.zoom_by(1.0 / 1.2);
+                Vec::new()
+            }
+        }
+    }
+
+    /// World units covered by one cell, horizontally and vertically, at the current view.
+    fn world_per_cell(&self) -> (f64, f64) {
+        let (x_bounds, y_bounds) =
+            crate::ui::graph::view_bounds(&self.graph_view, self.graph_viewport);
+        (
+            (x_bounds[1] - x_bounds[0]) / self.graph_viewport.width.max(1) as f64,
+            (y_bounds[1] - y_bounds[0]) / self.graph_viewport.height.max(1) as f64,
+        )
+    }
+
+    /// The object drawn under a cell, if any.
+    pub fn hit_at(&self, col: u16, row: u16) -> Option<GraphObjectRef> {
+        let point =
+            crate::ui::graph::cell_to_world(&self.graph_view, self.graph_viewport, col, row);
+        let discs = crate::ui::graph::layout_net(&self.graph);
+        crate::ui::graph::hit_test(&self.graph, &discs, point)
     }
 
     // --- pane sizing -------------------------------------------------------------------------------
