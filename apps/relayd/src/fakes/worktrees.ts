@@ -55,8 +55,9 @@ export function fakeWorktrees(options: FakeWorktreeOptions = {}): FakeWorktrees 
     async integrate(_repoRoot: string, branches: string[]) {
       calls.integrate.push([...branches]);
       const c = this.options.conflict;
-      if (c && branches.includes(c.branch)) return { branch: 'relay/integration', conflict: { branch: c.branch, files: [...c.files] } };
-      return { branch: 'relay/integration' };
+      const integrationPath = `${_repoRoot}/.relay/wt/integration`;
+      if (c && branches.includes(c.branch)) return { branch: 'relay/integration', path: integrationPath, conflict: { branch: c.branch, files: [...c.files] } };
+      return { branch: 'relay/integration', path: integrationPath };
     },
   };
 }

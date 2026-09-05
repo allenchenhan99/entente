@@ -415,7 +415,8 @@ describe('integration', () => {
     await r.orchestrator.settled();
     expect(r.ofType('integration_started')[0].payload).toEqual({ branch: 'relay/integration', order: ['t-a', 't-b'] });
     expect(r.worktrees.calls.integrate).toEqual([['relay/t-a', 'relay/t-b']]);
-    expect(r.checks.calls.at(-1)).toMatchObject({ taskId: 't-integration', attempt: 1 });
+    // the integration check runs in the worktree the manager created under the repo, never under relayDir
+    expect(r.checks.calls.at(-1)).toMatchObject({ taskId: 't-integration', attempt: 1, worktreePath: expect.stringMatching(/\/\.relay\/wt\/integration$/) });
     expect(r.types().at(-1)).toBe('mission_verified');
     expect(r.orchestrator.getMission(mission_id)!.status).toBe('verified');
   });

@@ -38,10 +38,10 @@ describe('fakes', () => {
     const info = await w.create('/repo', contract, ['relay/t-dep']);
     expect(info).toEqual(wt);
     expect(w.calls.create).toEqual([{ repoRoot: '/repo', taskId: 't-a', dependencyBranches: ['relay/t-dep'] }]);
-    expect(await w.integrate('/repo', ['relay/t-a'])).toEqual({ branch: 'relay/integration' });
+    expect(await w.integrate('/repo', ['relay/t-a'])).toEqual({ branch: 'relay/integration', path: '/repo/.relay/wt/integration' });
     const conflicting = fakeWorktrees({ conflict: { branch: 'relay/t-a', files: ['x.ts'] } });
     expect(await conflicting.integrate('/repo', ['relay/t-b', 'relay/t-a'])).toEqual({
-      branch: 'relay/integration', conflict: { branch: 'relay/t-a', files: ['x.ts'] },
+      branch: 'relay/integration', path: '/repo/.relay/wt/integration', conflict: { branch: 'relay/t-a', files: ['x.ts'] },
     });
   });
 

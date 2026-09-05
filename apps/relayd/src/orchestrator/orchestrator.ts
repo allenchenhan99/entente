@@ -1222,7 +1222,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         runtime: 'unknown', task_state: 'awaiting_verification', handoff_state: 'evidence_submitted',
         blocked_on_dependencies: [], attempt: 1, attempts: [], repairs: [], escalated: false,
       };
-      const worktree: WorktreeInfo = { path: path.join(deps.relayDir, 'wt', 'integration'), branch: res.branch, base: 'main' };
+      // The worktree manager creates the integration checkout under the *repo* (`<repo>/.relay/wt/integration`), which
+      // is not `<relayDir>/wt/integration` when RELAY_DIR lives outside the repo (found live: the check runner spawned git in
+      // a directory that did not exist and every mission failed at integration).
+      const worktree: WorktreeInfo = { path: res.path ?? path.join(deps.repoRoot, '.relay', 'wt', 'integration'), branch: res.branch, base: 'main' };
       const submission: EvidenceSubmission = { task_id: contract.id, contract_version: 1, attempt: 1, claimed: {}, summary: 'integration' };
       const record = await deps.checks.run(view, submission, worktree, path.join(deps.relayDir, 'evidence', 'integration'));
       const result = record.checks[INTEGRATION_CRITERION];

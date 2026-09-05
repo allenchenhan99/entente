@@ -11,7 +11,7 @@ export interface FakeChecks extends CheckRunner {
   /** Mutable: tests change it between attempts. */
   script: CheckScript;
   store?: EventStore;
-  calls: Array<{ taskId: string; attempt: number; allowedPaths: string[] }>;
+  calls: Array<{ taskId: string; attempt: number; allowedPaths: string[]; worktreePath: string }>;
 }
 
 export function fakeChecks(script: CheckScript, store?: EventStore): FakeChecks {
@@ -20,7 +20,7 @@ export function fakeChecks(script: CheckScript, store?: EventStore): FakeChecks 
     store,
     calls: [],
     async run(task: TaskView, submission: EvidenceSubmission, _worktree: WorktreeInfo, evidenceDir: string): Promise<EvidenceRecord> {
-      fake.calls.push({ taskId: task.id, attempt: submission.attempt, allowedPaths: [...task.contract.scope.allowed_paths] });
+      fake.calls.push({ taskId: task.id, attempt: submission.attempt, allowedPaths: [...task.contract.scope.allowed_paths], worktreePath: _worktree.path });
       const checks: EvidenceRecord['checks'] = {};
       const mismatch: string[] = [];
       for (const ac of task.contract.acceptance_criteria) {

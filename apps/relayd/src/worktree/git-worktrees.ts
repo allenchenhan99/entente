@@ -168,7 +168,7 @@ export class GitWorktreeManager implements WorktreeManager {
     return { patchPath, changedFiles };
   }
 
-  async integrate(repoRoot: string, branches: string[]): Promise<{ branch: string; conflict?: { branch: string; files: string[] } }> {
+  async integrate(repoRoot: string, branches: string[]): Promise<{ branch: string; path: string; conflict?: { branch: string; files: string[] } }> {
     await this.ensureRelayIgnored(repoRoot);
     const branch = 'relay/integration';
     const worktreePath = path.join(repoRoot, '.relay', 'wt', 'integration');
@@ -191,10 +191,10 @@ export class GitWorktreeManager implements WorktreeManager {
       if (merge.exitCode === 0) continue;
       const unresolved = await this.git(['diff', '--name-only', '--diff-filter=U', '-z'], worktreePath);
       await this.git(['merge', '--abort'], worktreePath);
-      return { branch, conflict: { branch: mergeBranch, files: nulSeparated(unresolved.stdout).sort() } };
+      return { branch, path: worktreePath, conflict: { branch: mergeBranch, files: nulSeparated(unresolved.stdout).sort() } };
     }
 
-    return { branch };
+    return { branch, path: worktreePath };
   }
 }
 

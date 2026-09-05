@@ -322,7 +322,7 @@ describe('check resume', () => {
     await r.orchestrator.settled();
     expect(await poll).toEqual({ status: 'verified' });
     // Exactly one run for t-a (the mission-level integration check follows once t-a completes).
-    expect(r.checks.calls.filter((c) => c.taskId === 't-a')).toEqual([{ taskId: 't-a', attempt: 1, allowedPaths: ['src/t-a/**'] }]);
+    expect(r.checks.calls.filter((c) => c.taskId === 't-a')).toEqual([{ taskId: 't-a', attempt: 1, allowedPaths: ['src/t-a/**'], worktreePath: '/tmp/fake/t-a' }]);
     expect(r.orchestrator.getMission(r.store.all()[0].mission_id)!.status).toBe('verified');
     const fresh = r.store.all().filter((e) => e.seq > seqBefore && e.task_id === 't-a').map((e) => e.type);
     expect(fresh.filter((t) => t === 'checks_started')).toEqual([]);
