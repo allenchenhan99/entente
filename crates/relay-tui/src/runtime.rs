@@ -647,8 +647,14 @@ impl<B: Backend> Runtime<B> {
                         Ok(()) => {
                             let _ = tx.send(Msg::Notice(command.label()));
                         }
+                        // Which command failed, not only which route: answering a question walks
+                        // several in a row, and "a POST to /clarify failed" does not say which of
+                        // the things you just typed did not arrive.
                         Err(e) => {
-                            let _ = tx.send(Msg::Error(e.to_string()));
+                            let _ = tx.send(Msg::Error(format!(
+                                "{} did not send — {e}",
+                                command.subject()
+                            )));
                         }
                     }
                 });

@@ -53,11 +53,29 @@ pub fn inspector_lines(app: &App, height: usize) -> Vec<Line<'static>> {
     } else {
         app.current_actions().to_vec()
     };
-    let keys = action_keys(&actions);
-    let action_line = if keys.is_empty() {
-        "actions: Esc close".to_string()
-    } else {
-        format!("actions: {keys} · Esc close")
+    // While the editor is open those keys do not run their actions — they type into your answer, so
+    // listing them says `[x] kill task` about a key that puts an `x` in the field. The line has to
+    // say what Enter and Esc do instead, which is also the only place Esc's meaning is ever stated.
+    let action_line = match app.input_mode {
+        Some(crate::app::InputMode::Answer) => {
+            let left = app.pending_questions().len().saturating_sub(1);
+            match left {
+                0 => "Enter sends it · Esc discards what you typed".to_string(),
+                1 => "Enter sends it and moves on · Esc leaves 1 question unanswered".to_string(),
+                n => format!("Enter sends it and moves on · Esc leaves {n} questions unanswered"),
+            }
+        }
+        Some(crate::app::InputMode::Reply | crate::app::InputMode::ReviewFailure) => {
+            "Enter sends it · Esc discards what you typed".to_string()
+        }
+        _ => {
+            let keys = action_keys(&actions);
+            if keys.is_empty() {
+                "actions: Esc close".to_string()
+            } else {
+                format!("actions: {keys} · Esc close")
+            }
+        }
     };
     let prompt = app.prompt_line();
     let reserved = 1 + usize::from(prompt.is_some()) + usize::from(app.error.is_some());
@@ -253,7 +271,9 @@ mod snapshots {
         // the sequence — this fixture's task asks two, and `a` walks both.
         assert!(text.contains("1/2 Which auth method?> magic"), "{text}");
         assert!(
-            text.contains("actions: [a] answer  [x] kill task · Esc close"),
+            // While the editor is open those keys type into the field rather than running, so the
+            // line says what Enter and Esc do instead of naming keys that would not work.
+            text.contains("Enter sends it and moves on · Esc leaves 1 question unanswered"),
             "{text}"
         );
         app.set_error("POST /tasks/t-backend-auth/clarify failed: 400");

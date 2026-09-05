@@ -3,7 +3,7 @@
 
 mod support;
 
-use relay_tui::app::{App, Command, Effect, Mode, Region, Viewport};
+use relay_tui::app::{App, Command, Effect, InputMode, Mode, Region, Viewport};
 use relay_tui::keys::{Key, KeyCode, Mouse, MouseKind};
 use relay_tui::model::*;
 use support::*;
@@ -1319,5 +1319,115 @@ fn an_inbox_selection_lights_up_the_network_it_came_from() {
         relay_tui::ui::graph::detail_line(&app).to_string().trim(),
         "",
         "the line under the network explains the selection rather than going blank"
+    );
+}
+
+// --- an editor that outlives what it was answering ------------------------------------------------
+
+/// The demo graph with a second agent that also asks a `Q1` — the normal state of a fleet, since
+/// question ids are per task and every agent starts at 1.
+fn two_agents_both_asking() -> App {
+    let mut app = App::new(Mode::Replay);
+    let mut graph = demo_graph();
+    graph.inbox.push(InboxItem {
+        id: "question:t-frontend-login".into(),
+        kind: InboxKind::TaskQuestion,
+        mission_id: "m-001".into(),
+        task_id: Some("t-frontend-login".into()),
+        title: "frontend asks 1 question (v1)".into(),
+        detail: vec!["Q1: Which shade of blue?".into()],
+        since: Some("2026-09-05T10:30:00+08:00".into()),
+        reference: GraphObjectRef::edge("contract:t-frontend-login"),
+        actions: vec![ObjectAction {
+            key: "a".into(),
+            kind: ActionKind::Clarify,
+            label: "answer".into(),
+            target: ActionTarget {
+                task_id: Some("t-frontend-login".into()),
+                question_ids: Some(vec!["Q1".into()]),
+                ..Default::default()
+            },
+        }],
+    });
+    app.set_graph(graph);
+    app
+}
+
+#[test]
+fn the_prompt_quotes_the_question_of_the_item_you_are_answering() {
+    let mut app = two_agents_both_asking();
+    app.select(Some(GraphObjectRef::inbox("question:t-frontend-login")));
+
+    app.handle_key(Key::char('a'));
+
+    // Both items have a Q1. Searching the whole inbox would show backend's wording above frontend's
+    // task id, and you would answer a question you never read.
+    assert_eq!(app.prompt_line().as_deref(), Some("Which shade of blue?> "));
+}
+
+#[test]
+fn an_editor_does_not_outlive_the_item_it_was_answering() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(demo_graph());
+    app.select(Some(GraphObjectRef::inbox("question:t-backend-auth")));
+    app.handle_key(Key::char('a'));
+    for c in "magic links".chars() {
+        app.handle_key(Key::char(c));
+    }
+    app.handle_key(Key::ENTER);
+    assert_eq!(app.input_mode, Some(InputMode::Answer), "Q2 is still open");
+
+    // The task is cancelled while you are typing the second answer. The editor only draws inside the
+    // inspector, so leaving input_mode set left no prompt, no cursor, and every key still swallowed
+    // into a field you could not see — the app looked frozen with no way out but Esc.
+    let mut graph = demo_graph();
+    graph.inbox.retain(|i| i.id != "question:t-backend-auth");
+    app.set_graph(graph);
+
+    assert_eq!(app.input_mode, None, "the editor closed with the item");
+    assert!(
+        app.notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("1 answer"),
+        "and said what had already been sent: {:?}",
+        app.notice
+    );
+    // Keys reach the app again.
+    app.handle_key(Key::TAB);
+    assert!(app.input_value.is_empty());
+}
+
+#[test]
+fn a_question_answered_elsewhere_leaves_the_queue() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(demo_graph());
+    app.select(Some(GraphObjectRef::inbox("question:t-backend-auth")));
+    app.handle_key(Key::char('a'));
+    assert_eq!(
+        app.prompt_line().as_deref(),
+        Some("1/2 Which auth method?> ")
+    );
+
+    // Someone answers Q1 from the CLI. The item survives, so the editor stays — but its queue must
+    // follow the server, or the prompt names a question nobody is asking and Enter answers it twice.
+    let mut graph = demo_graph();
+    for item in &mut graph.inbox {
+        if item.id == "question:t-backend-auth" {
+            item.detail.retain(|d| !d.starts_with("Q1"));
+            for action in &mut item.actions {
+                if let Some(ids) = action.target.question_ids.as_mut() {
+                    ids.retain(|q| q != "Q1");
+                }
+            }
+        }
+    }
+    app.set_graph(graph);
+
+    assert_eq!(app.input_mode, Some(InputMode::Answer));
+    assert_eq!(
+        app.prompt_line().as_deref(),
+        Some("Link expiry?> "),
+        "one question left, so no count, and it is the right one"
     );
 }

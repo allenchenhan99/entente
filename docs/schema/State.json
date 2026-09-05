@@ -1319,6 +1319,12 @@
           },
           "completed_at": {
             "type": "string"
+          },
+          "evidence_submitted_at": {
+            "type": "string"
+          },
+          "escalated_at": {
+            "type": "string"
           }
         },
         "required": [

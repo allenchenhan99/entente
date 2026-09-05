@@ -540,7 +540,10 @@ async fn live_actions_post_the_ink_bodies_and_errors_reach_the_status_line() {
     until(&mut rt, "error in status line", |rt| rt.app.error.is_some()).await;
     let last = rows(&rt).last().unwrap().clone();
     assert!(
-        last.contains("ERROR POST /tasks/t-backend-auth/reply failed: 400"),
+        // Which of the things you typed did not arrive, not only which route was called.
+        last.contains(
+            "ERROR your reply did not send — POST /tasks/t-backend-auth/reply failed: 400"
+        ),
         "{last}"
     );
 

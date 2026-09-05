@@ -15,9 +15,14 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Borders, Paragraph};
 use ratatui::Frame;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Columns the age reserves at the right: `now`, `41m`, `2h`, `13d` all fit in three, `120d` in four.
 const AGE_WIDTH: usize = 4;
+/// The narrowest a title may be squeezed before the row starts shedding what is around it instead.
+const MIN_TITLE: usize = 24;
+/// Seconds of clock difference between relayd and this terminal to shrug at before saying so.
+const SKEW_TOLERANCE: i64 = 5;
 /// How many rows of wrapped detail the selected item gets. Enough for a blocker written as prose;
 /// the whole of it lives in the inspector.
 const DETAIL_ROWS: usize = 3;
@@ -98,6 +103,9 @@ fn key_spans(actions: &[ObjectAction]) -> Vec<(String, bool)> {
         };
         spans.push((format!("[{}] {verb}", action.key), destructive));
     }
+    // One hint per key. Two pending criteria on a task emit two `[p] pass` and two `[f] fail`, and
+    // only the first is reachable — showing both promises a choice the key cannot make.
+    spans.dedup_by(|a, b| a.0 == b.0);
     // Whatever destroys something goes last, so the eye reaches it after the safe choices.
     spans.sort_by_key(|(_, destructive)| *destructive);
     spans
@@ -118,19 +126,90 @@ pub fn inbox_lines(app: &App, height: usize) -> Vec<Line<'static>> {
 /// finished page above a contract that has frozen a subtree.
 pub fn ordered_items(app: &App) -> Vec<&InboxItem> {
     let mut items: Vec<&InboxItem> = app.ws().graph.inbox.iter().collect();
+    let blocking = downstream_counts(&app.ws().graph);
+    let weight = |item: &InboxItem| -> usize {
+        item.task_id
+            .as_deref()
+            .and_then(|t| blocking.get(t))
+            .copied()
+            .unwrap_or(0)
+    };
     items.sort_by(|a, b| {
         blocking_tier(a.kind)
             .cmp(&blocking_tier(b.kind))
-            // An item with no `since` has no age, so it sorts below ones that do rather than as if
-            // it had been waiting forever.
-            .then(
-                app.inbox_age(b)
-                    .unwrap_or(-1)
-                    .cmp(&app.inbox_age(a).unwrap_or(-1)),
-            )
+            // Inside a tier, how many tasks are actually waiting on this one. A blocker on a leaf
+            // nobody depends on and a blocker holding up five tasks are not the same call, and the
+            // dependency edges have said which is which all along.
+            .then(weight(b).cmp(&weight(a)))
+            // An item with no `since` has no age and sorts below ones that do. Not as a number: a
+            // real age can be negative when the clocks disagree, and a sentinel in the same domain
+            // would let an item cross it and jump the list having crossed no threshold.
+            .then(match (app.inbox_age(b), app.inbox_age(a)) {
+                (Some(x), Some(y)) => x.cmp(&y),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
             .then(a.id.cmp(&b.id))
     });
     items
+}
+
+/// Who is waiting on whom: for each task, the tasks that cannot start until it is done.
+///
+/// `blocking_tier` says what *kind* of thing is stuck, which is a constant and cannot tell a blocker
+/// on a leaf from one holding up half the mission. The dependency edges can, and the client already
+/// holds them. `dep:a->b` means b waits on a.
+fn dependents(graph: &Graph) -> BTreeMap<&str, Vec<&str>> {
+    let mut out: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for edge in &graph.edges {
+        if edge.kind == GraphEdgeKind::Dependency {
+            out.entry(&edge.from).or_default().push(&edge.to);
+        }
+    }
+    out
+}
+
+/// Every task waiting on `task`, directly or through a chain. The `seen` set means a cyclic
+/// dependency graph — a bug the linter catches — does not hang the inbox.
+fn downstream<'a>(
+    dependents: &BTreeMap<&'a str, Vec<&'a str>>,
+    task: &'a str,
+) -> BTreeSet<&'a str> {
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut queue = vec![task];
+    while let Some(current) = queue.pop() {
+        for next in dependents.get(current).into_iter().flatten() {
+            if seen.insert(next) {
+                queue.push(next);
+            }
+        }
+    }
+    seen
+}
+
+/// How many tasks are stuck behind each task named by an inbox item.
+pub fn downstream_counts(graph: &Graph) -> BTreeMap<String, usize> {
+    let deps = dependents(graph);
+    graph
+        .inbox
+        .iter()
+        .filter_map(|item| item.task_id.as_deref())
+        .map(|task| (task.to_string(), downstream(&deps, task).len()))
+        .collect()
+}
+
+/// How many tasks cannot move until the inbox is dealt with: the tasks the items are about, plus
+/// everything downstream of them, counted once however many items name the same task.
+pub fn blocked_by_inbox(app: &App) -> usize {
+    let graph = &app.ws().graph;
+    let deps = dependents(graph);
+    let mut all: BTreeSet<&str> = BTreeSet::new();
+    for task in graph.inbox.iter().filter_map(|i| i.task_id.as_deref()) {
+        all.insert(task);
+        all.extend(downstream(&deps, task));
+    }
+    all.len()
 }
 
 /// The worst wait in the inbox, for the header.
@@ -198,27 +277,29 @@ fn wrap(text: &str, width: usize, rows: usize) -> Vec<String> {
 
 /// The mark against a question row while `a` is walking the item's questions.
 fn question_mark(app: &App, item: &InboxItem, detail: &str) -> Option<&'static str> {
-    let pending = app.pending_questions();
-    if pending.is_empty() || !answering(app, item) {
+    if !answering(app, item) {
         return None;
     }
+    let pending = app.pending_questions();
     let id = crate::model::question_of(detail)?;
     match pending.iter().position(|q| q == id) {
         Some(0) => Some("▸"),
         Some(_) => Some("·"),
-        // Not in the queue any more, and it was asked: you answered it a moment ago.
-        None => item
-            .actions
+        // Answered, from the walk's own record. Deriving this from the item's remaining questions
+        // never showed anything: the server deletes a question the moment it is answered, so the row
+        // was gone within a poll and the progress the prompt counts had nothing behind it.
+        None => app
+            .answered_questions()
             .iter()
-            .filter_map(|a| a.target.question_ids.as_ref())
-            .any(|ids| ids.iter().any(|q| q == id))
+            .any(|q| q == id)
             .then_some("✓"),
     }
 }
 
-/// Is this the item the editor is open on?
+/// Is this the item the editor is open on? The walk's own record, not the selection: the two come
+/// apart the moment a refresh moves the selection out from under an open editor.
 fn answering(app: &App, item: &InboxItem) -> bool {
-    matches!(&app.selected, Some(r) if r.kind == RefKind::Inbox && r.id == item.id)
+    app.answering_item() == Some(item.id.as_str())
 }
 
 /// Every row the inbox would draw if it had the room: a row per item saying who is asking about
@@ -249,6 +330,7 @@ pub fn all_inbox_rows(app: &App, width: u16) -> Vec<InboxRow> {
     };
     let width = width as usize;
     let detail_width = width.saturating_sub(6).max(10);
+    let blocked_counts = downstream_counts(&app.ws().graph);
     let mut rows: Vec<InboxRow> = Vec::new();
     for item in items {
         let reference = GraphObjectRef::inbox(&item.id);
@@ -261,13 +343,40 @@ pub fn all_inbox_rows(app: &App, width: u16) -> Vec<InboxRow> {
             .task_id
             .clone()
             .unwrap_or_else(|| item.mission_id.clone());
-        let keys = key_spans(&item.actions);
-        let keys_width: usize = keys.iter().map(|(t, _)| t.chars().count() + 2).sum();
-        let fixed = 2 + id_text.chars().count() + keys_width + 1 + AGE_WIDTH;
-        let title = truncate(
-            &format!("{} {}", inbox_icon(item.kind), item.title),
-            width.saturating_sub(fixed).max(8),
-        );
+        // What has to fit, in the order it earns its place. The title is the only thing that says
+        // what is being asked and the age is the only thing that says what to do first, so those two
+        // are last to go; an escalation carries up to eight key hints, and those go first. Nothing is
+        // allowed to push the age off the right edge — it used to be the rightmost span, so on a busy
+        // row it was the one that got clipped, silently, while the header still claimed an age.
+        let mut keys = key_spans(&item.actions);
+        let title_text = format!("{} {}", inbox_icon(item.kind), item.title);
+        // What is actually waiting on this, not what kind of thing it is. The count is the reason
+        // one blocker outranks another, so the row shows the reason rather than only the result.
+        let blocked = item
+            .task_id
+            .as_deref()
+            .and_then(|t| blocked_counts.get(t))
+            .copied()
+            .unwrap_or(0);
+        let blocks_text = (blocked > 0).then(|| format!("  blocks {blocked}"));
+        let blocks_width = blocks_text.as_ref().map_or(0, |t| t.chars().count());
+        let id_width = 2 + id_text.chars().count() + blocks_width;
+        let keys_width =
+            |k: &[(String, bool)]| -> usize { k.iter().map(|(t, _)| t.chars().count() + 2).sum() };
+        let room_for_title = |k: &[(String, bool)], with_id: bool| -> usize {
+            width.saturating_sub(keys_width(k) + if with_id { id_width } else { 0 } + 1 + AGE_WIDTH)
+        };
+        while keys.len() > 1 && room_for_title(&keys, true) < MIN_TITLE {
+            keys.pop();
+        }
+        let mut show_id = true;
+        if room_for_title(&keys, true) < MIN_TITLE {
+            show_id = false;
+            while !keys.is_empty() && room_for_title(&keys, false) < MIN_TITLE {
+                keys.pop();
+            }
+        }
+        let title = truncate(&title_text, room_for_title(&keys, show_id).max(1));
 
         let mut title_style = Style::new().fg(Color::Yellow);
         if active {
@@ -286,11 +395,19 @@ pub fn all_inbox_rows(app: &App, width: u16) -> Vec<InboxRow> {
             Span::styled(rest.to_string(), title_style),
         ];
         let mut used = title.chars().count();
-        spans.push(Span::styled(
-            format!("  {id_text}"),
-            Style::new().fg(Color::Gray),
-        ));
-        used += 2 + id_text.chars().count();
+        if show_id {
+            spans.push(Span::styled(
+                format!("  {id_text}"),
+                Style::new().fg(Color::Gray),
+            ));
+            if let Some(text) = &blocks_text {
+                spans.push(Span::styled(
+                    text.clone(),
+                    Style::new().fg(Color::Yellow).bold(),
+                ));
+            }
+            used += id_width;
+        }
         for (i, (text, destructive)) in keys.iter().enumerate() {
             let lead = "  ";
             let _ = i;
@@ -305,7 +422,15 @@ pub fn all_inbox_rows(app: &App, width: u16) -> Vec<InboxRow> {
             ));
         }
         // The age, right-aligned, so the column reads as a column and a glance down it ranks the list.
-        let age_text = age.map(age_label).unwrap_or_else(|| "-".to_string());
+        let age_text = match age {
+            // A `since` in the future is the server's clock disagreeing with this terminal's, and
+            // that is worth saying: every age is computed from that difference, so silently reading
+            // them all as `now` would leave the panel permanently calm about a stalled fleet.
+            Some(a) if a < -SKEW_TOLERANCE => "skew".to_string(),
+            Some(a) => age_label(a),
+            // Distinct from an age, and from the `-` that means "no detail" two rows below.
+            None => "·".to_string(),
+        };
         let pad = width.saturating_sub(used + AGE_WIDTH);
         spans.push(Span::raw(" ".repeat(pad)));
         spans.push(Span::styled(
@@ -389,7 +514,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let mut title = if count == 0 {
         Region::Inbox.title().to_string()
     } else {
-        format!("{} ({count})", Region::Inbox.title())
+        // `(2)` counts prompts, which says nothing about what they cost. The number of tasks that
+        // cannot move until you deal with them does, and it is what makes the header worth a glance
+        // from across the room.
+        let blocked = blocked_by_inbox(app);
+        if blocked > 0 {
+            format!("{} ({count}) · {blocked} blocked", Region::Inbox.title())
+        } else {
+            format!("{} ({count})", Region::Inbox.title())
+        }
     };
     // The header carries the worst wait, because the header is what is visible from across the room
     // while your eye is in a pane.
@@ -515,14 +648,15 @@ mod snapshots {
         let text = screen_text(&draw_rows(&mut app, 120, 40));
         assert!(text.contains("41m"), "the age column:\n{text}");
         assert!(text.contains("oldest 41m"), "and the header:\n{text}");
-        // The review item carries no `since`, so it says so rather than claiming to be brand new.
+        // The review item carries no `since`, so it says so with a glyph that is not an age and
+        // not the `-` that means "no detail", rather than claiming to be brand new.
         let rows = all_inbox_rows(&app, 120);
         let review = rows
             .iter()
             .map(|(l, _)| l.to_string())
             .find(|l| l.contains("human review"))
             .unwrap();
-        assert!(review.trim_end().ends_with('-'), "{review}");
+        assert!(review.trim_end().ends_with('·'), "{review}");
     }
 
     #[test]
@@ -603,6 +737,66 @@ mod reading {
         assert!(selected.len() <= DETAIL_ROWS, "and stops: {selected:?}");
         for line in &selected {
             assert!(line.chars().count() <= 80, "inside the panel: {line:?}");
+        }
+    }
+
+    /// An escalation carries a key hint per pending review plus clarify, reply, focus and cancel, and
+    /// the age was the rightmost span — so on the busiest row the panel silently clipped the one
+    /// thing that says what to do first, while the header still claimed an age.
+    #[test]
+    fn a_row_full_of_key_hints_sheds_the_hints_and_not_the_age() {
+        let mut app = app_with_a_long_blocker();
+        let mut graph = app.ws().graph.clone();
+        let keys = ["a", "p", "f", "q", "w", "r", "Enter", "x"];
+        let kinds = [
+            ActionKind::Clarify,
+            ActionKind::Review,
+            ActionKind::Review,
+            ActionKind::Review,
+            ActionKind::Review,
+            ActionKind::Reply,
+            ActionKind::Focus,
+            ActionKind::Cancel,
+        ];
+        graph.inbox.push(InboxItem {
+            id: "escalation:t-backend-auth".into(),
+            kind: InboxKind::Escalation,
+            mission_id: "m-001".into(),
+            task_id: Some("t-backend-auth".into()),
+            title: "backend's t-backend-auth is escalated".into(),
+            detail: vec!["escalated: needs a planner or human decision".into()],
+            since: Some("2026-09-05T09:46:00+08:00".into()),
+            reference: GraphObjectRef::node("t-backend-auth"),
+            actions: keys
+                .iter()
+                .zip(kinds)
+                .map(|(key, kind)| ObjectAction {
+                    key: (*key).into(),
+                    kind,
+                    label: "x".into(),
+                    target: ActionTarget::default(),
+                })
+                .collect(),
+        });
+        app.set_graph(graph);
+
+        for width in [40u16, 55, 80, 110] {
+            for (line, _) in all_inbox_rows(&app, width) {
+                assert!(
+                    line.to_string().chars().count() <= width as usize,
+                    "at {width} columns this row overflows: {line:?}"
+                );
+            }
+            let reference = GraphObjectRef::inbox("escalation:t-backend-auth");
+            let row = all_inbox_rows(&app, width)
+                .into_iter()
+                .find(|(_, r)| r.as_ref() == Some(&reference))
+                .map(|(l, _)| l.to_string())
+                .expect("the escalation's own row");
+            assert!(
+                row.trim_end().ends_with("1h"),
+                "the age survives at {width} columns: {row:?}"
+            );
         }
     }
 

@@ -258,8 +258,16 @@ impl Command {
 
     pub fn label(&self) -> String {
         match self {
-            Command::Clarify { task_id, .. } => format!("answer sent to {task_id}"),
-            Command::MissionClarify { mission_id, .. } => format!("answer sent for {mission_id}"),
+            Command::Clarify {
+                task_id,
+                question_id,
+                ..
+            } => format!("{question_id} answered on {task_id}"),
+            Command::MissionClarify {
+                mission_id,
+                question_id,
+                ..
+            } => format!("{question_id} answered on {mission_id}"),
             Command::Review {
                 task_id,
                 criterion_id,
@@ -268,6 +276,27 @@ impl Command {
             } => format!("{criterion_id} marked {status} on {task_id}"),
             Command::Reply { task_id, .. } => format!("reply sent to {task_id}"),
             Command::Cancel { task_id } => format!("cancel requested for {task_id}"),
+        }
+    }
+
+    /// What the command was about, in a form that reads correctly after "did not send". `label` is
+    /// written as a thing that happened, which is exactly wrong for a request that never arrived.
+    ///
+    /// Kept short, and free of the task id: the error it is prefixed to already carries the route,
+    /// and the status line is one row. What the route cannot say is *which question* — and answering
+    /// walks several in a row, so that is the part worth the columns.
+    pub fn subject(&self) -> String {
+        match self {
+            Command::Clarify { question_id, .. } | Command::MissionClarify { question_id, .. } => {
+                format!("your answer to {question_id}")
+            }
+            Command::Review {
+                criterion_id,
+                status,
+                ..
+            } => format!("marking {criterion_id} {status}"),
+            Command::Reply { .. } => "your reply".to_string(),
+            Command::Cancel { .. } => "the cancel".to_string(),
         }
     }
 }
@@ -395,8 +424,14 @@ pub struct App {
     /// the others silently would write your words against a question you were not looking at, into a
     /// log that is the only state and does not take them back.
     pending_questions: Vec<String>,
-    /// How many `a` started with, so the prompt can say `Q2 of 4` rather than a bare countdown.
-    answer_total: usize,
+    /// The questions this walk has already sent. Kept here, not derived from the inbox: the server
+    /// deletes a question the instant it is answered, so a row that has been dealt with would simply
+    /// vanish from under the cursor mid-walk with nothing to show for it.
+    answered_questions: Vec<String>,
+    /// The inbox item the walk is on. Question ids are per-task and every agent starts at `Q1`, so
+    /// two agents asking at once means two items both carrying a `Q1`; without this the prompt shows
+    /// one agent's question while the answer is routed to the other's.
+    answering_item: Option<String>,
     /// Test seam: what this client believes the time is, in seconds since the epoch. `None` asks the
     /// system clock. Ages are drawn from it, and a drawn age has to be reproducible in a snapshot.
     pub now_override: Option<i64>,
@@ -441,11 +476,25 @@ pub struct App {
     pub tick: u64,
 }
 
+/// Cut a string to `width` printed characters, marking that it was cut.
+fn truncate_to(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(width.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
 fn same_task(graph: &Graph, r: &GraphObjectRef, task_id: &str) -> bool {
     graph.task_of(r) == Some(task_id)
 }
 
 impl App {
+    /// How much of a question the prompt will show before the field it shares a line with. Agent
+    /// prose runs to any length; the field has to survive it.
+    const QUESTION_PROMPT_WIDTH: usize = 48;
+
     pub fn new(mode: Mode) -> Self {
         Self::with_urls(mode, &["http://127.0.0.1:7420".to_string()])
     }
@@ -473,7 +522,8 @@ impl App {
             input_value: String::new(),
             pending_action: None,
             pending_questions: Vec::new(),
-            answer_total: 0,
+            answered_questions: Vec::new(),
+            answering_item: None,
             now_override: None,
             help_open: false,
             error: None,
@@ -533,11 +583,12 @@ impl App {
                         .map(|e| GraphObjectRef::edge(e.id.clone())),
                 )
                 .collect(),
-            Region::Inbox => self
-                .ws()
-                .graph
-                .inbox
-                .iter()
+            // In the order the strip draws them, not the order the server sent them. The panel sorts
+            // by what is stuck behind each item; j/k walking the raw list would step through the rows
+            // out of order, and Tab into the panel would land on whichever row happened to be first
+            // on the wire rather than the one at the top.
+            Region::Inbox => crate::ui::inbox::ordered_items(self)
+                .into_iter()
                 .map(|i| GraphObjectRef::inbox(i.id.clone()))
                 .collect(),
             Region::Panes => self
@@ -567,6 +618,7 @@ impl App {
         if let Some(seq) = self.ws().graph.seq {
             self.ws_mut().last_seq = self.ws().last_seq.max(seq);
         }
+        self.reconcile_input();
         let mut effects = Vec::new();
         let keep = self
             .selected
@@ -587,6 +639,52 @@ impl App {
             }
         }
         effects
+    }
+
+    /// Bring an open editor back in line with what the server now says, on every refresh.
+    ///
+    /// An editor is a claim about work that still needs doing, and the server can settle that work
+    /// while you are typing — the task gets cancelled, or someone answers the same question from the
+    /// CLI. Two things went wrong when nothing checked. The item could vanish while `input_mode`
+    /// stayed `Some`, and since the editor only draws inside the inspector, the popup went with it:
+    /// no prompt, no cursor, and every key still swallowed into a field you could not see. The app
+    /// looked frozen. And a question answered elsewhere stayed in the queue, so the prompt named a
+    /// question that was no longer being asked and Enter sent a duplicate answer for it.
+    fn reconcile_input(&mut self) {
+        let Some(item_id) = self.answering_item.clone() else {
+            return;
+        };
+        let open: Vec<String> = match self.ws().graph.inbox_item(&item_id) {
+            Some(item) => item
+                .actions
+                .iter()
+                .filter_map(|a| a.target.question_ids.as_ref())
+                .flatten()
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        let before = self.pending_questions.len();
+        self.pending_questions.retain(|q| open.contains(q));
+        if self.pending_questions.is_empty() {
+            let answered = self.answered_questions.len();
+            self.reset_input();
+            self.set_notice(match answered {
+                0 => format!("{item_id} is no longer waiting on you · nothing was sent"),
+                1 => format!("{item_id} is settled · your 1 answer was sent"),
+                n => format!("{item_id} is settled · your {n} answers were sent"),
+            });
+        } else if self.pending_questions.len() < before {
+            self.set_notice(format!(
+                "{} of these questions {} answered elsewhere",
+                before - self.pending_questions.len(),
+                if before - self.pending_questions.len() == 1 {
+                    "was"
+                } else {
+                    "were"
+                }
+            ));
+        }
     }
 
     pub fn set_state(&mut self, state: State) {
@@ -787,15 +885,20 @@ impl App {
         crate::ui::inbox::action_keys(self.current_actions())
     }
 
-    /// The wording of a question, found on the inbox item that asked it. A detail row reads
+    /// The wording of a question, taken from the one item that asked it. A detail row reads
     /// `Q2: Link expiry?` — the id, then the question — so the id is a prefix to strip.
+    ///
+    /// Scoped to the item on purpose. Question ids are authored per task and everyone starts at
+    /// `Q1`, so searching the whole inbox would show you one agent's question while sending your
+    /// answer to another agent's — a wrong answer that looks entirely right.
     fn question_text(&self, id: &str) -> Option<String> {
+        let item_id = self.answering_item.as_deref()?;
         self.ws()
             .graph
-            .inbox
+            .inbox_item(item_id)?
+            .detail
             .iter()
-            .flat_map(|item| item.detail.iter())
-            .find_map(|d| crate::model::question_of(d).filter(|q| *q == id).map(|_| d))
+            .find(|d| crate::model::question_of(d) == Some(id))
             .map(|d| d[id.len()..].trim_start_matches([':', ' ']).to_string())
     }
 
@@ -806,6 +909,24 @@ impl App {
             &self.pending_questions
         } else {
             &[]
+        }
+    }
+
+    /// The questions this walk has already sent.
+    pub fn answered_questions(&self) -> &[String] {
+        if self.input_mode == Some(InputMode::Answer) {
+            &self.answered_questions
+        } else {
+            &[]
+        }
+    }
+
+    /// The inbox item `a` is walking, if any.
+    pub fn answering_item(&self) -> Option<&str> {
+        if self.input_mode == Some(InputMode::Answer) {
+            self.answering_item.as_deref()
+        } else {
+            None
         }
     }
 
@@ -873,10 +994,22 @@ impl App {
                     // The question itself, not its id: `Q2` names a row you would have to go and read
                     // when the whole point of the prompt is that you do not have to.
                     Some(id) => {
-                        let done = self.answer_total - self.pending_questions.len() + 1;
-                        let text = self.question_text(id).unwrap_or_else(|| id.clone());
-                        if self.answer_total > 1 {
-                            format!("{done}/{} {text}", self.answer_total)
+                        let done = self.answered_questions.len() + 1;
+                        // Counted from what is left, not from what `a` started with, so a question
+                        // answered elsewhere shrinks the total instead of shifting the numbering.
+                        let total = self.answered_questions.len() + self.pending_questions.len();
+                        // Agent prose of any length, and the editor shares one line with it: an
+                        // unbounded question pushed the field past the right edge and you typed blind.
+                        let text = match self.question_text(id) {
+                            Some(text) => truncate_to(&text, Self::QUESTION_PROMPT_WIDTH),
+                            // The id alone when nothing spelled the question out, and a warning when
+                            // the item that did has stopped listing it — those are different, and
+                            // only one of them means your answer is about to go somewhere stale.
+                            None if self.answering_item.is_none() => id.clone(),
+                            None => format!("{id} (no longer listed)"),
+                        };
+                        if total > 1 {
+                            format!("{done}/{total} {text}")
                         } else {
                             text
                         }
@@ -1041,7 +1174,8 @@ impl App {
         self.input_value.clear();
         self.pending_action = None;
         self.pending_questions.clear();
-        self.answer_total = 0;
+        self.answered_questions.clear();
+        self.answering_item = None;
         self.pending_pane_close = None;
         self.pending_task_delete = None;
     }
@@ -1054,7 +1188,24 @@ impl App {
         } else {
             Vec::new()
         };
-        self.answer_total = self.pending_questions.len();
+        self.answered_questions.clear();
+        // The inbox item the walk is on, however you reached it: `a` works from a graph node too, and
+        // the item is what carries the question wording and what a refresh has to be checked against.
+        self.answering_item = if mode == InputMode::Answer {
+            match &self.selected {
+                Some(r) if r.kind == RefKind::Inbox => Some(r.id.clone()),
+                _ => action.target.task_id.as_deref().and_then(|task| {
+                    self.ws()
+                        .graph
+                        .inbox
+                        .iter()
+                        .find(|i| i.task_id.as_deref() == Some(task) && !i.detail.is_empty())
+                        .map(|i| i.id.clone())
+                }),
+            }
+        } else {
+            None
+        };
         self.pending_action = Some(action);
         self.error = None;
         // The inline editor lives in the inspector, like the Ink overlay tabs.
@@ -1192,17 +1343,27 @@ impl App {
                         return Vec::new();
                     }
                     let question = self.pending_questions.first().cloned();
-                    let command = submit_command(&action, mode, question, value);
+                    let Some(command) = submit_command(&action, mode, question.clone(), value)
+                    else {
+                        // Nothing could be built from this action, so nothing was sent. Saying so
+                        // beats closing the editor and dropping what you typed in silence.
+                        self.set_error("nothing to send: this action has no question to answer");
+                        return Vec::new();
+                    };
                     // More questions on this item means the editor stays open on the next one: the
                     // work is "answer what backend asked", not "answer one of the things it asked".
                     if mode == InputMode::Answer && self.pending_questions.len() > 1 {
+                        if let Some(id) = question {
+                            self.answered_questions.push(id);
+                        }
                         self.pending_questions.remove(0);
                         self.input_value.clear();
-                        self.error = None;
-                        return command.map(|c| vec![Effect::Post(c)]).unwrap_or_default();
+                        // The error is not cleared here: a POST that failed on the previous question
+                        // is the one thing you need to still be able to read on this one.
+                        return vec![Effect::Post(command)];
                     }
                     self.reset_input();
-                    return command.map(|c| vec![Effect::Post(c)]).unwrap_or_default();
+                    return vec![Effect::Post(command)];
                 }
                 KeyCode::Backspace | KeyCode::Delete => {
                     self.input_value.pop();

@@ -276,7 +276,10 @@ function inboxFor(state: State, mission: MissionView, tasks: TaskView[]): InboxI
         ...base,
         title: `${role} needs your review of ${criterionId} (attempt ${task.attempt})`,
         detail: [criterion?.condition ?? criterionId],
-        since: task.last_seen_at,
+        // When the evidence landed, not when the agent was last heard from: `last_seen_at` is reset
+        // by every progress report, so a task still working on another criterion made its pending
+        // review look brand new on every ping, whatever it had actually been waiting.
+        since: task.evidence_submitted_at ?? task.last_seen_at,
         ref: { kind: 'edge', id: `evidence:${task.id}` },
         actions: [...reviewActions(task, criterionId), inspectAction(task.id)],
       });
@@ -308,7 +311,7 @@ function inboxFor(state: State, mission: MissionView, tasks: TaskView[]): InboxI
         ...base,
         title: task.task_state === 'failed' ? `${role} failed ${task.id} (budget exhausted)` : `${role}'s ${task.id} is escalated`,
         detail,
-        since: task.completed_at ?? task.last_seen_at,
+        since: task.escalated_at ?? task.completed_at ?? task.last_seen_at,
         ref: { kind: 'node', id: task.id },
         actions: agentNodeActions(task),
       });

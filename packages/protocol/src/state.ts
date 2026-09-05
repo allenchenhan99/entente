@@ -53,6 +53,14 @@ export const TaskView = z.object({
   started_at: z.string().optional(),
   last_seen_at: z.string().optional(),
   completed_at: z.string().optional(),
+  /**
+   * When the criteria now awaiting a human entered that state. Distinct from `last_seen_at`, which is
+   * a liveness heartbeat every progress report resets — a task still working on AC-4 would otherwise
+   * make its pending review of AC-3 look brand new on every ping, however long it had been waiting.
+   */
+  evidence_submitted_at: z.string().optional(),
+  /** When the task escalated or exhausted its budget, so the inbox can say how long ago that was. */
+  escalated_at: z.string().optional(),
 });
 export type TaskView = z.infer<typeof TaskView>;
 
