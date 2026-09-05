@@ -409,6 +409,11 @@ impl App {
                 .filter(|n| crate::ui::graph::is_visible(n))
                 .map(|n| GraphObjectRef::node(n.id.clone()))
                 .chain(
+                    self.unattached_agents()
+                        .into_iter()
+                        .map(|n| GraphObjectRef::node(n.id)),
+                )
+                .chain(
                     self.graph
                         .edges
                         .iter()
@@ -1245,11 +1250,16 @@ impl App {
         )
     }
 
+    /// Agents relayd is hosting that no contract accounts for; they are on the network too.
+    pub fn unattached_agents(&self) -> Vec<GraphNode> {
+        crate::ui::graph::unattached_agents(&self.graph, self.pane_states.values().map(|p| &p.info))
+    }
+
     /// The object drawn under a cell, if any.
     pub fn hit_at(&self, col: u16, row: u16) -> Option<GraphObjectRef> {
         let point =
             crate::ui::graph::cell_to_world(&self.graph_view, self.graph_viewport, col, row);
-        let discs = crate::ui::graph::layout_net(&self.graph);
+        let discs = crate::ui::graph::layout_net(&self.graph, &self.unattached_agents());
         crate::ui::graph::hit_test(&self.graph, &discs, point)
     }
 

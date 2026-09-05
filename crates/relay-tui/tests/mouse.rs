@@ -330,3 +330,97 @@ fn a_capital_x_typed_into_a_pane_is_just_a_letter() {
     );
     assert!(app.prompt_line().is_none());
 }
+
+// --- agents nobody contracted --------------------------------------------------------------------
+
+/// A pane hosting a coding agent that no task accounts for: launched by hand, bound to nothing.
+fn loose_agent(pane_id: &str, role: &str, alive: bool) -> PaneInfo {
+    PaneInfo {
+        task_id: None,
+        ..pane(pane_id, None, role, alive)
+    }
+}
+
+#[test]
+fn an_agent_with_no_contract_is_still_on_the_network() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(vec![loose_agent("relay:7", "scout", true)], None);
+
+    let loose = app.unattached_agents();
+
+    assert_eq!(loose.len(), 1, "{loose:?}");
+    assert_eq!(loose[0].id, "relay:7");
+    assert_eq!(loose[0].label, "scout");
+    assert_eq!(
+        loose[0].badge.as_deref(),
+        Some("no contract"),
+        "the node says why it stands alone"
+    );
+}
+
+#[test]
+fn nothing_connects_it_because_nothing_has_been_agreed() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(vec![loose_agent("relay:7", "scout", true)], None);
+    let loose = app.unattached_agents();
+
+    let discs = relay_tui::ui::graph::layout_net(&app.graph, &loose);
+    assert!(discs.iter().any(|d| d.id == "relay:7"), "it is drawn");
+    for edge in &app.graph.edges {
+        assert_ne!(edge.from, "relay:7");
+        assert_ne!(edge.to, "relay:7");
+    }
+}
+
+#[test]
+fn an_agent_the_planner_did_contract_is_not_duplicated() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    // Same role as a task in the graph: this pane is that agent, not a second one.
+    app.set_panes(
+        vec![pane("relay:1", Some("t-backend-auth"), "backend", true)],
+        None,
+    );
+
+    assert!(
+        app.unattached_agents().is_empty(),
+        "a contracted agent already has its node"
+    );
+}
+
+#[test]
+fn a_plain_shell_is_not_an_agent() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    let mut shell = loose_agent("relay:9", "shell", true);
+    shell.runtime = None; // `t` opens a shell, not a coding agent
+    app.set_panes(vec![shell], None);
+
+    assert!(app.unattached_agents().is_empty());
+}
+
+#[test]
+fn a_loose_agent_can_be_selected_like_any_other_node() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(vec![loose_agent("relay:7", "scout", true)], None);
+
+    let refs = app.refs_for_region(Region::Graph);
+
+    assert!(
+        refs.contains(&GraphObjectRef::node("relay:7")),
+        "j/k reaches what the network draws: {refs:?}"
+    );
+}
+
+#[test]
+fn a_loose_agent_whose_process_died_says_so() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(vec![loose_agent("relay:7", "scout", false)], None);
+
+    let loose = app.unattached_agents();
+    assert_eq!(loose[0].runtime, Some(RuntimeState::Exited));
+}

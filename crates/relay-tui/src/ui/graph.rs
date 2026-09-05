@@ -81,6 +81,51 @@ pub fn runtime_is_live(node: &GraphNode, pane_alive: Option<bool>) -> bool {
     )
 }
 
+/// Agents relayd is hosting that no contract accounts for.
+///
+/// The object model builds agents from task contracts, so an agent launched by hand — you opened a
+/// terminal and started one — is nowhere in it. It belongs on the network all the same: it is running,
+/// it is an agent, and the fact that nothing binds it to anyone is the thing worth seeing. It is drawn
+/// standing alone, with no edges, because RelayGraph draws relationships it has evidence for.
+///
+/// A plain shell is not an agent and does not appear; the pane's runtime is what tells them apart.
+pub fn unattached_agents<'a>(
+    graph: &Graph,
+    panes: impl Iterator<Item = &'a PaneInfo>,
+) -> Vec<GraphNode> {
+    panes
+        .filter(|pane| pane.runtime.is_some())
+        .filter(|pane| {
+            !graph.nodes.iter().any(|node| {
+                node.kind == GraphNodeKind::Agent
+                    && (Some(node.id.as_str()) == pane.task_id.as_deref()
+                        || node.label == pane.role)
+            })
+        })
+        .map(|pane| GraphNode {
+            id: pane.pane_id.clone(),
+            kind: GraphNodeKind::Agent,
+            label: pane.role.clone(),
+            task_id: None,
+            runtime: Some(if pane.alive {
+                RuntimeState::Working
+            } else {
+                RuntimeState::Exited
+            }),
+            task_state: None,
+            handoff_state: None,
+            column: 1, // the agents tier
+            status: if pane.alive {
+                VisualStatus::Working
+            } else {
+                VisualStatus::Done
+            },
+            // Why it stands alone, said plainly rather than left to be inferred from missing edges.
+            badge: Some("no contract".to_string()),
+        })
+        .collect()
+}
+
 /// World units a tier gives each of its nodes — the widest a label may be before it runs into the
 /// neighbour's.
 pub fn slot_width(count: usize) -> f64 {
@@ -88,9 +133,14 @@ pub fn slot_width(count: usize) -> f64 {
 }
 
 /// Where each node sits. Nodes of a tier are spread evenly across the world's width, in protocol order.
-pub fn layout_net(graph: &Graph) -> Vec<Disc> {
+pub fn layout_net(graph: &Graph, unattached: &[GraphNode]) -> Vec<Disc> {
     let mut tiers: [Vec<&GraphNode>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-    for node in graph.nodes.iter().filter(|n| is_visible(n)) {
+    for node in graph
+        .nodes
+        .iter()
+        .chain(unattached.iter())
+        .filter(|n| is_visible(n))
+    {
         // The protocol's fourth column (`done`) has no object behind it yet; fold it into the verifier tier
         // rather than leaving a dead band in a panel this narrow.
         let tier = (node.column as usize).min(2);
@@ -306,15 +356,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     app.graph_viewport = viewport_of(canvas_area);
 
     let graph = app.graph.clone();
-    let mut discs = layout_net(&graph);
+    let unattached = app.unattached_agents();
+    let mut discs = layout_net(&graph, &unattached);
     // The pane is the better witness than the event-derived runtime state: an agent's contract exists
     // long before a coding shell is spawned for it, and the shell can die while the task stays open.
     for disc in &mut discs {
-        if let Some(node) = graph.nodes.iter().find(|n| n.id == disc.id) {
+        if let Some(node) = graph
+            .nodes
+            .iter()
+            .chain(unattached.iter())
+            .find(|n| n.id == disc.id)
+        {
             let pane_alive = app
                 .pane_states
                 .values()
-                .find(|p| p.info.task_id.as_deref() == Some(disc.id.as_str()))
+                .find(|p| {
+                    p.info.task_id.as_deref() == Some(disc.id.as_str()) || p.info.pane_id == disc.id
+                })
                 .map(|p| p.alive());
             disc.live = runtime_is_live(node, pane_alive);
         }
@@ -489,7 +547,7 @@ mod tests {
 
     #[test]
     fn nodes_sit_in_three_tiers_with_agents_between_the_human_and_the_verifier() {
-        let discs = layout_net(&graph_with_verifier("live-1"));
+        let discs = layout_net(&graph_with_verifier("live-1"), &[]);
         let human = discs.iter().find(|d| d.id == "human").unwrap();
         let agent = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
         let verifier = discs.iter().find(|d| d.id == "verifier").unwrap();
@@ -507,7 +565,7 @@ mod tests {
 
     #[test]
     fn a_tier_spreads_its_nodes_evenly_and_never_stacks_them() {
-        let discs = layout_net(&fixture("live-1").graph);
+        let discs = layout_net(&fixture("live-1").graph, &[]);
         let agents: Vec<&Disc> = discs.iter().filter(|d| d.is_agent).collect();
         assert!(agents.len() >= 2, "fixture has two agents");
         for pair in agents.windows(2) {
@@ -522,15 +580,15 @@ mod tests {
     #[test]
     fn placement_does_not_move_when_the_view_does() {
         let graph = fixture("live-1").graph;
-        let before = layout_net(&graph);
-        let after = layout_net(&graph);
+        let before = layout_net(&graph, &[]);
+        let after = layout_net(&graph, &[]);
         assert_eq!(before, after, "layout is fixed, never force-directed");
     }
 
     #[test]
     fn edges_start_and_end_on_the_rims_not_the_centres() {
         let graph = fixture("live-1").graph;
-        let discs = layout_net(&graph);
+        let discs = layout_net(&graph, &[]);
         let edge = graph.edges.first().unwrap();
         let (a, b) = edge_ends(&discs, edge).unwrap();
         let from = disc(&discs, &edge.from).unwrap();
@@ -574,7 +632,7 @@ mod tests {
     #[test]
     fn clicking_a_disc_finds_its_node() {
         let graph = fixture("live-1").graph;
-        let discs = layout_net(&graph);
+        let discs = layout_net(&graph, &[]);
         let target = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
 
         let hit = hit_test(&graph, &discs, (target.x, target.y)).unwrap();
@@ -584,7 +642,7 @@ mod tests {
     #[test]
     fn clicking_between_two_discs_finds_the_edge_that_runs_there() {
         let graph = fixture("live-1").graph;
-        let discs = layout_net(&graph);
+        let discs = layout_net(&graph, &[]);
         let edge = graph
             .edges
             .iter()
@@ -602,7 +660,7 @@ mod tests {
     #[test]
     fn clicking_empty_space_selects_nothing() {
         let graph = fixture("live-1").graph;
-        let discs = layout_net(&graph);
+        let discs = layout_net(&graph, &[]);
         assert_eq!(hit_test(&graph, &discs, (-40.0, -40.0)), None);
     }
 
@@ -650,7 +708,7 @@ mod tests {
             }
         }
         assert!(
-            !layout_net(&graph).iter().any(|d| d.id == "verifier"),
+            !layout_net(&graph, &[]).iter().any(|d| d.id == "verifier"),
             "relayd verifies; the node means nothing until a task has produced something"
         );
 
@@ -659,7 +717,7 @@ mod tests {
                 node.status = VisualStatus::Working;
             }
         }
-        assert!(layout_net(&graph).iter().any(|d| d.id == "verifier"));
+        assert!(layout_net(&graph, &[]).iter().any(|d| d.id == "verifier"));
     }
 
     #[test]
@@ -670,7 +728,7 @@ mod tests {
                 node.status = VisualStatus::Pending;
             }
         }
-        let discs = layout_net(&graph);
+        let discs = layout_net(&graph, &[]);
         for edge in graph.edges.iter().filter(|e| e.to == "verifier") {
             assert!(edge_ends(&discs, edge).is_none());
         }
