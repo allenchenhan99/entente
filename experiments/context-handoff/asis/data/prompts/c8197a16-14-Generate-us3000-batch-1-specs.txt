@@ -1,0 +1,19 @@
+Project: A-D-Aperture "Data" repo at D:\AD (Windows), Python 3.12. Spec-clear mechanical task: create FIVE new dataset-spec files that mirror existing S&P-500 specs but target a broader universe (top-3000 US stocks). The data columns are IDENTICAL to the existing specs; only the dataset name, titles, and CSV source paths change.
+
+For each pair below: READ the existing source spec, COPY its structure/columns EXACTLY, and write the new file with these changes only:
+  (a) Dataset `name`: replace the `sp500_` prefix with `us3000_`.
+  (b) In EVERY Table, change `source_file`: replace the leading folder ("fmp/" or "fmp_extra/") with "fmp_us3000/". e.g. "fmp/fmp_income.csv" -> "fmp_us3000/fmp_income.csv"; "fmp_extra/fmp_financial_scores.csv" -> "fmp_us3000/fmp_financial_scores.csv". Keep the filename unchanged.
+  (c) Title/description: mention "US Russell-3000-proxy universe" instead of "S&P 500". version="2026-08-27".
+  (d) Keep ALL columns, coerce types, indexes, and views identical (just update any {table} placeholders naturally — they resolve by logical name, no change needed).
+
+PAIRS (source -> new file, new dataset name, expected table count):
+1. D:\AD\scripts\ad_datasets\sp500_fundamentals.py -> D:\AD\scripts\ad_datasets\us3000_fundamentals.py  (name `us3000_fundamentals`, 3 tables)
+2. D:\AD\scripts\ad_datasets\sp500_valuation.py     -> D:\AD\scripts\ad_datasets\us3000_valuation.py     (name `us3000_valuation`, 4 tables)
+3. D:\AD\scripts\ad_datasets\sp500_scores.py        -> D:\AD\scripts\ad_datasets\us3000_scores.py        (name `us3000_scores`, 4 tables)
+4. D:\AD\scripts\ad_datasets\sp500_growth.py        -> D:\AD\scripts\ad_datasets\us3000_growth.py        (name `us3000_growth`, 4 tables)
+5. D:\AD\scripts\ad_datasets\sp500_profile.py       -> D:\AD\scripts\ad_datasets\us3000_profile.py       (name `us3000_profile`) — SPECIAL: include ONLY the `company_profile` table (source "fmp_us3000/fmp_profile.csv"); DROP the `shares_float` table (its data is not in this batch). So us3000_profile has exactly 1 table.
+
+MANDATORY acceptance — run and paste output:
+  A) `python -c "import sys; sys.path.insert(0,r'D:/AD/scripts'); import importlib; ns=['us3000_fundamentals','us3000_valuation','us3000_scores','us3000_growth','us3000_profile']; print([(n,len(importlib.import_module('ad_datasets.'+n).DATASET.tables)) for n in ns])"`  expected: [('us3000_fundamentals',3),('us3000_valuation',4),('us3000_scores',4),('us3000_growth',4),('us3000_profile',1)]
+  B) `python -c "import sys;sys.path.insert(0,r'D:/AD/scripts');import ad_datasets.us3000_valuation as v;print([ (t.name,t.source_file) for t in v.DATASET.tables])"` — every source_file must start with "fmp_us3000/".
+Boundary: create only those 5 files; modify nothing else; do NOT build or scp (I deploy+build after the data finishes fetching). After finishing, INDEPENDENTLY re-run A and B and report the actual output.

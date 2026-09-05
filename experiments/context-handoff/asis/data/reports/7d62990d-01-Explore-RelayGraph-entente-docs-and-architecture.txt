@@ -1,0 +1,86 @@
+Not a working env (deps not installed) — not material to the report; skipping. I have sufficient findings.
+
+## Report: RelayGraph / entente — architecture facts relevant to the "A2A profile" critique
+
+### 1. Project purpose / docs
+
+- Root `README.md`: "Turn fuzzy natural-language handoffs between coding agents into confirmable, trackable, verifiable, retryable work contracts." Positions itself as a "coordination control plane that sits *above* coding-agent runtimes (Claude Code, Codex) and terminal hosts (tmux, Herdr)." Explicitly: "It does not replace them."
+- `PRD.md` (Traditional Chinese, hackathon PRD, "FUTUREMODE BUILDMODE Gen-AI Hackathon 2026," dated 2026-09-04): full architecture, data model, state machine, lint rules, demo script, roadmap. This is the authoritative design doc.
+- `docs/protocol.md`: auto-generated (`scripts/gen-protocol-docs.mjs`) reference of the object schemas, event types, check kinds, MCP tool list — generated from `packages/protocol/src`, so it tracks code, not aspirational.
+- `docs/relay-terminal-plan.md`: Phase-2 roadmap for a self-built terminal (relayd hosting PTYs + a React/xterm.js web app), described as work packages/contracts to "pick up."
+- `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`: contributor/agent-facing instructions.
+- Core lifecycle stated in README: `proposed → needs_clarification → revised → accepted → evidence_submitted → verified` with a `retry_requested` loop back into evidence_submitted ("delta repair, same session").
+- Four stated principles: clarify before execution, evidence over self-reporting, local repair over global retry, everything is an event (append-only JSONL, one reducer for all state).
+
+### 2. "Task Contract" — implementation, not just a doc concept
+
+Defined as zod schemas in `packages/protocol/src/contract.ts` (frozen integration contract per README/PRD). Concretely:
+
+- `TaskContract`: `id` (regex `t-[a-z0-9-]+`), `mission_id`, `version`, `sender`, `recipient`, `runtime` (`claude-code`|`codex`), `goal`, `inputs`, `constraints`, `non_goals`, `scope.allowed_paths`, `acceptance_criteria` (array of `AcceptanceCriterion`), `output`, `dependencies`, `budget` (`max_repairs`, `stagnation_limit`), `clarifications`, and `parent_task` (optional — used for agent-delegated subtasks).
+- `AcceptanceCriterion`: `id` (`AC-\d+`), `condition`, optional `check`.
+- `Check` is a zod discriminated union over 5 kinds: `command`, `diff_scope`, `file_exists`, `human_review`, `llm_judge`.
+- Related schemas in the same file: `ContractResponse` (accept/needs_clarification/rejected, with `interpretation`, `assumptions`, `risks`, `verification_plan`, `questions`), `EvidenceSubmission`, `CheckResult`, `EvidenceRecord`, `RepairContract`, `Mission`.
+- These types are shared verbatim between `apps/relayd` (server), `apps/tui` (UI), and fixtures/tests — it's a single TypeScript/zod source of truth, not duplicated per-consumer.
+- `docs/protocol.md` and `docs/schema/*.json` are generated (JSON Schema) from these zod schemas via `scripts/gen-protocol-docs.mjs`, so docs track code automatically.
+
+### 3. Verification / evidence / repair — real enforcement, not convention
+
+This is genuinely implemented and unit-tested, not just documented:
+
+- `apps/relayd/src/verify/check-runner.ts` (`DeterministicCheckRunner`): for each acceptance criterion it runs the bound `check` inside the task's git worktree — `command` via `execa` with timeout and captured stdout/stderr as evidence files; `diff_scope` via `picomatch` matching changed files against `scope.allowed_paths`; `file_exists` via `fs.existsSync`; `human_review` returns `pending_human`; `llm_judge` currently returns `status: 'error', observed: 'llm_judge not configured'` (i.e., not implemented — nice-to-have per PRD). It computes `self_report_mismatch` by comparing the agent's `claimed` status against the actual check result.
+- `apps/relayd/src/repair/policy.ts` (`DefaultRepairPolicy.decide`): pure logic that inspects failed criteria, enforces `budget.max_repairs`, detects "stagnation" (same failed criteria + same changed files across `stagnation_limit` attempts) to escalate rather than loop forever, and otherwise emits a scoped `RepairContract` naming only the failed criteria and forbidding touching `non_goals`.
+- Lint rule (`packages/protocol/src` lint rules, e.g. `unverifiable_criterion`): a criterion without a bound `check` is an **error**-level lint that blocks agent spawn — enforced in code (evidenced by `lint.test.ts`), not just a PRD statement.
+- Test files exist alongside each of these (`check-runner.test.ts`, `policy.test.ts`, `orchestrator.test.ts`, `git-worktrees.test.ts`, `lint.test.ts`), so this is exercised by a real test suite (though I could not execute `vitest` in this environment — `node_modules`/vitest not installed here — so I read the code/tests rather than running them).
+
+Conclusion: "evidence over self-reporting" is a concretely enforced mechanism (deterministic check execution in an isolated git worktree, diffed and scoped), not merely a doc-level aspiration — with the caveat that `llm_judge` is a stub and `human_review` still requires a human to click pass/fail via the CLI/TUI.
+
+### 4. MCP usage
+
+RelayGraph **is an MCP server**, not a client or "just documented as compatible."
+
+- `apps/relayd/src/mcp/server.ts`: uses `@modelcontextprotocol/sdk` (`McpServer`, `WebStandardStreamableHTTPServerTransport`), mounted on a Hono app at `/mcp` as a stateless streamable-HTTP MCP server (fresh `McpServer` + transport per request).
+- Auth model: each spawned agent gets a bearer token (`Authorization: Bearer <task_token>` for recipients, `mission:<id>` token for the planner); the MCP server resolves the caller via `orchestrator`/token lookup, not via any external identity system.
+- Tools registered (from `packages/protocol` `mcp.ts`, exposed to agents): recipient tools `relay_get_contract`, `relay_respond_to_contract`, `relay_await_contract`, `relay_report_progress`, `relay_report_blocker`, `relay_await_reply`, `relay_propose_subtask`, `relay_await_task`, `relay_submit_evidence`, `relay_await_verdict`; planner tools `relay_get_mission`, `relay_propose_task`, `relay_list_tasks`, `relay_revise_task`, `relay_answer_clarification`, `relay_ask_human`, `relay_await_answers`.
+- README explicitly states: "relayd is an MCP server (streamable HTTP at `/mcp`)." "The same server serves Claude Code and Codex."
+- No evidence relayd acts as an MCP *client* (i.e., it doesn't call out to other MCP servers) — it's purely the server side that Claude Code / Codex agents connect into.
+
+### 5. A2A (Agent2Agent protocol) mentions
+
+None found. Searched all source, docs, and markdown (excluding `.reference-repos` which is a vendored copy of an unrelated project, `pi-mono`) for `a2a`, `agent2agent`, `agent-to-agent` — the only hits were an accidental substring match inside a base64 SHA-512 integrity hash in `package-lock.json` (`...I9fPXU9geO9bHOt9pHHOhOkYerIMsmVaWB0rA2AI9ERh...`), not a real reference. Also searched full git log (`--all --grep`, case-insensitive) for "a2a" / "agent2agent" — zero commits. There is **no existing A2A integration, mention, or design discussion anywhere in this repository or its history.** The project's own protocol design (contracts over MCP tool calls, bearer-token task identity, JSONL event log) was built independently of, and without reference to, Google's Agent2Agent protocol.
+
+### 6. Orchestrator / worktree / delegation model
+
+Real, tested, and actively evolving (per recent commit history, all dated 2026-09-04):
+
+- **Worktrees**: `apps/relayd/src/worktree/git-worktrees.ts` — one `git worktree` + branch (`relay/<task-id>`) per task, created before the agent is spawned (since the agent's cwd is fixed at launch). Base branch merges in all `dependencies`' branches first.
+- **Orchestrator** (`apps/relayd/src/orchestrator/orchestrator.ts`): central state machine driving task/mission lifecycle, spawn gating (lint must pass, dependencies must be `completed`), contract revisions, evidence/verdict flow, and now subtask delegation.
+- **Delegation ("agent networking")**: recipients can call `relay_propose_subtask` to delegate part of their own task as a new contract where they become `sender` and `parent_task` is set to their own task id (`packages/protocol/src/contract.ts` field `parent_task`). Enforcement: subtask's `scope.allowed_paths` must be **disjoint** from the parent's (lint rule at error severity, `overlapping_scope`-style check in `orchestrator.ts` around line 450-455), and the subtask cannot depend on its own parent. Recipients also get `relay_await_task` to long-poll for a (typically child) task to reach a terminal state.
+- **Subtask → parent worktree landing** (commit `c1098e4`, `feat(orchestrator): a verified subtask lands in its parent's worktree automatically`): when a subtask is verified/completed, relayd merges the child's branch into the parent's worktree automatically (`landSubtaskInParent`), notifies the parent via a `progress_reported` event, and — critically — extends the parent's effective `allowed_paths` for its own `diff_scope` check (`viewForChecks`) to include its completed subtasks' paths, so the parent's own verification doesn't fail on the merged-in files. On merge conflict, the parent is auto-blocked (`task_blocked`, `waiting_on: 'human'`) rather than silently failing. Commit message notes this was "found live" (a real bug hit during dogfooding), suggesting it's not speculative design but a fix driven by actual runs.
+- **Delegation graph visualization**: commit `9ab2b3a` — the TUI/graph shows delegation edges with the `await_task` outcome (waiting/merged/conflict-failed-canceled), implemented in `packages/protocol/src/graph/`.
+- **Daemon restart/resume** (`apps/relayd/src/persist/restore.ts`, `workspace.ts`): relayd can restore an in-flight run on boot by rehydrating the orchestrator purely from the append-only event log plus a `workspace.json` pane tracker, then respawning agents that were alive with a runtime-specific `--resume`/`resume <id>` flag (implemented for Claude Code and Codex in `apps/relayd/src/launch`). A `RESUME_PROMPT` constant re-enters the protocol handshake (calls `relay_get_contract`, then continues from wherever the agent left off — awaiting verdict, awaiting clarification, or working). `RELAY_RESUME=latest` picks the newest recorded run; explicit `RELAY_RUN_ID` picks a specific one. This is backed by `boot.test.ts` and `restore.test.ts`.
+- **Fan-in integration**: per PRD §9, once all tasks reach `completed`, relayd builds a `relay/integration` branch, merges task branches in dependency-topological order, and runs a mission-level `integration_check` (default `npx vitest run`); conflicts produce `integration_conflict` and wait for a human.
+
+Overall this is a genuinely implemented multi-agent orchestration system with git-worktree isolation, not a stub — the delegation/merge/resume logic is recent (same day as PRD per commit timestamps — likely a compressed hackathon timeline, worth noting for maturity assessment) but functionally real and covered by tests.
+
+### 7. Explicit positioning statements
+
+From `PRD.md` §20 ("定位與 pitch lines"), explicit and pointed:
+
+> "RelayGraph 不是 chat UI、agent launcher、workflow editor、autonomous coder." (RelayGraph is NOT a chat UI, agent launcher, workflow editor, or autonomous coder.)
+> "RelayGraph 是 **coding-agent teams 的 semantic coordination and verification layer**." (RelayGraph IS a semantic coordination and verification layer for coding-agent teams.)
+> Pitch lines: "Agent frameworks manage execution. We manage understanding." / "GitHub made code collaboration explicit. RelayGraph makes agent collaboration explicit." / "Herdr shows you the process. RelayGraph shows you the handshake."
+
+From README: "Agent frameworks tell you whether an agent is running. RelayGraph tells you whether agents actually understand each other." And: "a coordination control plane that sits above coding-agent runtimes... and terminal hosts... It does not replace them."
+
+From PRD §0/§16 non-goals: explicitly not a terminal multiplexer, not a general low-code workflow builder, not a cloud scheduler/agent marketplace/production deployment system, not cross-org IAM, not aiming to support "every" agent framework (MVP = one real adapter protocol, two runtimes on the same protocol), not autonomous graph rewriting.
+
+**Self-description is consistently: a control-plane / coordination-and-verification layer for coding-agent teams within a single repo/mission**, built on MCP as the transport for agent-to-relayd tool calls, with git worktrees for isolation and an append-only event log as the sole state source. It is not described anywhere as a "protocol" in the interoperability/standards sense (no spec document independent of the code, no versioned wire-protocol negotiation, no mention of interop with other agent frameworks or with A2A) — it's positioned as a single opinionated product/tool with one frozen internal schema (`packages/protocol`) shared by its own server and UI, extensible only via two internal interface points (`AgentRuntime`, `TerminalHost`) for which runtime/host to spawn, not for interop with external agent-to-agent protocols.
+
+### Gaps / aspirational-vs-implemented flags for the critique
+
+- **`llm_judge` check kind** exists in the schema and is listed in docs, but the runner explicitly returns an unimplemented error (`'llm_judge not configured'`) — schema-complete, functionality absent.
+- **Orchestration-level repair** (re-decomposing a task via the planner after stagnation) is explicitly scoped out of the MVP per PRD §10: only the "escalate to human" and "local repair" paths are implemented; automatic re-decomposition is not.
+- **Codex as a second runtime**, **Herdr terminal host adapter**, and **Claude Code hooks for precise runtime state** are listed under PRD §16 "Nice to have," i.e., lower-confidence/partial by design intent (would need to verify current implementation state in `apps/relayd/src/launch` directly if this matters for the critique).
+- **No A2A relationship exists at all** in this codebase — any proposal framing entente/RelayGraph as "an A2A engineering-work-contract profile" is not grounded in anything present in the repository; the protocol is self-designed (MCP tool calls + bearer tokens + JSONL events), independently of Google's Agent2Agent protocol, with zero code, docs, or commit referencing A2A.
+- **Timeline compression**: PRD is dated 2026-09-04 and nearly all delegation/persistence/worktree-merge commits are also dated 2026-09-04 — this is very recent, hackathon-paced work; "recent commits" in point 6 of the task essentially means "commits from the same day as the design doc," worth flagging when assessing maturity/stability claims.
+- The system is fundamentally scoped to **single-repo, single-mission, same-machine** coordination (tmux/Herdr panes, git worktrees in one repo) — there's no mention anywhere of cross-organization, cross-repo, or cross-vendor agent interoperability, which is a core concern that a genuine A2A profile would need to address.

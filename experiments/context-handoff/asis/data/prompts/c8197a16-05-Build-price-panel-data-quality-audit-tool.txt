@@ -1,0 +1,37 @@
+Project: the A-D-Aperture "Data" repo checked out at D:\AD (Windows; use git-bash-style paths where needed). Target Python: 3.12. This is a spec-clear implementation task — build one self-contained data-quality audit tool the quant data team will use to CERTIFY that vendor daily price panels are clean.
+
+CREATE EXACTLY ONE FILE: D:\AD\scripts\audit_price_panel.py  (do not modify any other file).
+
+Purpose: given a daily OHLCV price table, run a battery of cleanliness checks and emit a machine-readable + human-readable report. Stdlib-first (csv, json, argparse, statistics, math, datetime). Parquet support optional via lazy `import pyarrow.parquet` — if the input is parquet and pyarrow is unavailable, print a clear message and exit 2.
+
+CLI:
+  python scripts/audit_price_panel.py --input <path> [--format auto|csv|parquet] [--out <dir>] [--self-test]
+
+Input schema: columns include date, a symbol column (auto-detect among: yfinance_ticker, symbol, ticker), open, high, low, close, optional adj_close, volume. Be tolerant of column order and extra columns.
+
+Checks (compute counts + up to 20 example offending rows each; group per symbol and globally):
+  HARD failures (cause exit code 1):
+   1. duplicate (date, symbol) keys
+   2. null/empty/non-numeric in any of open/high/low/close
+   3. non-positive (<=0) open/high/low/close
+   4. OHLC inconsistency: high < low; high < max(open,close); low > min(open,close); close or open outside [low,high]
+  SOFT flags (reported, do NOT fail):
+   5. non-monotonic/unsorted dates within a symbol
+   6. negative volume (hard? treat negative volume as HARD; zero volume as soft-count)
+   7. extreme 1-day close-to-close return |r|>0.50 (possible unapplied split / bad tick) — list worst 20 globally
+   8. if adj_close present: adj_close<=0 (HARD); large day-over-day (adj_close/close) ratio jumps >1% (soft flag, since we lack corporate-action data to confirm)
+   9. per-symbol coverage: first_date, last_date, bar_count, and pct_of_expected_trading_days (approx expected ≈ round(252 * (last-first).days/365)); flag symbols with <90% coverage
+Output to --out (default: a new timestamped dir under the system temp, NOT inside the repo):
+  - audit_report.json  (summary: row_count, symbol_count, date range, per-check counts, list of hard-failure check names, per-symbol coverage array)
+  - audit_summary.txt  (human summary: PASS/FAIL banner, top issues, worst-return list, low-coverage symbols)
+Behavior: deterministic, no network. For CSV, stream row-by-row so it handles 2M+ rows without loading all into memory; keep only per-symbol running aggregates + bounded example lists. Exit 0 if no HARD failures, 1 if any HARD failure, 2 on usage/format error.
+
+--self-test mode: build a tiny in-memory dataset containing KNOWN defects (a duplicate key, a high<low row, a <=0 price, a 60% jump, a coverage gap), run the auditor over it WITHOUT touching disk input, and assert that each corresponding check fires. Print "SELF-TEST PASS" and exit 0 if all expected checks caught; else print what was missed and exit 1.
+
+MANDATORY acceptance — you MUST actually run these and paste their output in your report:
+  A) python D:\AD\scripts\audit_price_panel.py --self-test     → must print SELF-TEST PASS and exit 0
+  B) python -c "import ast,io; ast.parse(io.open(r'D:/AD/scripts/audit_price_panel.py',encoding='utf-8').read()); print('AST OK')"
+  C) create a ~6-row valid CSV in the temp dir and run --input on it → must exit 0 and produce both report files (show a few lines)
+Do not run against the real 157MB panel (not present locally). Do not commit anything or create report files inside D:\AD. Only the one script file is a repo change.
+
+Invocation reminder for you (codex): run codex with `-C D:\AD -s workspace-write --skip-git-repo-check -o <resultfile>`. After codex finishes, INDEPENDENTLY re-run acceptance commands A and B yourself to confirm (do not trust codex's self-report), then report: the final path, that A/B/C passed with their actual output, and a 5-line summary of the checks implemented.

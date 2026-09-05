@@ -1,0 +1,19 @@
+Report delivered to the team lead. Summary of what I researched and concluded:
+
+**Alternative/exotic data scouting for a small US-equity quant shop** — 16 sources across all requested categories, rated by free-vs-paid and signal quality, grounded in real 2026 providers with URLs.
+
+**The actionable headline — build these free sources first** (you already have SEC/FMP plumbing that makes them cheap to integrate):
+- **PatentsView** (USPTO) — innovation/R&D factor, free API + bulk
+- **GDELT** — global news sentiment/controversy, free via BigQuery
+- **Wikipedia pageviews** — investor-attention factor, free keyless API
+- **ApeWisdom** — Reddit/WSB retail crowding, free API
+- **ImportYeti** — free US ocean bill-of-lading (supply-chain/revenue nowcast)
+- **DIY supply-chain graph** from EDGAR 10-K "significant customers" — free customer-supplier momentum spillover
+
+**Low-cost next:** Google Trends (via SerpApi/Apify), Placer.ai free foot-traffic tier, app-rank scrapes via Apify.
+
+**Aspirational paid (highest ROI when funded):** credit-card transaction panels (Facteus/Consumer Edge — reportedly ~76% market-neutral alpha, but tens-to-hundreds of $k/yr), then SimilarWeb or Sensor Tower for consumer-tech names.
+
+**The cross-cutting hard problem I flagged for every source:** entity resolution — mapping patent assignees / web domains / shipping consignees / POIs back to your ticker universe on a point-in-time basis. That's where the real engineering budget goes.
+
+The full report with all five required fields per source (what/provider+URL/cost+access/coverage+PIT caveat/priority) is in the message to the team lead.

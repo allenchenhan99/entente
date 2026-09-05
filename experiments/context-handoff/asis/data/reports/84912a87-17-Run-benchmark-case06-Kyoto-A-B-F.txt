@@ -1,0 +1,13 @@
+Committed locally (commit `950b942`), not pushed as instructed.
+
+## Case 06 report (Kyoto, 5 days, A/B/F)
+
+Ran a real TripGenie chat query (6 scrolled screenshots at `docs/experiments/trip_com_tool_benchmark_2026-09/screenshots/case06_tripgenie_1.png` through `_6.png`, all actually read/verified) and a real `build_itinerary()` harness call (`case06_traivial_harness.py` → `case06_traivial.json`, validated against `ItineraryResponse`, rendered to `screenshots/case06_traivial_render.png`, also read/verified).
+
+**Six-metric scores — both systems:** visited-leakage=0, must-visit coverage=4/4, infeasible-itinerary=0, manual-fixes-needed=0, evidence-provided=yes, UNKNOWN-honesty=yes (neither fabricated an address for the no-coordinate matcha shop; no VISITED leakage).
+
+**Key asymmetric finding (the interesting part):** Both systems ended up scheduling the Gion/Gion District duplicate only once — looked like a tie. But I traced Traivial's actual mechanism in `plan.py`: with 16 schedulable candidates against 15 slots (5 days×3), `plan_itinerary()` does a blind `candidates[:capacity]` truncation by input order, not semantic dedup. "Gion District" was dropped purely because it was 16th in my input list (confirmed by printing index positions in the harness). Swap the input order and "祇園" would've been dropped instead, or — with fewer candidates and no capacity pressure — both duplicates would've been scheduled (as case03 already showed). TripGenie, by contrast, explicitly reasoned in text that Gion and Gion District are the same place. Same superficial outcome, different reliability underneath — documented plainly, not smoothed over.
+
+Minor honest note: Traivial's caveats correctly named the dropped item ("已略過：「Gion District」"), and TripGenie explicitly excluded 貴船神社 with a stated reason — both showed good disclosure discipline.
+
+Files: `docs/experiments/trip_com_tool_benchmark_2026-09.md` (§ 案例06 appended), `docs/experiments/trip_com_tool_benchmark_2026-09/case06_traivial_harness.py`, `case06_traivial.json`, 7 screenshots. Commit hash: `950b942`.

@@ -1,0 +1,55 @@
+Excellent! Let me create a summary of the work completed:
+
+## Summary
+
+I've successfully added display for `supply_readiness` level and reasons to the combos comparison page. Here's what was implemented:
+
+### Changes Made
+
+**1. Added `supplyReadinessHTML()` function** (D:\vscode_python\unvisited\web\js\views\combos.js:425-455)
+- Displays supply readiness status with level (ready/partial/insufficient)
+- Shows specific issues when readiness is not "ready":
+  - `quote_freshness_ok === false` → "報價超過 60 分鐘或缺少時間戳"
+  - `stay_geolocation_ok === false` → "住宿所在區域未確認"
+  - `route_evidence_ok === false` → "路線規劃為估算"
+  - `date_supply_ok === false` → "日期供給不完整"
+  - `unresolved_gap_count > 0` → Shows count of schemes missing must-visit places
+- Uses appropriate CSS classes: `notice--warn` for partial, `notice--danger` for insufficient
+- Returns empty string for "ready" level (no unnecessary warnings)
+
+**2. Integrated into render flow** (D:\vscode_python\unvisited\web\js\views\combos.js:108)
+- Placed after error handling, before caveats
+- Consistent with existing data quality indicators
+
+**3. Added comprehensive test** (D:\vscode_python\unvisited\tests\test_frontend_views.py:2924-2973)
+- `test_combos_supply_readiness_shows_level_and_reasons()`
+- Verifies ready level is hidden
+- Confirms partial level shows warning with reasons
+- Validates insufficient level shows danger alert
+- Tests unresolved_gap_count display
+
+**4. Fixed existing test mock** 
+- Updated root mock in `test_combos_empty_panel_does_not_call_nonempty_candidates_no_candidate_data()` to include `querySelector` method needed by renderCombos
+
+### Current State
+
+- ✅ **Syntax check**: `node --check web/js/views/combos.js` passes
+- ✅ **Tests**: All 82 tests in test_frontend_views.py pass
+- ✅ **Implementation**: Minimal, focused, and consistent with existing patterns
+- ✅ **No new backend fields**: Uses existing `supply_readiness` data from API response
+
+### What Was Already Implemented
+
+The combos page already displayed:
+- **Staleness indicators** (line 660-665): Shows "報價擷取於 [timestamp]，已超過 60 分鐘" when quotes are stale
+- **Synthetic stay badges** (lines 594, 636, 857-867): Shows "含非真實住宿估價" and detailed notice when synthetic
+- **Evidence cards** (lines 687-733): Shows API-only, web-verified, web-mismatch, and other evidence levels
+
+### Risk Assessment
+
+**Low risk** - This change:
+- Only adds display, doesn't modify any backend logic
+- Uses existing API fields (supply_readiness) already available
+- Follows existing CSS patterns and component structure
+- Is conditional (only shows when readiness ≠ ready)
+- Has full test coverage

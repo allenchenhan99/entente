@@ -1,0 +1,12 @@
+Explore this repository (D:\vscode_python\entente), which is called "RelayGraph" or "entente". I need to understand its actual architecture and positioning to critique a proposal that frames it as an "A2A engineering-work-contract profile" (A2A = Agent2Agent protocol).
+
+Please find and summarize:
+1. Any README, docs/, or design docs describing the project's purpose, architecture, and core concepts (task contracts, clarification, evidence, verification, repair/repair loop, event log, worktrees, MCP usage).
+2. How "task contract" or similar structured task definitions are actually implemented in code (schema, fields, where defined).
+3. How verification/evidence/repair loops work concretely (not just as buzzwords) — is there real code enforcing "evidence" before merge, or is it a convention/doc-level idea?
+4. How MCP (Model Context Protocol) is used — is entente an MCP server, client, or just documented as compatible?
+5. Any existing mention of A2A (Agent2Agent protocol) in the codebase, docs, or commit history — is there already an A2A integration attempt?
+6. The orchestrator/worktree/delegation model — how subtasks, parent tasks, and multi-agent coordination actually work (recent commits mention delegation edges, subtask verification landing in parent's worktree, daemon restart/resume).
+7. Any explicit product positioning statements (is it meant to be a protocol, a tool, a framework, an app?).
+
+Report factual findings with file paths, not opinions. Keep it organized by the 7 points above. This is for a skeptical architecture critique, so flag anything that looks aspirational/doc-only versus actually implemented, and note any gaps between documentation claims and code reality.

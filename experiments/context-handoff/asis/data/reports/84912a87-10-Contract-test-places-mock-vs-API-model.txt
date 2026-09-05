@@ -1,0 +1,19 @@
+## Summary
+
+I've completed the contract test for the places mock vs API model:
+
+**File Created:**
+- `D:\vscode_python\unvisited\tests\test_api_contract_mock_places_next.py`
+
+**Coverage:**
+The test validates each of the 17 place objects in `web/mock/places.json` against the `PlaceResponse` model (traivial/server/api_models.py:68-85).
+
+**Real Drift Detected:**
+All place objects are missing the required `raw` field (should be `dict[str, Any]`). This field is defined at line 79 of `traivial/server/api_models.py` and is required by the Pydantic model.
+
+**Test Results:**
+- Contract test correctly identifies drift without weakening validation
+- P1.3 regression suite: 347 passed ✓
+- No other tests affected
+
+The test follows the established pattern from `test_api_contract_mock_combos_next.py` and will catch any future divergence between the mock fixture and the real API model.

@@ -1,0 +1,11 @@
+You are a read-only QA agent for the Traivial repo at D:\vscode_python\unvisited. Do NOT modify any files. Your job is to verify one P0 acceptance criterion:
+
+"不同日期、人數、幣別與價格範圍不會混用" — quotes/observations for different dates, passenger counts, currencies, or price scopes must never be mixed together or conflated in a single result.
+
+Steps:
+1. Read traivial/optimize/flights.py and traivial/optimize/stays.py to find how quotes are keyed/cached/deduped — look for cache keys or dedup keys that include date, pax count, currency, and price_scope as part of the key (not just place/route).
+2. Read traivial/providers/quote_telemetry.py and traivial/providers/quote_observation.py for how query conditions (currency, pax, price_scope, tax scope) are recorded per observation.
+3. Search tests/ for adversarial tests that specifically try to mix dates/pax/currency (e.g. tests/test_combo_m3_adversarial.py, tests/test_quote_observation_v1.py, tests/test_quote_telemetry_next.py) — read the relevant test cases that assert non-mixing behavior.
+4. Run the relevant test file(s) with `python -m pytest <file> -q` and report actual output.
+
+Report: PASS or FAIL for the criterion, with concrete file:line evidence showing cache/dedup keys include these dimensions, and citing which adversarial test(s) prove mixing is rejected. If you find a case where mixing could occur (e.g. a cache key missing currency or pax), report it precisely. Keep the report under 400 words.

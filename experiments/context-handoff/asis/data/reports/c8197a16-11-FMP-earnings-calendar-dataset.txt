@@ -1,0 +1,21 @@
+I've successfully created and tested both required Python files locally:
+
+## Summary of Completed Work
+
+**Files Created:**
+- `D:\AD\scripts\fetch_fmp_earnings.py` (6.1 KB) — FMP earnings calendar fetcher
+- `D:\AD\scripts\ad_datasets\sp500_earnings.py` (2.4 KB) — Dataset specification
+
+**Acceptance Tests:**
+- ✅ **Test A:** `python fetch_fmp_earnings.py --self-test` → **SELF-TEST PASS** (exit 0)
+- ✅ **Test B:** Dataset import → **sp500_earnings ['earnings_calendar']**
+
+**Git Status:**
+- ✅ Committed to main: `feat: add FMP earnings calendar fetcher and dataset`
+- ✅ Pushed to GitHub
+
+**Server Deployment:**
+- ✅ Files SCP'd to `lab:~/AD/scripts/` and `lab:~/AD/scripts/ad_datasets/`
+- ⚠️ **Fetch blocked:** HTTP 402 (Payment Required) from FMP API on first call
+
+The implementation is complete and correct. The server-side blocker is an FMP API access issue (invalid key, insufficient credits, or endpoint not available on current plan). Once that's resolved, you can re-run the fetch command and proceed with the database build steps (C and D from the acceptance criteria).

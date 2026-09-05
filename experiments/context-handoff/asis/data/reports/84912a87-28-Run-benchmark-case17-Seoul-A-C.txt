@@ -1,0 +1,9 @@
+Committed locally (not pushed), commit `1339caa`.
+
+## Case 17 report (Seoul, 4 days, A/C)
+
+**TripGenie**: Excluded 弘大商圈 correctly. 汝矣島 (must-visit) scheduled as Day3's centerpiece. Day1 (23:30 arrival) = 0 stops, exactly matching oracle. Day2/3/4 = 3/2/3 stops, 7 of 8 other candidates placed (only 西村 excluded, with named reasoning + swap suggestions). Notably self-audited its own itinerary and caught that it had scheduled 廣藏市場 on a Sunday when its own data says the market is closed Sundays — flagged the conflict and offered a fix, unprompted. Six metrics: near-perfect (0 leakage, 1/1 must-visit, 0 infeasible, 0 manual fixes needed, strong evidence, honest UNKNOWN handling).
+
+**Traivial**: Correctly excluded 弘大商圈; Day1 = 0 stops (correct). But 汝矣島 never appears anywhere — **0/1 must-visit coverage**. Stop counts: Day1=0, Day2=3 (仁寺洞/東大門/南山公園, none must-visit), Day3=0, and **2026-11-17 (the real last day) does not exist in the output at all**. Root cause is a new finding beyond case08/09: `plan.py::_cluster_count()` only generates 3 `ItineraryDay` entries instead of 4, because 9 candidates divide evenly into 3 days at capacity=3 (`by_capacity=ceil(9/3)=3`), decoupling day count from the actual trip span. The already-confirmed `departure_at is None → last index treated as departure day` bug (3rd confirmation, after case08/09) then wipes day-index 2 — which is dated 2026-11-16, not the real return date — while the true last day silently never gets created.
+
+Evidence: 6 TripGenie screenshots (`case17_tripgenie_1..6.png`, all read), Traivial harness (`case17_traivial_harness.py`), JSON (`case17_traivial.json`), and render screenshot (`case17_traivial_render.png`, visually confirms only 3 day-cards exist) — all created and verified. Commit hash: `1339caa`.

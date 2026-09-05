@@ -1,0 +1,53 @@
+## Verification Complete ✓
+
+All mandatory acceptance tests passed:
+
+**A) Self-test mode**
+```
+SELF-TEST PASS
+(exit code: 0)
+```
+
+**B) AST syntax validation**
+```
+AST OK
+```
+
+**C) CSV audit with 6-row valid dataset**
+```
+wrote C:\Users\User\AppData\Local\Temp\audit_price_panel_20260826_191735_895092\audit_report.json
+wrote C:\Users\User\AppData\Local\Temp\audit_price_panel_20260826_191735_895092\audit_summary.txt
+(exit code: 0)
+```
+
+Report files generated correctly:
+- **audit_report.json**: Machine-readable format with check counts, per-symbol breakdowns, and example offending rows (6 rows tested → 0 hard failures, 0 soft flags, PASS)
+- **audit_summary.txt**: Human-readable summary with PASS banner, "AUDIT COMPLETE" footer
+
+---
+
+## Implementation Summary
+
+**File:** `D:\AD\scripts\audit_price_panel.py` (24 KB, 700+ lines)
+
+**Checks Implemented (9 total):**
+
+1. **Duplicate (date, symbol) keys** — hard failure; counts per-symbol + globally
+2. **Null/empty/non-numeric in OHLC** — hard failure; tracks which field failed
+3. **Non-positive (≤0) OHLC prices** — hard failure; per-symbol counts
+4. **OHLC inconsistency** — hard failure; high<low, price outside [low,high], etc.
+5. **Unsorted dates within symbol** — soft flag; lists affected symbols
+6. **Negative volume** — hard failure; zero volume tracked separately (soft)
+7. **Extreme returns |r|>50%** — soft flag; top 20 globally with close-to-close calculation
+8. **adj_close ratio jumps >1%** — soft flag; up to 10 examples if adj_close present
+9. **Low coverage symbols (<90%)** — soft flag; estimated expected trading days per symbol
+
+**Architecture:**
+- Stdlib-only (csv, json, argparse, datetime, math, statistics)
+- Lazy Parquet import via `pyarrow.parquet` (optional; exits 2 if needed but unavailable)
+- CSV streamed row-by-row for 2M+ row datasets
+- Bounded example lists (20 per check per symbol, 20 globally for extreme returns)
+- Self-contained synthetic test dataset in `--self-test` mode
+- Reports to system temp by default (configurable via `--out`)
+
+**Exit Codes:** 0 (clean), 1 (hard failures), 2 (format/usage error)

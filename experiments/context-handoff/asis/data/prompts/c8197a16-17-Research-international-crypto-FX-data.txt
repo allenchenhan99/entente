@@ -1,0 +1,9 @@
+You are on the data-strategy team of A-D-Aperture, a quant research shop currently focused on US equities (data via FMP/SEC/FRED). We want to expand BEYOND US equities. Note: our FMP plan only covers US + UK + Canada prices (other markets are 402/paywalled), and FMP has no options.
+
+Your job: research data sources for NON-US and NON-EQUITY asset classes — broadly, not limited to FMP. Cover:
+1. **International equities**: Japan (esp. J-Quants — JPX official free API), Europe, HK/China, India, emerging markets. Free/cheap sources: J-Quants, Yahoo Finance (via .T/.L/.HK suffixes), Tiingo, EODHD, Stooq, Alpha Vantage, exchange official APIs. What's genuinely free and how complete (prices + fundamentals)?
+2. **Crypto**: prices (CoinGecko, exchange APIs Binance/Coinbase/Kraken, CCXT), and ON-CHAIN data (Glassnode, Dune Analytics, Nansen, blockchain explorers, Messari) — free vs paid.
+3. **FX & commodities & rates/futures**: free sources (FRED, exchange, OANDA, Yahoo, Nasdaq Data Link, EIA for energy).
+4. **Global macro** beyond FRED: World Bank, IMF, OECD, Eurostat, BIS, central-bank APIs.
+
+For EACH: (1) what + quant use; (2) provider/API + URL; (3) **FREE vs paid** + access difficulty (key/registration/rate limits); (4) coverage/history/quality + PIT caveat; (5) blunt priority (High/Med/Low) for a small shop. Highlight the best FREE path for Japan equities specifically (the user has a personal interest), and the best free crypto+on-chain path. Use web search to ground every source in a REAL URL (2026). Concise, structured table/bullets, ~1 page, actionable. Your FINAL MESSAGE is your full self-contained report with sources (synthesized by the lead).

@@ -1,0 +1,13 @@
+Report delivered to the team lead. Summary of what I researched and concluded:
+
+**The four free wins worth prioritizing for a small shop:**
+1. **J-Quants** — JPX's own official API for Japan equities. The standout: prices + fundamentals + short interest + futures/options, PIT-clean. Free tier gives 2yr history on a 12-week delay (fine for factor research); ¥1,650/mo (~$11) kills the delay. Nothing in other markets matches an exchange-official fundamentals API this cheap.
+2. **CCXT + native exchange APIs** — free, keyless tradable crypto OHLCV/depth from Binance/Kraken/Coinbase; CoinGecko Demo (free) for market-cap universe.
+3. **Dune** — the free on-chain path; API on every tier including free. (Glassnode's API is effectively $999/mo — avoid until a factor proves out on Dune.)
+4. **DBnomics** — one keyless API fronting BIS/ECB/Eurostat/IMF/OECD/World Bank/BEA/Japan ESRI; replaces N provider integrations.
+
+**Fill-ins:** Yahoo/yfinance (broad intl via suffixes, but prototype-only — no survivorship/PIT guarantees), Stooq (free bulk EOD backup), jugaad-data (free India bhavcopy), EIA+FRED (energy/FX/rates), EODHD $20–100/mo when scaling to full global coverage.
+
+**Traps I flagged for the team:** Yahoo has no PIT/survivorship guarantees; all macro needs vintage/ALFRED handling for honest backtests; FMP is already dead outside US/UK/CA so don't design around it internationally.
+
+Every source is grounded in a real 2026 URL, and I confirmed the J-Quants tier pricing directly from their pricing page.

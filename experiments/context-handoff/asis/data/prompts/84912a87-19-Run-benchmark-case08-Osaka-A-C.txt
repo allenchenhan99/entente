@@ -1,0 +1,68 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology notes and case01-07 for exact format): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06/case07's writeups are good templates for concise-but-rigorous format.
+
+## Your assigned case: Case 08
+
+**City**: Osaka. **Days**: 4 (dates 2026-11-14 to 2026-11-17).
+**Categories**: A (already-visited exclusion), C (arrival-day time constraint — arrival is so late it nearly consumes the whole first day).
+**Already visited (VISITED, exclude)**: 通天閣 (Tsutenkaku Tower).
+**Arrival constraint**: flight arrives 20:00 on day 1 (2026-11-14) — almost nothing should be scheduled that day given how late it is.
+**Must-visit**: 環球影城 (Universal Studios Japan / USJ).
+**Other candidates (9)**: 大阪城, 道頓堀, 黑門市場, 心齋橋, 梅田藍天大廈, 四天王寺, 新世界, 中之島公園, 阿倍野HARUKAS展望台.
+**Daily capacity**: 3/day. **Party**: 2 adults. No departure-time constraint this case (only arrival is tested).
+
+## Oracle (write down before testing)
+- 通天閣 must NOT appear in either output.
+- 環球影城 must appear if feasible.
+- Day 1 (arrival day, 20:00 landing) should have 0 or at most 1 very-nearby/low-effort stop — a full 3-stop day 1 would be a real feasibility violation worth flagging.
+- No day should exceed 3 stops.
+
+## Steps (reuse established method from prior cases)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (use `depth: 6` targeted snapshot to find the launcher ref, not full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 3, "我已經去過通天閣（有明確入內紀錄）請不要排進行程", "第一天晚上20:00才抵達大阪，幾乎沒有時間安排行程", must-visit 環球影城, the other 9 candidates, ask for day-by-day with reasons.
+- Wait ~25s, check scroll container's scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot `#tripgenie-content` scrolled to cover full response as `screenshots/case08_tripgenie_1.png`, `_2.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness)
+- Template: `case01_traivial_harness.py` (plain build_itinerary) combined with `case02_traivial_harness.py`'s pattern for the arrival-only live-constraint (use `apply_live_constraints` with `outbound_arrival="20:00"` on the FlightQuote, but do NOT set `return_departure` — leave it None/unset since there's no departure constraint this case; check case02's harness for exact FixtureRouteProvider/FixtureHoursProvider pattern, no live queries).
+- Real approximate Osaka coordinates for all places (Tsutenkaku ~34.6524,135.5063, USJ ~34.6654,135.4323, Osaka Castle ~34.6873,135.5262, etc — use your own knowledge for the rest).
+- VISITED verdict for 通天閣 with real evidence fields (dwell/distance/dates/matched_segment_ids), UNVISITED for the rest.
+- `max_stops_per_day=3`, `plan_mode="schedule"`. Remember: `build_itinerary()` requires `day.area_lat`/`area_lng` set on each ItineraryDay before calling `apply_live_constraints`, or every day gets wiped immediately (see case02_traivial_harness.py for the fix — set them via `replace()` on the itinerary's days after build_itinerary, before apply_live_constraints).
+- Validate against `ItineraryResponse`, write `case08_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case08_traivial_harness.py`, capture real output — specifically report Day 1's actual stop count.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if not already), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case08_traivial.json`, screenshot to `screenshots/case08_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例08（大阪，4天，情境A/C）` to the benchmark .md, concise bullet format like case06/07: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. Be honest about Day 1 stop counts on both sides — this case is specifically testing whether either system over-packs a nearly-impossible arrival day.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, the key finding about arrival-day handling, confirmation screenshots/harness were actually created and read, commit hash.

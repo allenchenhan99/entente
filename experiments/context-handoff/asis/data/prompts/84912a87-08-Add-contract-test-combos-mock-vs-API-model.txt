@@ -1,0 +1,12 @@
+Repo: D:\vscode_python\unvisited (Traivial). You may ONLY add a new test file under tests/ (e.g. tests/test_api_contract_mock_combos_next.py). Do NOT modify any file under traivial/ or web/ — this is a read-only-of-production-code, test-only task.
+
+This is P1 item 5 from docs/PRODUCT_COMPLETION_PLAN.md ("API 契約機械化"): "把 web/mock/*.json 納入契約測試...確保 mock fixture 與真實 presenter 不會欄位分岔". First slice: the combos endpoint.
+
+Steps:
+1. First check if a contract test already covers this (search tests/ for existing tests that load web/mock/combos.json and validate it against a Pydantic response model — grep for "mock/combos.json" or "CombosResponse" in tests/). If a test already does this exact thing, report that and stop — do not duplicate.
+2. If not already covered: read web/mock/combos.json to see its shape, and read traivial/server/api_models.py to find the Pydantic model(s) that represent the real `/api/combos` response (likely `CombosResponse` or similar — grep for "combos" in api_models.py).
+3. Write a new pytest test that loads web/mock/combos.json and validates it parses successfully against the real response Pydantic model(s) (e.g. `CombosResponse.model_validate(mock_data)` or per-item validation if the mock is a list/partial shape used differently by the frontend — inspect web/js/api.js's mock-mode handling briefly to understand exactly what shape the frontend expects from the mock file, so your test validates the actually-relevant shape, not an assumption).
+4. If the mock file's shape genuinely doesn't match the real model (this would reveal a real drift bug), do not force it to pass — write the test to accurately assert reality, and report the drift clearly as a finding rather than papering over it with a weakened test.
+5. Run `python -m pytest <your_new_test_file> -q` and paste actual output. Also run `.\scripts\test.ps1 -Tier p1_3 -q` (PowerShell) or equivalent to confirm no regression, and paste that output too.
+
+Report: whether this was already covered, what you added, actual test output, and whether you found any real mock/model drift (a genuine finding, not to be silently fixed by you — just report it precisely with file:line).

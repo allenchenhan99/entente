@@ -1,0 +1,30 @@
+Project: A-D-Aperture "Data" repo at D:\AD (Windows). A remote lab server is reachable via `ssh lab` (SSH config already set up: user user317, host 140.113.135.111). The operational copy of the repo is at `lab:~/AD`. Python 3.12 both sides. This task is spec-clear end-to-end: add a FRED macro dataset to the server database.
+
+CONTEXT you can rely on:
+- `D:\AD\scripts\fetch_fred.py` ALREADY EXISTS (a keyless FRED fetcher). Read it. It writes two CSVs into its --out dir:
+  - `fred_observations.csv` with header: series_id,date,value
+  - `fred_series.csv` with header: series_id,category,description
+- The DB engine: `~/AD/scripts/manage_db.py` (subcommands: build NAME, verify, list, info) and `~/AD/scripts/ad_db.py` (dataclasses Column, Table, View, Dataset; Column(name, sql_type, coerce=..., nullable=..., from_csv=..., pk=...); coerce in {"text","int","real","bool"}). Datasets auto-discover from `~/AD/scripts/ad_datasets/*.py`.
+- Template to COPY conventions from: `D:\AD\scripts\ad_datasets\sp500_corporate_actions.py` (surrogate id pk via Column("id","INTEGER", from_csv=False, pk=True); indexes; source_file paths relative to data/; DATASET object). FRED needs NO API key (do not use Infisical).
+
+STEP 1 — create `D:\AD\scripts\ad_datasets\macro_fred.py`: Dataset name `macro_fred`, title "US macro series (FRED)", source "FRED (Federal Reserve Bank of St. Louis)", version "2026-08-27", TWO tables:
+  - `observations` src "fred/fred_observations.csv"; columns after surrogate id: series_id (TEXT), date (TEXT), value (REAL coerce="real"); indexes ("series_id",), ("date",), ("series_id","date").
+  - `series_meta` src "fred/fred_series.csv"; columns after id: series_id (TEXT), category (TEXT), description (TEXT); index ("series_id",).
+  Add a View `v_series_coverage` using {observations} placeholder: per series_id, MIN(date), MAX(date), COUNT(*). Docstring: FRED is first-hand macro (keyless fredgraph.csv); note this REPLACES the sparse `us_macro` FMP snapshot for real history.
+
+STEP 2 — deploy to server:
+  `scp D:\AD\scripts\fetch_fred.py lab:~/AD/scripts/fetch_fred.py`
+  `scp D:\AD\scripts\ad_datasets\macro_fred.py lab:~/AD/scripts/ad_datasets/macro_fred.py`
+
+STEP 3 — fetch on server (keyless, ~30s):
+  `ssh lab "cd ~/AD && python3 scripts/fetch_fred.py --out data/fred --start 2010-01-01"`
+
+STEP 4 — build + verify on server:
+  `ssh lab "cd ~/AD && python3 scripts/manage_db.py --db ad.sqlite build macro_fred && python3 scripts/manage_db.py --db ad.sqlite verify | tail -5"`
+
+MANDATORY acceptance — the run PASSES only if ALL hold; run them and paste real output:
+  A) local: `python -c "import sys; sys.path.insert(0,r'D:/AD/scripts'); import ad_datasets.macro_fred as m; print(m.DATASET.name, [t.name for t in m.DATASET.tables])"` prints `macro_fred ['observations', 'series_meta']`
+  B) server build output shows `observations` table with rows > 10000 and status OK, and final verify prints `all tables consistent with catalog.`
+  C) `ssh lab "cd ~/AD && python3 scripts/manage_db.py --db ad.sqlite query \"SELECT COUNT(DISTINCT series_id) s, COUNT(*) n FROM macro_fred__observations\""` shows s>=25.
+
+Boundaries: create only the one new file `macro_fred.py` locally (plus the scp/ssh actions above); modify no other local file. Do NOT touch other datasets or the DB beyond building `macro_fred`. If `ssh lab` fails, report the exact error instead of guessing. After finishing, INDEPENDENTLY re-run acceptance A/B/C yourself and report actual output + whether macro_fred is built and verified on the server.

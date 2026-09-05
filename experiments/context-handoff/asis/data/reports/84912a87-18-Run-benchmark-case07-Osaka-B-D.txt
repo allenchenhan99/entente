@@ -1,0 +1,13 @@
+Committed locally as `c5ccb06` (not pushed, per instructions).
+
+**Case 07 (Osaka, 3 days, B/D) complete.** Real TripGenie query at tw.trip.com (5 screenshots, all read/verified) + real `build_itinerary()` harness (validated against `ItineraryResponse`, rendered visually via `render_traivial_case.html`, screenshot read/verified).
+
+**Deviation noted**: assignment text said "9 other candidates" but listed 10 names — used all 10 as given (12 total candidates vs 9 slots, not "11 vs 9"), recorded honestly per prior-case precedent.
+
+**Six-metric scores**: both hit 2/2 must-visit coverage, 0 infeasible days, N/A on visited-leakage/UNKNOWN (no VISITED items this case). Evidence: TripGenie gave a rich 4-tier disclosed trade-off logic (must-visit priority → dedup → geo-clustering → first-visit representativeness), explicitly named and reasoned about dropped candidates (Sayama-ike Museum, USJ), and even offered a conditional alternate itinerary. Traivial's caveat named the 3 dropped candidates but gave zero reasoning for why those three.
+
+**Key finding**: confirmed for the third time (after case02, case05) that Traivial's capacity cutoff (`candidates[:capacity]` in `plan.py`) is pure input-order truncation with no `must_visit` concept anywhere in the scheduler (verified by grep). Both must-visit places survived only because the harness author happened to list them first — reorder the input and they'd be silently dropped with no protection.
+
+**TripGenie flaw found**: its own concrete day-by-day draft contradicts its final "core list" recommendation — Umeda Sky Building is named as a priority-keep but never actually scheduled into any day, while Nakanoshima Park is scheduled but excluded from the final core list. Recorded honestly as a genuine inconsistency.
+
+Files: `docs/experiments/trip_com_tool_benchmark_2026-09.md`, `case07_traivial_harness.py`, `case07_traivial.json`, `screenshots/case07_tripgenie_{1..5}.png`, `screenshots/case07_traivial_render.png`.

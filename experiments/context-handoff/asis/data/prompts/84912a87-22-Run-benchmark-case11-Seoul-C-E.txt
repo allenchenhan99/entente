@@ -1,0 +1,74 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-10 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-10 writeups are good templates for concise-but-rigorous format. IMPORTANT CONTEXT: cases 08/09 found a real systemic bug in `traivial/itinerary/live_constraints.py` — leaving arrival OR departure time unset silently wipes that whole boundary day (treated as "flight evidence missing"). This case DOES have both an arrival and departure constraint (both very tight — arrival 22:00, departure 09:00), so set BOTH `outbound_arrival` and `return_departure` on the FlightQuote deliberately this time — that's the correct, intended test, not the bug.
+
+## Your assigned case: Case 11
+
+**City**: Seoul. **Days**: 3 (dates 2026-11-14 to 2026-11-16).
+**Categories**: C (both arrival AND departure clock constraints, both extremely tight), E (stay area fixed to Hongdae/弘大).
+**Arrival constraint**: flight arrives 22:00 on day 1 (2026-11-14) — essentially no time for anything that day.
+**Departure constraint**: flight departs 09:00 on day 3 (2026-11-16) — essentially no time that day either.
+**Stay area**: 弘大 (Hongdae), fixed for the whole trip.
+**Must-visit**: 東大門 (Dongdaemun).
+**Other candidates (7)**: 明洞, 梨泰院, 南山公園, 仁寺洞, 汝矣島, 益善洞韓屋街, 廣藏市場.
+**Daily capacity**: 3/day. **Party**: 2 adults.
+
+This case is essentially testing: with only 1 real full day (day 2) out of 3, can each system produce an honest, non-overpacked itinerary rather than pretending day 1 or day 3 have real capacity?
+
+## Oracle (write down before testing)
+- 東大門 must appear if feasible (it should be — day 2 is fully open).
+- Day 1 (22:00 arrival) should have 0 stops — nothing is reasonably schedulable that late.
+- Day 3 (09:00 departure) should have 0 stops — nothing fits before a 9am flight.
+- Day 2 should carry the real weight of the trip, up to 3 stops.
+- Stay area should be Hongdae throughout.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for the launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 3, "住宿請安排在弘大", "第一天晚上22:00才抵達首爾，幾乎沒有時間安排行程", "最後一天早上09:00班機，幾乎沒有時間安排行程", must-visit 東大門, other 7 candidates, ask for day-by-day with reasons and explicitly ask how it handles two nearly-impossible boundary days in a 3-day trip.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case11_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — build_itinerary + apply_live_constraints with BOTH arrival and departure set)
+- Template: case02/05's harness pattern (both arrival and departure clocks set, FixtureRouteProvider/FixtureHoursProvider synthetic, no live queries).
+- Real approximate Seoul coordinates (Hongdae ~37.5563,126.9236, Dongdaemun ~37.5663,127.0092, etc).
+- All UNVISITED verdicts (no VISITED items this case).
+- base_area="首爾 弘大" on ComboOption; FlightQuote with `outbound_arrival="22:00"`, `return_departure="09:00"`, correct depart/return dates.
+- After build_itinerary, set `area_lat`/`area_lng` to real Hongdae coordinates on every ItineraryDay via replace() before calling apply_live_constraints (required, see case02/05/09 harnesses).
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case11_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case11_traivial_harness.py`, capture real output — report Day1/Day2/Day3 stop counts explicitly, and whether 東大門 survived.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case11_traivial.json`, screenshot to `screenshots/case11_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例11（首爾，3天，情境C/E）` to the benchmark .md, concise bullet format matching case06-10: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. This time BOTH arrival and departure are explicitly set (the correct use of the constraint system, not the case08/09 bug) — if Day1 and Day3 correctly come out empty and 東大門 survives on Day2, that's a GOOD result for Traivial, report it as such honestly; don't force a negative finding if the system behaves correctly here.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, Day1/2/3 stop counts for Traivial specifically, whether this confirms correct behavior when both clocks ARE set (contrast with cases 08/09 where one was left unset), confirmation screenshots/harness were actually created and read, commit hash.

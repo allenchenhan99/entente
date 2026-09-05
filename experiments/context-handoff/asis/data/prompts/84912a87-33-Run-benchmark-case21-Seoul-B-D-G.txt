@@ -1,0 +1,67 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-20 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-20 writeups are good templates for concise-but-rigorous format. This case has NO arrival/departure clock constraints — use plain `build_itinerary()` only, do NOT call `apply_live_constraints()`.
+
+## Your assigned case: Case 21
+
+**City**: Seoul. **Days**: 5 (dates 2026-11-14 to 2026-11-18).
+**Categories**: B (many candidates vs days — real scarcity pressure), D (daily capacity 3/day), G (passed-by-only place, should remain schedulable).
+**Passed-by (PASSED_BY, must remain schedulable)**: 仁寺洞 (Insadong) — describe as: your track only shows you passing through during a subway transfer walk, no real stop anywhere, not counted as visited, still want to go properly this time.
+**Must-visit (4)**: 東大門, 弘大, 益善洞韓屋街, 廣藏市場.
+**Other candidates (12, deliberately more than remaining slots to force real B-pressure)**: 景福宮, 明洞, 梨泰院, 南山公園, 汝矣島, 樂天世界塔, 西村, 新沙洞林蔭道, 首爾路7017, 北村韓屋村, 望遠市場, 南山谷韓屋村.
+**Daily capacity**: 3/day. **Party**: 2 adults.
+
+## Oracle (write down before testing)
+- 仁寺洞 must NOT be excluded as if visited — must remain schedulable (G test).
+- All 4 must-visit should appear if feasible — but per the established pattern (cases 06-20 repeatedly losing must-visit under any real pressure), do NOT assume, check carefully.
+- 5 days × 3 = 15 slots; total schedulable = 4 must-visit + 仁寺洞(passed-by) + 12 others = 17 candidates vs 15 slots — real scarcity, at least 2 should be honestly dropped.
+- No day should exceed 3 stops.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 3, describe 仁寺洞 exactly as above (只是轉乘途中經過，沒有明確停留，不算去過，還是想去), must-visit 東大門/弘大/益善洞韓屋街/廣藏市場, other 12 candidates, ask for day-by-day with reasons and how it decides what to drop given the list won't all fit.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case21_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — plain build_itinerary, no live constraints)
+- Template: case04's PASSED_BY pattern combined with case07/16's scarcity pattern.
+- Real approximate Seoul coordinates (reuse from case10/11/12/17 harnesses: Insadong ~37.5717,126.9857, Dongdaemun ~37.5663,127.0092, Hongdae ~37.5563,126.9236, Gyeongbokgung ~37.5796,126.9770, Myeongdong ~37.5636,126.9850, Itaewon ~37.5347,126.9947, Namsan Park ~37.5512,126.9882, Yeouido ~37.5219,126.9245, Bukchon ~37.5826,126.9832, Mangwon Market ~37.5563,126.9106).
+- 仁寺洞: `VisitStatus.PASSED_BY`, sparse dwell evidence, matched_segment_ids=[].
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case21_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case21_traivial_harness.py`, capture real output — report whether 仁寺洞 got scheduled, which of the 4 must-visit survived, which candidates got dropped and whether disclosed, `len(result["days"])` vs expected 5.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case21_traivial.json`, screenshot to `screenshots/case21_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例21（首爾，5天，情境B/D/G）` to the benchmark .md, concise bullet format matching case06-20: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, must-visit coverage count, G-handling of 仁寺洞, confirmation screenshots/harness were actually created and read, commit hash.

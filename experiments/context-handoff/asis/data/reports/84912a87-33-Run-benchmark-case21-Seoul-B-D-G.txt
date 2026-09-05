@@ -1,0 +1,20 @@
+Committed locally as `8dbfb2b` (not pushed, per instructions).
+
+## Case 21 report (Seoul, 5 days, B/D/G)
+
+Both systems handled the G test correctly: 仁寺洞/Insadong (PASSED_BY, subway-transfer walk-through only) was recognized by both as "not actually visited" and kept schedulable — TripGenie via explicit stated reasoning in chat, Traivial via `VisitStatus.PASSED_BY` + `_is_unfinished_or_stale()`, with the presenter confirming `visit_evidence_kind=path_dwell`/`needs_confirmation=True` as a structured signal TripGenie's plain text lacks.
+
+Must-visit coverage: 4/4 for both systems.
+
+Scarcity (17 candidates vs 15 slots): both honestly dropped candidates rather than silently losing must-visit items. Traivial scheduled 15/17 (88.2%), TripGenie 13/17 (76.5%) — but tracing `plan.py` confirms Traivial's higher number is pure artifact of `candidates[:capacity]` input-order truncation (harness author put must-visit + Insadong first), not any real prioritization logic — consistent with the case07/16 finding, stated explicitly in the writeup rather than credited as a win. TripGenie showed genuine semantic tradeoff reasoning for each of its 4 drops, but also added one uninstructed extra place (N Seoul Tower) not in the given candidate list — a minor deviation worth noting.
+
+No day exceeded 3 stops on either side. Both disclosed evidence/reasons per stop and per drop.
+
+Evidence created and verified by reading each file:
+- `docs/experiments/trip_com_tool_benchmark_2026-09/case21_traivial_harness.py` (ran successfully, output captured)
+- `docs/experiments/trip_com_tool_benchmark_2026-09/case21_traivial.json` (validated against `ItineraryResponse`)
+- `screenshots/case21_tripgenie_1.png` through `_5.png` (read and confirmed content)
+- `screenshots/case21_traivial_render.png` (read and confirmed content)
+- Markdown section appended to `docs/experiments/trip_com_tool_benchmark_2026-09.md`
+
+Commit hash: `8dbfb2b` (local only, not pushed).

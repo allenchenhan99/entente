@@ -1,0 +1,13 @@
+Committed locally as `b779e42` (not pushed, per instructions).
+
+**Case 09 (Osaka, 4 days, E/G) — done.**
+
+Both systems handled the core oracle correctly: Shinsaibashi (G test — 6-min pause outside one store, not a real visit) stayed schedulable on both sides, Kuromon Market (must-visit) was covered by both, hotel/base stayed in Namba, and neither scheduled anything past 12:00 on day 4.
+
+**Six-metric scores:**
+- TripGenie: 0 leakage(n/a), coverage 1/1, 0 infeasible, 0 manual fixes, rich evidence (per-stop reasons + explicit exclusion reasons for Umeda Sky/Nakanoshima + airport transfer time estimates), honest UNKNOWN (hours subject to official confirmation). Day 4: 1 light stop (Osaka Castle, 08:30) ending well before noon.
+- Traivial: 0 leakage(n/a), coverage 1/1 (Kuromon got lucky, landed on unaffected Day 2), Day 4 = 0 stops (even cleaner match to oracle than TripGenie), but **1 real infeasibility-adjacent defect**, ≥1 manual fix needed, partial evidence, UNKNOWN-handling over-conservative.
+
+**Key finding**: Running the real harness (not just reading code) confirmed Day 1 was entirely wiped. Root cause: leaving `outbound_arrival` unset (correct per this case's spec — no arrival constraint) makes `is_arrival_day = (arrival_at is None and index==0)` true, and `_constrain_day()` then blanks day 1 with "arrival-day flight evidence missing." This silently dropped Universal Studios Japan and Abeno Harukas (never named in caveats — only the day-level note). This is the exact mirror of case08's departure-day bug, now confirmed on the arrival side too, indicating a systemic design flaw in `live_constraints.py`'s `is_arrival_day`/`is_departure_day` defaults rather than a one-off.
+
+Screenshots (6 TripGenie panels + 1 Traivial render) were read and verified; harness output (`case09_traivial.json`) validated against `ItineraryResponse`. Files: `docs/experiments/trip_com_tool_benchmark_2026-09.md` (case09 section appended), `docs/experiments/trip_com_tool_benchmark_2026-09/case09_traivial_harness.py`, `case09_traivial.json`, `screenshots/case09_tripgenie_{1..6}.png`, `screenshots/case09_traivial_render.png`.

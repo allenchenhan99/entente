@@ -1,0 +1,68 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-11 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-11 writeups are good templates for concise-but-rigorous format. This case has NO arrival/departure clock constraints — use plain `build_itinerary()` only (like case01/03/06/07/10), do NOT call `apply_live_constraints()`.
+
+## Your assigned case: Case 12
+
+**City**: Seoul. **Days**: 4 (dates 2026-11-14 to 2026-11-17).
+**Categories**: F (bilingual/duplicate place name), G (passed-by-only place that should remain schedulable, not treated as visited).
+**Passed-by (PASSED_BY, must remain schedulable)**: 梨泰院 (Itaewon) — describe as: phone location track has only sparse, scattered points passing through the area, not a real concentrated stay anywhere specific — you're not sure if you actually "visited" it and still want to go.
+**Must-visit (3)**: 南山公園 (Namsan Park), 弘大 (Hongdae), 廣藏市場 (Gwangjang Market).
+**Duplicate test**: include both "南山公園" and "Namsan Park" as separate-looking candidate entries in your prompt (same real place, two names) — see whether TripGenie recognizes and merges them, and confirm (per case03/06's established finding) that Traivial's `build_itinerary()` schedules both as separate stops if given as separate Place objects with the same coordinates but different ids (no scheduler-level dedup).
+**Other candidates (6)**: 東大門, 仁寺洞, 益善洞韓屋街, 汝矣島, 樂天世界塔, 西村.
+**Daily capacity**: 3/day. **Party**: 2 adults.
+
+## Oracle (write down before testing)
+- 梨泰院 must NOT be excluded as if already-visited — must remain a real schedulable candidate (G test).
+- 南山公園/Namsan Park duplicate should ideally be recognized as one place by a good system, but per established Traivial behavior, expect it to schedule both separately unless capacity pressure forces a drop (case06 found capacity-driven truncation is what actually removes duplicates in Traivial, not semantic dedup).
+- All 3 must-visit places should appear if feasible (given the pattern found in cases 06/07/08/09/11, do NOT assume they will — check).
+- No day should exceed 3 stops.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 3, describe 梨泰院 exactly as above (軌跡點稀疏分散，不算明確定點停留，不確定算不算去過，還是想去), must-visit 南山公園/Namsan Park/弘大/廣藏市場 (list 南山公園 and "Namsan Park" as if separate items — see if it notices), other 6 candidates, ask for day-by-day with reasons and explicitly ask how it handles 梨泰院's ambiguous status and whether 南山公園/Namsan Park are the same place.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case12_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — plain build_itinerary, no live constraints)
+- Template: case03/04's pattern combined (PASSED_BY verdict for 梨泰院 like case04's 祇園; duplicate Place pair for 南山公園/Namsan Park like case03/06's duplicate pattern, same coordinates different ids).
+- Real approximate Seoul coordinates (Namsan Park ~37.5512,126.9882, Hongdae ~37.5563,126.9236, Gwangjang Market ~37.5703,126.9995, Itaewon ~37.5347,126.9947, etc).
+- 梨泰院: `VisitStatus.PASSED_BY`, evidence with sparse/scattered dwell, matched_segment_ids=[].
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case12_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case12_traivial_harness.py`, capture real output — report whether 梨泰院 got scheduled, whether both Namsan duplicates got scheduled or one got truncated, and which 3 must-visit places survived.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case12_traivial.json`, screenshot to `screenshots/case12_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例12（首爾，4天，情境F/G）` to the benchmark .md, concise bullet format matching case06-11: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. Be honest about must-visit coverage either way — if the pattern from cases 06-11 holds and Traivial drops a must-visit again, say so plainly; if this case happens to be clean, say that too.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, key finding on G-handling (梨泰院) and F-handling (Namsan duplicate), must-visit coverage count, confirmation screenshots/harness were actually created and read, commit hash.
