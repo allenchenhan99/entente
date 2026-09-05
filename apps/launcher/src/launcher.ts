@@ -168,7 +168,8 @@ export function parseArgs(argv: string[], cwd: string = process.cwd()): ParsedAr
   if (tui !== undefined && !TUIS.includes(tui as LauncherTui)) {
     throw new UsageError(`--tui must be one of ${TUIS.join('|')}, got ${tui}`);
   }
-  const repo = path.resolve(cwd, parsed.values.repo ?? '.');
+  // `~` is the shell's to expand, and a path typed into the TUI never went through one.
+  const repo = path.resolve(cwd, expandHome(parsed.values.repo ?? '.'));
   const explicitDir = parsed.values.dir === undefined ? undefined : path.resolve(cwd, parsed.values.dir);
 
   return {
@@ -475,23 +476,39 @@ export function resolveTerminalBase(
  * same repo, then prints `{"url":…,"token":…,"repo":…,"port":N}` for whatever asked.
  */
 async function daemon(options: LauncherOptions, deps: LauncherDependencies): Promise<number> {
+  // A repo that is not there is a typo, not a project. relayd would happily make the directory and
+  // serve it, leaving a daemon and an empty `.relay` somewhere nobody meant to put one.
+  if (!deps.fs.existsSync(options.repo)) {
+    throw new LauncherError(`no such directory: ${options.repo}`);
+  }
   const base = resolveTerminalBase(options, deps);
-  for (let port = options.port; port < options.port + DAEMON_PORT_SPAN; port += 1) {
-    const url = baseUrl(port);
-    const health = await checkHealth(url, deps);
-    if (health.healthy) {
-      // Already a relayd here. Ours only if it is serving this repo; someone else's project otherwise.
-      // A daemon too old to report its repo cannot be told apart, and taking it would be the token
-      // clobber this whole dance exists to avoid — so it is left alone.
-      if (health.repo === undefined || !samePath(health.repo, options.repo)) continue;
+  // Look from the default port first, then from the requested one. Searching only upward from
+  // whatever port was asked for walks straight past a daemon already serving this repo lower down,
+  // and starting a rival is how both of them end up overwriting the same `session.token` — which
+  // locks out whichever clients were already connected.
+  const ports: number[] = [];
+  for (const from of [DEFAULT_PORT, options.port]) {
+    for (let port = from; port < from + DAEMON_PORT_SPAN; port += 1) {
+      if (!ports.includes(port)) ports.push(port);
+    }
+  }
+  // A port that is free is only worth taking once every existing daemon has been ruled out.
+  let firstFree: number | undefined;
+  for (const port of ports) {
+    const health = await checkHealth(baseUrl(port), deps);
+    if (health.healthy && health.repo !== undefined && samePath(health.repo, options.repo)) {
       const token = await readToken(options.relayDir, deps);
-      deps.stdout(JSON.stringify({ url, token, repo: options.repo, port, started: false }));
+      deps.stdout(JSON.stringify({ url: baseUrl(port), token, repo: options.repo, port, started: false }));
       return 0;
     }
-    // Something that is not relayd. Not ours to take, and not ours to kill.
-    if (health.responded) continue;
+    if (!health.healthy && !health.responded && firstFree === undefined && port >= options.port) {
+      firstFree = port;
+    }
+  }
+  if (firstFree !== undefined) {
     if (options.noSpawn) throw new LauncherError('relayd is not running; remove --no-spawn to start it');
-    spawnRelayd({ ...options, port, host: base.host, termd: base.termd, workspaceRoot: deps.workspaceRoot }, deps);
+    const url = baseUrl(firstFree);
+    spawnRelayd({ ...options, port: firstFree, host: base.host, termd: base.termd, workspaceRoot: deps.workspaceRoot }, deps);
     try {
       await waitForHealth(url, deps);
     } catch (error) {
@@ -501,7 +518,7 @@ async function daemon(options: LauncherOptions, deps: LauncherDependencies): Pro
       );
     }
     const token = await readToken(options.relayDir, deps);
-    deps.stdout(JSON.stringify({ url, token, repo: options.repo, port, started: true }));
+    deps.stdout(JSON.stringify({ url, token, repo: options.repo, port: firstFree, started: true }));
     return 0;
   }
   throw new LauncherError(
@@ -510,6 +527,14 @@ async function daemon(options: LauncherOptions, deps: LauncherDependencies): Pro
 }
 
 const samePath = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
+
+/** `~` and `~/…` against HOME; anything else untouched. */
+export function expandHome(input: string, home: string | undefined = process.env.HOME): string {
+  if (home === undefined || home === '') return input;
+  if (input === '~') return home;
+  if (input.startsWith('~/')) return path.join(home, input.slice(2));
+  return input;
+}
 
 async function up(options: LauncherOptions, deps: LauncherDependencies): Promise<number> {
   const base = resolveTerminalBase(options, deps);

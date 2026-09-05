@@ -6,7 +6,7 @@ import path from 'node:path';
 import { DEFAULT_PORT } from '@relay/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { parseArgs, runLauncher, runTui, type ChildProcessLike, type SpawnFunction } from './launcher.js';
+import { expandHome, parseArgs, runLauncher, runTui, type ChildProcessLike, type SpawnFunction } from './launcher.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -572,7 +572,9 @@ describe('entente daemon', () => {
     const out: string[] = [];
 
     const code = await runLauncher(['daemon', '--repo', repo, '--port', '7460'], {
-      fetch: vi.fn(async () => health(repo)) as unknown as typeof globalThis.fetch,
+      fetch: vi.fn(async (url: string) =>
+        String(url).includes('7460') ? health(repo) : Promise.reject(new Error('ECONNREFUSED')),
+      ) as unknown as typeof globalThis.fetch,
       spawn: spawn as unknown as SpawnFunction,
       fs,
       stdout: (line: string) => out.push(line),
@@ -617,22 +619,81 @@ describe('entente daemon', () => {
     fs.writeFileSync(path.join(relayDir, 'session.token'), 'tok-mine\n');
     const out: string[] = [];
     const child = childProcess(7461);
-    let asked = 0;
+    const started = new Set<string>();
 
     const code = await runLauncher(['daemon', '--repo', repo, '--port', '7460'], {
       fetch: vi.fn(async (url: string) => {
-        asked += 1;
         // No `repo` field at all: it cannot be told apart, and taking it would be the token clobber
         // this whole dance exists to avoid.
         if (String(url).includes('7460')) return health(undefined);
-        return asked > 2 ? health(repo) : dead();
+        return started.has('7461') ? health(repo) : dead();
       }) as unknown as typeof globalThis.fetch,
-      spawn: vi.fn(() => child) as unknown as SpawnFunction,
+      spawn: vi.fn(() => {
+        started.add('7461');
+        return child;
+      }) as unknown as SpawnFunction,
       fs,
       stdout: (line: string) => out.push(line),
     });
 
     expect(code).toBe(0);
     expect(JSON.parse(out.at(-1)!)).toMatchObject({ port: 7461 });
+  });
+});
+
+describe('finding a daemon that is already there', () => {
+  it('looks below the requested port, so it cannot start a rival on the same repo', async () => {
+    const repo = temporaryDirectory();
+    const relayDir = path.join(repo, '.relay');
+    fs.mkdirSync(relayDir, { recursive: true });
+    fs.writeFileSync(path.join(relayDir, 'session.token'), 'tok-existing\n');
+    const spawn = vi.fn();
+    const out: string[] = [];
+
+    // The daemon for this repo is on the default port; the caller asked to start looking at 7470.
+    const code = await runLauncher(['daemon', '--repo', repo, '--port', '7470'], {
+      fetch: vi.fn(async (url: string) =>
+        String(url).includes(String(DEFAULT_PORT))
+          ? new Response(JSON.stringify({ ok: true, version: '0.0.1', repo }), { status: 200, headers: { 'content-type': 'application/json' } })
+          : Promise.reject(new Error('ECONNREFUSED')),
+      ) as unknown as typeof globalThis.fetch,
+      spawn: spawn as unknown as SpawnFunction,
+      fs,
+      stdout: (line: string) => out.push(line),
+    });
+
+    expect(code).toBe(0);
+    // Searching only upward walked past it and started a second relayd on the same repo, and the two
+    // then overwrote the same session token — locking out whichever clients were already connected.
+    expect(spawn).not.toHaveBeenCalled();
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ port: DEFAULT_PORT, started: false });
+  });
+
+  it('refuses a repo that is not there rather than making one', async () => {
+    const missing = path.join(temporaryDirectory(), 'not-a-project');
+    const spawn = vi.fn();
+    const errors: string[] = [];
+
+    const code = await runLauncher(['daemon', '--repo', missing], {
+      fetch: vi.fn(async () => Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof globalThis.fetch,
+      spawn: spawn as unknown as SpawnFunction,
+      fs,
+      stderr: (line: string) => errors.push(line),
+    });
+
+    // relayd would happily create the directory and serve it, leaving a daemon and an empty `.relay`
+    // somewhere nobody meant to put one — which is what a mistyped path did.
+    expect(code).toBe(1);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(errors.join(' ')).toContain('no such directory');
+  });
+
+  it('expands ~ in a path, which the TUI never sends through a shell', () => {
+    expect(expandHome('~/code/x', '/home/me')).toBe('/home/me/code/x');
+    expect(expandHome('~', '/home/me')).toBe('/home/me');
+    expect(expandHome('/abs/x', '/home/me')).toBe('/abs/x');
+    expect(expandHome('./rel', '/home/me')).toBe('./rel');
+    // A literal `~` inside a name is not a home reference.
+    expect(expandHome('weird~name', '/home/me')).toBe('weird~name');
   });
 });

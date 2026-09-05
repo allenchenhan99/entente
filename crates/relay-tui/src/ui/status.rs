@@ -49,8 +49,10 @@ pub fn status_text(app: &App) -> String {
     // Errors and notices come before the metrics so they survive truncation on narrow terminals.
     if let Some(e) = &app.error {
         parts.push(format!("ERROR {e}"));
-    } else if app.input_mode == Some(crate::app::InputMode::ClosePaneConfirm) {
-        // Asked here, not in the inspector: the pane it is about must stay visible.
+    } else if app.input_mode.is_some() && !app.inspector_open {
+        // Any prompt the inspector is not already showing is shown here. An editor that is open and
+        // drawn nowhere swallows every key with nothing on screen, and the app simply looks frozen —
+        // which is what `n` did, and what closing a pane would have done before it was special-cased.
         if let Some(prompt) = app.prompt_line() {
             parts.push(prompt);
         }
