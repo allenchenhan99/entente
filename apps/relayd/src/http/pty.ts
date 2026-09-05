@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import type { Hono, Context } from 'hono';
 import type { z } from 'zod';
-import { PaneInputBody, WaitOutputBody, ReadScreenQuery, ptyRoutes } from '@relay/protocol';
+import { CreatePaneBody, PaneInputBody, WaitOutputBody, ReadScreenQuery, ptyRoutes } from '@relay/protocol';
 import type { RelayHost } from '../pty/host.js';
 import { PaneNotFoundError } from '../pty/host.js';
 import { UnknownKeyError } from '../pty/keys.js';
@@ -58,6 +58,23 @@ export function mountPty(app: Hono, host: RelayHost, options: MountPtyOptions = 
   app.get(ptyRoutes.panes, (c) => {
     const focused = host.focusedPane;
     return c.json(focused === undefined ? { panes: host.list() } : { panes: host.list(), focused_pane: focused });
+  });
+
+  // Parity with termd's `POST /panes`: the same body spawns a pane on the in-process host, so a client
+  // (the TUI's new-terminal key) works the same under RELAY_HOST=relay and RELAY_HOST=relayterm.
+  app.post(ptyRoutes.panes, async (c) => {
+    const body = await parseBody(c, CreatePaneBody);
+    if (!body.ok) return body.res;
+    const { paneId } = await host.spawn({
+      name: body.data.name,
+      argv: body.data.argv,
+      cwd: body.data.cwd,
+      env: body.data.env ?? {},
+      ...(body.data.prompt === undefined ? {} : { prompt: body.data.prompt }),
+      ...(body.data.cols === undefined ? {} : { cols: body.data.cols }),
+      ...(body.data.rows === undefined ? {} : { rows: body.data.rows }),
+    });
+    return c.json({ pane_id: paneId }, 201);
   });
 
   app.get(ptyRoutes.pane(':id'), (c) => withPane(c, (paneId) => c.json(host.get(paneId)!.info())));

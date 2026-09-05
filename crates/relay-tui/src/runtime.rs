@@ -52,6 +52,8 @@ pub enum Msg {
     PaneFrame(String, PtyServerMessage),
     PaneClosed(String, String),
     Connection(Connection),
+    /// A pane was created on the daemon; focus it once the refreshed list arrives.
+    PaneOpened(String),
     Error(String),
     Notice(String),
     Quit,
@@ -72,6 +74,10 @@ pub struct Runtime<B: Backend> {
     refresh_pending: bool,
     tasks: Vec<JoinHandle<()>>,
     quit: bool,
+    /// Working directory a new shell pane starts in; the repo the mission is about.
+    pub workdir: String,
+    /// Pane this session asked the daemon to open, focused as soon as the daemon reports it.
+    pending_pane: Option<String>,
 }
 
 impl<B: Backend> Runtime<B> {
@@ -88,6 +94,8 @@ impl<B: Backend> Runtime<B> {
             tx,
             rx,
             pane_senders: BTreeMap::new(),
+            workdir: ".".to_string(),
+            pending_pane: None,
             refresh_pending: false,
             tasks: Vec::new(),
             quit: false,
@@ -203,6 +211,14 @@ impl<B: Backend> Runtime<B> {
     fn apply_panes(&mut self, panes: Vec<PaneInfo>, focused: Option<String>) {
         let effects = self.app.set_panes(panes, focused);
         self.run_effects(effects);
+        // A pane this session asked for is the one the user wants to be looking at.
+        if let Some(pane_id) = self.pending_pane.clone() {
+            if self.app.panes.contains(&pane_id) {
+                self.pending_pane = None;
+                let effects = self.app.focus_pane(pane_id, true);
+                self.run_effects(effects);
+            }
+        }
         let missing: Vec<String> = self
             .app
             .panes
@@ -321,6 +337,13 @@ impl<B: Backend> Runtime<B> {
                 self.app.handle_key(key)
             }
             Msg::Mouse(mouse) => self.app.handle_mouse(mouse),
+            Msg::PaneOpened(pane_id) => {
+                self.pending_pane = Some(pane_id.clone());
+                self.app
+                    .set_notice(format!("shell pane {pane_id} opening…"));
+                self.refresh_now();
+                Vec::new()
+            }
             Msg::Resize => Vec::new(),
             Msg::Tick => {
                 self.app.tick = self.app.tick.wrapping_add(1);
@@ -458,6 +481,26 @@ impl<B: Backend> Runtime<B> {
             }
             // Handing the mouse back to the terminal is the terminal's business, not the app's; the
             // runtime owns the escape sequences.
+            // A shell beside the agents, so a mission can be started without leaving the app. The UI never
+            // sends a command line: the shell comes from the environment and the cwd from --repo.
+            Effect::NewShellPane => {
+                let Source::Live(client) = &self.source else {
+                    self.app
+                        .set_notice("replay has no daemon to open a pane on");
+                    return;
+                };
+                let client = client.clone();
+                let tx = self.tx.clone();
+                let cwd = self.workdir.clone();
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+                self.tasks.push(tokio::spawn(async move {
+                    let msg = match client.create_pane("shell", &[shell], &cwd, 120, 40).await {
+                        Ok(pane_id) => Msg::PaneOpened(pane_id),
+                        Err(e) => Msg::Notice(format!("could not open a shell pane: {e}")),
+                    };
+                    let _ = tx.send(msg);
+                }));
+            }
             Effect::SetMouseCapture(on) => {
                 let mut out = std::io::stdout();
                 let _ = if on {

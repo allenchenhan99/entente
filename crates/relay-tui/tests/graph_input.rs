@@ -235,3 +235,30 @@ fn an_open_overlay_keeps_the_mouse_out_of_the_graph() {
         .is_empty());
     assert_eq!(app.selected, None, "the help overlay owns the screen");
 }
+
+#[test]
+fn t_asks_for_a_shell_pane_and_says_so() {
+    let mut app = app_with_canvas();
+
+    let effects = app.handle_key(Key::char('t'));
+
+    assert!(matches!(effects.as_slice(), [Effect::NewShellPane]));
+    assert!(
+        app.notice.as_deref().is_some_and(|n| n.contains("shell")),
+        "{:?}",
+        app.notice
+    );
+}
+
+#[test]
+fn t_does_not_type_into_a_pane_or_an_editor() {
+    let mut app = app_with_canvas();
+    app.terminal_input = true;
+
+    let effects = app.handle_key(Key::char('t'));
+
+    assert!(
+        !matches!(effects.as_slice(), [Effect::NewShellPane]),
+        "while typing into a terminal, t is just a letter"
+    );
+}

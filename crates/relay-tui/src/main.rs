@@ -94,6 +94,8 @@ async fn main() -> Result<()> {
     )?;
     let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
     let mut runtime = Runtime::new(terminal, source);
+    // `t` opens a shell here — the repo the mission is about, not wherever relay-tui was started.
+    runtime.workdir = args.repo.to_string_lossy().into_owned();
     let tx = runtime.sender();
     std::thread::spawn(move || loop {
         match crossterm::event::poll(Duration::from_millis(200)) {

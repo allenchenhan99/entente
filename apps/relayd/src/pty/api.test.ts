@@ -200,3 +200,27 @@ describe('pty input keys', () => {
     expect(fs.readFileSync(capture, 'latin1')).toBe('ab\r\x1b\x03\x1b[A\x1b[B\x1b[D\x1b[C\t\x7f\x04');
   });
 });
+
+describe('POST /panes', () => {
+  it('spawns the pane a client asked for and returns its id', async () => {
+    const { host, srv } = await setup();
+
+    const res = await srv.json<{ pane_id: string }>('POST', '/panes', {
+      name: 'shell',
+      argv: ['/bin/sh', '-c', 'printf ready; sleep 5'],
+      cwd: process.cwd(),
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.pane_id).toMatch(/^relay:\d+$/);
+    expect(host.get(res.body.pane_id)?.info().role).toBe('shell');
+  });
+
+  it('refuses a body without an executable rather than spawning nothing', async () => {
+    const { srv } = await setup();
+
+    const res = await srv.json('POST', '/panes', { name: 'shell', argv: [], cwd: process.cwd() });
+
+    expect(res.status).toBe(400);
+  });
+});

@@ -86,6 +86,30 @@ export const ReadScreenQuery = z.object({
   lines: z.number().int().positive().max(5000).default(200),
 });
 
+/**
+ * `POST /panes` → 201 `{ pane_id }`. relayd spawns agents through this; a client uses it to open a plain
+ * shell beside them. The host runs `argv` verbatim, so this route is always behind the session-token
+ * guard — see docs/security.md.
+ */
+export const CreatePaneBody = z.object({
+  /** Pane title, and the agent role when this pane hosts one (`backend`, `planner`, `shell`). */
+  name: z.string().min(1),
+  /** Executable and arguments; must not be empty. */
+  argv: z.array(z.string()).min(1),
+  cwd: z.string().min(1),
+  env: z.record(z.string(), z.string()).optional(),
+  cols: z.number().int().positive().optional(),
+  rows: z.number().int().positive().optional(),
+  /** Delivered once the process is interactive, the way an agent's bootstrap prompt is. */
+  prompt: z.string().optional(),
+  /** The task this pane hosts, when it hosts one; it becomes `PaneInfo.task_id`. */
+  task_id: z.string().optional(),
+});
+export type CreatePaneBody = z.infer<typeof CreatePaneBody>;
+
+export const CreatePaneResult = z.object({ pane_id: PaneId });
+export type CreatePaneResult = z.infer<typeof CreatePaneResult>;
+
 export const PaneInputBody = z.object({
   /** Literal text to type; `\r` submits. Sent with bracketed paste when the pane has it enabled. */
   text: z.string().optional(),
@@ -158,7 +182,10 @@ export const HostMetrics = z.object({
 export type HostMetrics = z.infer<typeof HostMetrics>;
 
 export const ptyRoutes = {
-  /** `GET` → PaneInfo[] · `POST /panes/:id/kill` · `POST /panes/:id/focus` (records the focused pane for other clients). */
+  /**
+   * `GET` → `{ panes, focused_pane? }` · `POST` CreatePaneBody → 201 CreatePaneResult ·
+   * `POST /panes/:id/kill` · `POST /panes/:id/focus` (records the focused pane for other clients).
+   */
   panes: '/panes',
   pane: (paneId: string) => `/panes/${paneId}`,
   /** WebSocket. */

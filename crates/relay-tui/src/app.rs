@@ -284,6 +284,9 @@ pub enum Effect {
     FocusPane(String),
     /// Grab the mouse for the app, or hand it back to the terminal so the user can select text.
     SetMouseCapture(bool),
+    /// Open a shell pane beside the agents. The runtime fills in the shell and the repo, since `App`
+    /// knows neither the environment nor the filesystem.
+    NewShellPane,
     Quit,
 }
 
@@ -1000,6 +1003,10 @@ impl App {
             (_, Some('0')) => {
                 self.graph_view = GraphView::default();
                 Vec::new()
+            }
+            (_, Some('t')) => {
+                self.set_notice("opening a shell pane…");
+                vec![Effect::NewShellPane]
             }
             (_, Some('m')) => {
                 self.mouse_capture = !self.mouse_capture;
