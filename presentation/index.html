@@ -1,14 +1,163 @@
 <!doctype html>
 <html lang="zh-Hant">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Entente — Provenance Engineering</title>
-    <meta name="description" content="Entente 黑客松動畫報告：從 Task Contract、驗證與局部修復，走向可追溯的 Agent 交付鏈。" />
-    <link rel="icon" type="image/png" href="/entente/logo.png" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/main.tsx"></script>
-  </body>
-</html>
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entente — Atrophied Intelligence · Pitch v2</title>
+<link rel="icon" href="/entente/logo.png">
+<style>
+:root{color-scheme:dark;--bg:#070b16;--ink:#f2f4ff;--muted:#99a5bf;--purple:#b49aff;--cyan:#64e6da;--red:#ff839b;--line:#2a3650}
+*{box-sizing:border-box}body{margin:0;background:#03050a;color:var(--ink);font-family:Inter,"Noto Sans TC","Microsoft JhengHei",sans-serif;overflow:hidden}button,a{-webkit-tap-highlight-color:transparent}button{font:inherit;cursor:pointer}a{color:inherit;text-underline-offset:5px}button:focus-visible,a:focus-visible{outline:3px solid var(--cyan);outline-offset:5px}
+#viewport{position:fixed;inset:0;display:grid;place-items:center}#stage{position:relative;width:1600px;height:900px;flex-shrink:0;overflow:hidden;transform-origin:center;background:radial-gradient(ellipse at 85% 12%,#29204866,transparent 49%),radial-gradient(ellipse at 12% 80%,#09383733,transparent 50%),var(--bg)}#stage:before{content:"";position:absolute;inset:0;background-image:linear-gradient(#8ca5db06 1px,transparent 1px),linear-gradient(90deg,#8ca5db06 1px,transparent 1px);background-size:40px 40px;pointer-events:none}
+.brand{position:absolute;top:33px;left:64px;display:flex;align-items:center;gap:12px;font-size:23px;letter-spacing:1px;font-weight:700;z-index:2}.brand img{width:39px;height:39px;border-radius:9px}.brand span span{color:var(--purple)}.edition{position:absolute;right:64px;top:43px;font-size:14px;letter-spacing:3px;color:var(--muted)}.slide{position:absolute;inset:99px 64px 82px;display:none;animation:enter .35s ease-out}.slide.active{display:block}@keyframes enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.eyebrow{color:var(--cyan);font:600 15px/1.3 ui-monospace,Consolas,monospace;letter-spacing:3px;text-transform:uppercase;margin:0 0 16px}.title{font-size:57px;line-height:1.23;font-weight:750;letter-spacing:-1.6px;margin:0}.title em{font-style:normal;color:var(--purple)}.subtitle{font-size:23px;color:var(--muted);line-height:1.55;margin:15px 0 0}.accent{color:var(--cyan)}.dim{color:var(--muted)}.visual{width:100%;height:461px;margin-top:20px}.visual svg{width:100%;height:100%;overflow:visible}.takeaway{font-size:28px;line-height:1.4;margin-top:12px;display:flex;align-items:center;gap:16px}.takeaway:before{content:"";display:block;width:35px;height:3px;background:var(--cyan)}.sources{position:absolute;bottom:0;left:0;right:0;color:#8090ae;font-size:13px;line-height:1.5}.sources a{margin-right:15px}.tag{display:inline-block;border:1px solid #4d4565;background:#b49aff12;color:#d0c1ff;border-radius:5px;padding:5px 10px;font-size:15px;letter-spacing:.3px;vertical-align:middle}.phase-caption{height:35px;color:var(--cyan);font-size:22px;margin-top:2px}.phase-caption b{display:inline-block;font-size:15px;border:1px solid #397a78;border-radius:50%;width:28px;height:28px;text-align:center;line-height:26px;margin-right:12px}
+svg text{font-family:Inter,"Noto Sans TC","Microsoft JhengHei",sans-serif;fill:var(--ink)}svg .minor{fill:var(--muted);font-size:16px}svg .label{font-size:22px;font-weight:650}svg .mono{font-family:ui-monospace,Consolas,monospace;font-size:14px;letter-spacing:1px}svg .wire{fill:none;stroke:#465777;stroke-width:2}svg .wire.cyan{stroke:var(--cyan)}svg .wire.purple{stroke:var(--purple)}svg .wire.red{stroke:var(--red);stroke-dasharray:5 7}svg .nodebox{fill:#111a2a;stroke:#475674;stroke-width:1.5}svg .nodebox.cyan{stroke:var(--cyan);fill:#102629}svg .nodebox.purple{stroke:var(--purple);fill:#211b37}svg .nodebox.red{stroke:#b35974;fill:#2a1928}.pulse-node{transition:opacity .5s,filter .5s;opacity:1;filter:brightness(.8)}.pulse-node.lit{opacity:1;filter:brightness(1) drop-shadow(0 0 12px #62e8df42)}.problem-group.lit{filter:drop-shadow(0 0 10px #ff839b55)}.packet{filter:drop-shadow(0 0 5px #64e6da)}.gate{fill:#12292c;stroke:#4ea9a1;stroke-width:1.5}.faint{opacity:.65}.evidence-link{stroke:#b49aff;stroke-width:1.5;stroke-dasharray:3 5;fill:none}
+.tree .visual{height:486px;margin-top:12px}.tree .subtitle{margin-top:10px}.tree .phase-caption{margin-top:8px}.flow .title{font-size:53px}.archify{display:block;width:1360px;height:500px;object-fit:contain;margin:4px auto 0}.flow .sources{bottom:0}.flow .takeaway{position:absolute;bottom:29px;margin:0;font-size:25px}.flow .subtitle{margin-top:8px}
+.results .title{font-size:50px}.quote{margin:20px 0 22px;border-left:3px solid var(--purple);padding-left:22px;font-size:29px;line-height:1.5}.results-grid{display:grid;grid-template-columns:1.03fr 1fr;gap:50px}.comparison{border-top:1px solid var(--line);padding-top:15px}.comparison-head{display:grid;grid-template-columns:1.1fr 1fr 1fr;color:var(--muted);font-size:18px;margin:0 0 20px}.result-row{display:grid;grid-template-columns:1.1fr 1fr 1fr;align-items:center;padding:24px 0;border-bottom:1px solid var(--line);font-size:24px}.result-row strong{font-size:28px}.good{color:var(--cyan)}.bad{color:var(--red)}.result-total{display:flex;align-items:baseline;gap:17px;margin-top:24px}.result-total strong{font-size:77px;font-weight:650;line-height:1;color:var(--cyan)}.result-total span{font-size:23px;line-height:1.5;color:var(--muted)}.dialogue{border:1px solid #3b425f;border-radius:15px;background:linear-gradient(150deg,#171e31,#0a1420);padding:24px 29px}.dialogue-head{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:15px;letter-spacing:1px;border-bottom:1px solid var(--line);padding-bottom:14px}.live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--cyan);margin-right:8px;box-shadow:0 0 10px #64e6da88}.message{display:flex;gap:20px;padding:20px 0;border-bottom:1px solid #27314a;font-size:23px;line-height:1.5;transition:opacity .5s}.message:last-of-type{border:0}.message span{color:var(--purple);font:14px/1.7 ui-monospace,Consolas,monospace;min-width:79px;padding-top:3px}.message strong{font-size:23px;color:var(--cyan);font-weight:550}.video-link{display:inline-flex;align-items:center;gap:13px;margin-top:20px;font-size:20px;text-decoration:none;color:var(--cyan)}.video-link .play-icon{display:grid;place-items:center;width:32px;height:32px;border:1px solid #4d9b98;border-radius:50%;font-size:13px}.results .sources{font-size:16px;bottom:2px;line-height:1.7}
+.open-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:40px;margin-top:61px}.open-column{border-top:2px solid #65538c;padding-top:28px}.open-number{font:18px ui-monospace,monospace;color:var(--purple);margin-bottom:21px}.open-column h2{font-size:37px;margin:0 0 16px;font-weight:650}.open-column p{font-size:24px;color:var(--muted);line-height:1.65;margin:0}.open-column code{display:block;color:var(--cyan);font-size:19px;margin-top:29px;line-height:1.7}.repo-strip{margin-top:65px;border:1px solid #334b54;background:#122d2d55;padding:28px 30px;display:flex;align-items:center;justify-content:space-between;border-radius:9px}.repo-strip a{font-size:29px;text-decoration:none}.repo-strip span{font-size:19px;color:var(--cyan)}
+.closing .eyebrow{color:var(--purple)}.closing-layout{display:grid;grid-template-columns:1fr 1.13fr;gap:30px;height:550px;margin-top:28px}.closing-copy{display:flex;flex-direction:column;justify-content:center}.closing h1{font-size:64px;line-height:1.18;letter-spacing:-2px;margin:0 0 34px}.closing h1 span{display:block;color:var(--purple)}.closing-quote{font-size:30px;line-height:1.7;margin:0}.closing-copy>a{font-size:18px;color:var(--muted);margin-top:38px}.scope{position:relative;height:537px;align-self:center}.scope-layer{position:absolute;border:1px solid #65578c;border-radius:20px;background:#100e2170;transition:box-shadow .5s,border-color .5s}.scope-layer .scope-label{position:absolute;top:16px;left:23px;font-size:21px;color:#bcc1d5}.scope-layer.lit{border-color:var(--purple);box-shadow:0 0 26px #b49aff17}.scope-layer.outer{inset:0;background:linear-gradient(150deg,#51317c24,#111625);border:2px solid #b49aff}.scope-layer.outer>.scope-label{color:#d6c4ff;font-size:24px}.scope-label small{font-size:13px;color:#b49aff;margin-left:10px}.closing .sources{font-size:15px}
+.footer{position:absolute;bottom:22px;left:64px;right:64px;height:33px;display:flex;align-items:center;justify-content:space-between;z-index:3;font-size:14px;color:var(--muted)}.nav{display:flex;gap:7px;align-items:center}.nav button,.controls button{border:1px solid transparent;color:var(--muted);background:transparent;border-radius:6px;padding:6px 10px;font-size:14px}.nav button:hover,.controls button:hover{color:white;background:#ffffff0b}.nav button[aria-current=true]{color:var(--cyan);border-color:#3b5e62;background:#64e6da0c}.controls{display:flex;gap:8px;align-items:center}.controls .primary{border-color:#4b4566;color:#d4c4ff}.timer{font:14px ui-monospace,Consolas,monospace;margin-right:10px}.progress{height:3px;position:absolute;bottom:0;left:0;right:0;background:#192238}.progress>span{display:block;height:100%;width:0;background:linear-gradient(90deg,#aa81ff,var(--cyan));transition:width .15s linear}.notes{position:absolute;inset:auto 64px 83px;z-index:10;background:#111929f5;border:1px solid #536780;border-radius:12px;padding:27px 32px;font-size:24px;line-height:1.8;box-shadow:0 -20px 80px #0008}.notes[hidden]{display:none}.notes .note-top{display:flex;justify-content:space-between;font-size:14px;color:var(--cyan);margin-bottom:10px}.notes button{color:var(--muted);background:none;border:none;font-size:20px}.notes p{margin:0}.toast{position:absolute;top:85px;right:64px;background:#18283b;border:1px solid #4d6c80;padding:12px 20px;border-radius:8px;font-size:17px;z-index:20}.toast[hidden]{display:none}
+@media(prefers-reduced-motion:reduce){.slide{animation:none}.pulse-node,.message{transition:none}.packet{display:none}}
+@media print{body{overflow:visible;background:#070b16}#viewport{position:static;display:block}#stage{transform:none!important;width:1600px;height:auto;overflow:visible}.slide{display:block!important;position:relative;inset:auto;width:1472px;height:760px;margin:70px 64px;break-after:page;animation:none}.brand,.edition,.footer,.progress,.notes{display:none}.pulse-node{opacity:1}}
+
+.cover-layout{display:grid;grid-template-columns:1fr 1fr;align-items:center;height:655px;gap:20px}.cover-logo{width:106px;height:106px;border-radius:23px;margin-bottom:25px}.cover h1{font-size:117px;letter-spacing:-7px;line-height:1;margin:0 0 28px}.cover h1 span{color:var(--purple)}.cover-line{font-size:33px;line-height:1.65;margin:0}.team-label{color:var(--muted);font:14px ui-monospace,monospace;letter-spacing:4px;margin:44px 0 13px}.team-name{font-size:33px;font-weight:600;color:#c8b4ff;letter-spacing:-.5px}.cover-art{height:500px;width:100%}.cover-art svg{width:100%;height:100%}.tree .title{font-size:50px}.tree .subtitle{font-size:21px}.tree .visual{height:494px}.tree .phase-caption{font-size:23px}.contract-title{font-size:31px;font-weight:700;fill:#dfcfff}.contract-key{font-size:21px;fill:#d4bdff;font-weight:650}.contract-value{font-size:18px;fill:#e4e9f7}.contract-rule{stroke:#4c3f69;stroke-width:1}.contract-panel{fill:#221832;stroke:#c2a0ff;stroke-width:2.5}
+
+.demo .title{font-size:47px}.demo-layout{display:grid;grid-template-columns:880px 1fr;gap:38px;margin-top:17px;align-items:start}.demo-screen{position:relative;line-height:0;border:1px solid #364657;border-radius:8px;overflow:visible}.demo-screen>img{display:block;width:100%;height:auto;border-radius:8px}.demo-region{position:absolute;border:2px solid transparent;border-radius:6px;transition:border-color .4s,box-shadow .4s;pointer-events:none}.demo-region span{position:absolute;top:-13px;left:6px;display:grid;place-items:center;width:25px;height:25px;background:#15212e;border:1px solid #567481;border-radius:50%;color:#afbcc9;font:600 15px sans-serif}.demo-region.lit{border-color:#64e6da;box-shadow:0 0 18px #64e6da33}.demo-region.lit span{background:#64e6da;color:#071a1d;border-color:#64e6da}.demo-callouts{padding-top:5px}.demo-callout{display:flex;gap:18px;padding:16px 0 18px;border-bottom:1px solid #27374b;opacity:.7;transition:opacity .4s}.demo-callout.lit{opacity:1}.demo-callout>b{display:grid;place-items:center;width:34px;height:34px;flex-shrink:0;border:1px solid #567481;border-radius:50%;font-size:19px;color:#a7bdcf}.demo-callout.lit>b{border-color:#64e6da;color:#64e6da;box-shadow:0 0 12px #64e6da22}.demo-callout h2{font-size:27px;margin:0 0 14px;font-weight:650}.demo-callout.lit h2{color:#64e6da}.demo-callout p{font-size:21px;line-height:1.7;margin:0;color:#a9b7cb}.demo-status{font-size:17px;line-height:1.65;color:#b6a0b2;margin:19px 0 0 52px}.demo-flow{display:flex;gap:14px;align-items:center;margin-top:19px;font-size:21px;color:#c8b7ed}.demo-flow i{font-style:normal;color:#526985}.demo-flow a{margin-left:auto;font-size:16px;color:#9baac2}
+</style>
+</head>
+<body><main id="viewport"><div id="stage">
+<div class="brand"><img src="/entente/logo.png" alt="Entente logo"><span>entente<span>.</span></span></div><div class="edition">HACKATHON / 120 SECONDS</div>
+<section class="slide active cover" data-slide="0" aria-label="Entente 封面，Atrophied Intelligence">
+<div class="cover-layout"><div><img class="cover-logo" src="/entente/logo.png" alt="Entente logo"><h1>entente<span>.</span></h1><p class="cover-line">讓 Agent 之間的交接，<br><span class="accent">有憑有據。</span></p><div class="team-label">TEAM NAME</div><div class="team-name">Atrophied Intelligence</div></div>
+<div class="cover-art"><svg viewBox="0 0 690 500" role="img" aria-label="階梯式雙向交接：主 Agent 經中央契約派工給子 Agent，子 Agent 的回覆也經中央契約回到主 Agent"><defs><radialGradient id="cover-halo"><stop stop-color="#9864f2" stop-opacity=".24"/><stop offset="1" stop-color="#9864f2" stop-opacity="0"/></radialGradient></defs><circle cx="344" cy="256" r="243" fill="url(#cover-halo)"/>
+<path d="M138 136H344V250H551V372" fill="none" stroke="#4a4368" stroke-width="2"/>
+<path d="M551 372H344V250H138V136" fill="none" stroke="#4a4368" stroke-width="2"/>
+<g class="pulse-node" data-cover="0"><rect x="50" y="86" width="176" height="100" rx="15" fill="#10272c" stroke="#64e6da"/><text x="81" y="126" font-size="24">主 Agent</text><text x="82" y="158" font-size="18" style="fill:#64e6da">需求</text></g>
+<g class="pulse-node" data-cover="1"><rect x="257" y="200" width="176" height="100" rx="15" fill="#271c3c" stroke="#b49aff"/><text x="294" y="239" font-size="26">契約</text><text x="295" y="273" font-size="18" style="fill:#cbb5ff">Contract</text></g>
+<g class="pulse-node" data-cover="2"><rect x="462" y="322" width="176" height="100" rx="15" fill="#10272c" stroke="#64e6da"/><text x="490" y="362" font-size="24">子 Agent</text><text x="491" y="394" font-size="18" style="fill:#64e6da">證據</text></g>
+<circle r="5" fill="#64e6da" class="packet"><animateMotion path="M138 136H344V250H551V372" dur="3s" repeatCount="indefinite"/></circle>
+<circle r="4" fill="#cbb5ff" class="packet"><animateMotion path="M551 372H344V250H138V136" dur="3s" repeatCount="indefinite"/></circle>
+</svg></div></div></section>
+<section class="slide problem" data-slide="1" aria-label="交接痛點">
+ <p class="eyebrow">02 / THE HANDOFF GAP</p><h1 class="title">Agent 同時開工，<em>交接卻可能失真。</em></h1>
+ <p class="subtitle">多個 agent 之間，需求、理解與「完成」的證據，如何對得上？</p>
+ <div class="visual" id="problem-visual"></div>
+ <div class="takeaway">Entente 把交接變成<span class="accent">可以檢查的介面。</span></div>
+ <div class="sources">研究背景：<a href="https://arxiv.org/abs/2503.13657" target="_blank" rel="noopener">MAST · Cemri et al., 2025</a><a href="https://arxiv.org/abs/2505.06120" target="_blank" rel="noopener">Laban et al., 2025</a><a href="https://www.anthropic.com/engineering/multi-agent-research-system" target="_blank" rel="noopener">Anthropic · Multi-agent research system</a></div>
+</section>
+<section class="slide tree" data-slide="2" aria-label="Session tree 與 checkpoint 設計">
+ <p class="eyebrow">03 / CONTRACT + CONTEXT</p><h1 class="title">用<em>契約</em>定義交付，用 Context 保留理解。</h1>
+ <p class="subtitle">契約定義交付要求；Session Tree 準備所需資訊。兩者同版本，一起交接。 <span class="tag">Context 層設計</span></p>
+ <div class="visual" id="tree-visual"></div><div class="phase-caption" id="tree-caption"></div>
+ <div class="sources">顏色與標籤區分「人已確認／機器已驗證／Agent 自述」。封包限制大小，與契約版本綁定，寫入同一份 append-only 事件日誌。Checkpoint 依目前 main 文件標示為設計提案。</div>
+</section>
+<section class="slide flow demo" data-slide="3" aria-label="Entente 真實 Demo 介面">
+<p class="eyebrow">04 / CONTRACTS IN THE TERMINAL</p><h1 class="title">契約、協作與證據，<em>在同一個畫面。</em></h1>
+<div class="demo-layout"><div class="demo-screen"><img src="/entente/demo-terminal.png" alt="團隊提供的 Entente terminal Demo 截圖，左側列出三個已驗證的子任務與契約版本，下方顯示 agent 協作圖，右側顯示 agent 的檢查結果回報。整體 mission 顯示 failed。">
+<div class="demo-region" data-demo="0" style="left:1%;top:7%;width:33%;height:17%"><span>1</span></div>
+<div class="demo-region" data-demo="1" style="left:1%;top:41%;width:33%;height:49%"><span>2</span></div>
+<div class="demo-region" data-demo="2" style="left:36%;top:8%;width:63%;height:65%"><span>3</span></div></div>
+<aside class="demo-callouts"><div class="demo-callout" data-demo="0"><b>1</b><div><h2>子任務與契約版本</h2><p>每項任務都有自己的狀態，<br>也看得見契約如何升版。</p></div></div>
+<div class="demo-callout" data-demo="1"><b>2</b><div><h2>Agent 協作圖</h2><p>主 Agent 與子 Agent 的關係，<br>直接呈現在交接網路上。</p></div></div>
+<div class="demo-callout" data-demo="2"><b>3</b><div><h2>檢查與結果</h2><p>對照右側回報與任務狀態。<br>「Agent 說完成」仍須驗證。</p></div></div>
+<p class="demo-status">此畫面：子任務 verified；<br>整體 mission 顯示 failed。</p></aside></div>
+<div class="demo-flow"><span>契約</span><i>→</i><span>澄清</span><i>→</i><span>執行</span><i>→</i><span>檢查</span><i>→</i><span>交付／定向修復</span><a href="https://allenchenhan99.github.io/entente/diagrams/handoff.html" target="_blank" rel="noopener">完整流程 ↗</a></div>
+</section>
+<section class="slide results" data-slide="4" aria-label="登入案例成果">
+ <p class="eyebrow">05 / ASK BEFORE ASSUMING</p><h1 class="title">「不要幫我選。」<em>Agent 會先問嗎？</em></h1>
+ <blockquote class="quote">「Magic link 或驗證碼，我明天決定。」</blockquote>
+ <div class="results-grid"><div class="comparison"><div class="comparison-head"><span>同一個登入任務</span><span>純 CLI</span><span>Entente</span></div>
+ <div class="result-row"><strong>Codex</strong><span>猜中</span><span class="good">先問，再做 ✓</span></div>
+ <div class="result-row"><strong>Claude</strong><span class="bad">猜錯</span><span class="good">先問，再做 ✓</span></div>
+ <div class="result-total"><strong>2/2</strong><span>本次 Entente 案例正確<br>隱藏測試通過</span></div></div>
+ <div><div class="dialogue"><div class="dialogue-head"><span><i class="live-dot"></i>CONTRACT HANDOFF</span><span>案例流程示意</span></div>
+ <div class="message" data-message="0"><span>AGENT</span><div>登入方式尚未決定，<br>請先確認需求。</div></div>
+ <div class="message" data-message="1"><span>HUMAN</span><div>回答需求，<strong>契約升為 v2</strong>。</div></div>
+ <div class="message" data-message="2"><span>RELAYD</span><div>執行檢查，<strong>附上通過證據</strong>。</div></div></div>
+ <a class="video-link" href="https://drive.google.com/drive/folders/168uANm4OpPwaiZgcVaDspMtl1ALsAi4d" target="_blank" rel="noopener"><span class="play-icon">▶</span>觀看團隊 Demo 影片 ↗</a></div></div>
+ <div class="sources">本頁數字依團隊提供的案例結果，樣本有限。規格完整的小任務，純 CLI 同樣正確且更快。<br>七份 live run 事件紀錄可 replay；個別 run 的流程與修復情形依事件內容為準。</div>
+</section>
+<section class="slide open" data-slide="5" aria-label="開源與貢獻方式">
+ <p class="eyebrow">06 / OPEN TO INSPECTION</p><h1 class="title">可以跑、可以查，<em>也可以一起做。</em></h1>
+ <div class="open-grid"><article class="open-column"><div class="open-number">01 — REPLAY</div><h2>先重播一個任務</h2><p>不需要 API key。<br>從事件紀錄看見<br>契約、檢查與修復。</p><code>fixtures/events-live-*.jsonl</code></article>
+ <article class="open-column"><div class="open-number">02 — EXTEND</div><h2>接上你的 Agent</h2><p>清楚的擴充介面，<br>把 runtime 與 terminal host<br>接進相同的協作流程。</p><code>AgentRuntime<br>TerminalHost</code></article>
+ <article class="open-column"><div class="open-number">03 — VERIFY</div><h2>改完，自己驗證</h2><p>離線測試與 fake executor。<br>協定文件與 JSON Schema<br>由程式產生。</p><code>npx tsc -b<br>npx vitest run</code></article></div>
+ <div class="repo-strip"><a href="https://github.com/allenchenhan99/entente" target="_blank" rel="noopener">github.com/allenchenhan99/entente ↗</a><span>MIT LICENSE</span></div>
+</section>
+<section class="slide closing" data-slide="6" aria-label="Provenance Engineering 定位">
+ <p class="eyebrow">07 / OUR ENGINEERING SCOPE</p>
+ <div class="closing-layout"><div class="closing-copy"><h1>我們稱它為<span>Provenance<br>Engineering.</span></h1><p class="closing-quote">每一句話都有<span class="accent">來源</span>，<br>每一個「做完了」都有<span class="accent">證據</span>。</p><a href="https://github.com/allenchenhan99/entente" target="_blank" rel="noopener">entente · github.com/allenchenhan99/entente</a></div>
+ <div class="scope" aria-label="範圍從 Prompt、Context、Harness、Loop、Graph 到最外層 Provenance Engineering">
+ <div class="scope-layer outer" data-layer="5"><div class="scope-label">Provenance <small>我們提出的工程定位</small></div></div>
+ <div class="scope-layer" data-layer="4" style="inset:64px 24px 24px"><div class="scope-label">Graph <small>誰與誰協作</small></div></div>
+ <div class="scope-layer" data-layer="3" style="inset:129px 48px 48px"><div class="scope-label">Loop <small>回饋、修復與停止</small></div></div>
+ <div class="scope-layer" data-layer="2" style="inset:194px 72px 72px"><div class="scope-label">Harness <small>工具、權限與執行環境</small></div></div>
+ <div class="scope-layer" data-layer="1" style="inset:259px 96px 96px"><div class="scope-label">Context <small>帶入哪些資訊</small></div></div>
+ <div class="scope-layer" data-layer="0" style="inset:324px 120px 120px"><div class="scope-label">Prompt <small>如何表達指令</small></div></div>
+ </div></div><div class="sources">由小到大呈現團隊的 scope 定位；來源紀錄與檢查證據仍須對照其內容與產生方式解讀。</div>
+</section>
+<div class="notes" id="notes" hidden><div class="note-top"><span id="note-time"></span><button id="close-notes" aria-label="關閉講稿">×</button></div><p id="note-copy"></p></div>
+<div class="toast" id="toast" hidden></div>
+<footer class="footer"><nav class="nav" aria-label="簡報頁面"><button id="prev" aria-label="上一頁">←</button><span id="page-buttons"></span><button id="next" aria-label="下一頁">→</button></nav><div class="controls"><span class="timer" id="timer">00:00 / 02:00</span><button id="autoplay" class="primary">▶ 兩分鐘自動播放</button><button id="show-notes">講稿 N</button><button id="fullscreen">全螢幕 F</button></div></footer><div class="progress"><span id="progress"></span></div>
+</div></main>
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const durations=[5,20,30,20,25,10,10],starts=[0,5,25,55,75,100,110];
+const notes=[
+ '我們是 Atrophied Intelligence。這是 Entente。',
+ '多個 agent 可以同時執行，交接卻可能遺失需求、理解錯方向，或只回報沒有證據的完成。我們把焦點放在交接邊界，用契約、澄清與證據，把協作變成可以檢查的流程。',
+ '核心是這份契約：目標、輸入、範圍、驗收檢查與修復預算。它定義什麼才算完成。左邊的 session tree，則設計成用 checkpoint 保留資訊來源，只取相關項目和增量。派工時，Context 封包與同版本契約一起送出。子 agent 有疑問就先問，回答後契約升版，再開始做。',
+ '這是我們的實際介面。左上追蹤子任務與契約版本，左下是 agent 協作圖，右邊是檢查結果的回報。子任務通過、agent 說完成、整體任務成功，是不同狀態。契約讓我們能追到哪個環節需要處理。',
+ '我們測了一個不能猜的登入需求。負責人說，登入方式明天決定，不要幫我選。純 CLI 的兩個模型，一個猜中、一個猜錯。走 Entente，兩個都先問，收到契約第二版才做，這次兩個都正確。我們也保留反面結果：規格完整的小任務，CLI 同樣正確而且更快。',
+ '專案以 MIT 開源。不需要 API key 就能 replay，也有擴充介面和離線測試，讓大家可以從重播、接 runtime 或加測試開始貢獻。',
+ '從 Prompt、Context，到 Harness、Loop 和 Graph，我們再把範圍擴到來源與證據。我們稱它為 Provenance Engineering。每一句話有來源，每個做完了有證據。謝謝。'
+];
+const defs=`<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1L9 5L0 9" fill="none" stroke="#7791b0" stroke-width="1.5"/></marker><marker id="mint" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#64e6da"/></marker></defs>`;
+function node(x,y,w,h,label,sub='',color='',extra=''){return `<g ${extra}><rect class="nodebox ${color}" x="${x}" y="${y}" width="${w}" height="${h}" rx="10"/><text class="label" x="${x+22}" y="${y+(sub?33:38)}">${label}</text>${sub?`<text class="minor" x="${x+22}" y="${y+59}">${sub}</text>`:''}</g>`}
+function wire(d,color='',motion=false,delay=0){return `<path d="${d}" class="wire ${color}" marker-end="url(#${color==='cyan'?'mint':'arrow'})"/>${motion?`<circle class="packet" r="4" fill="${color==='red'?'#ff839b':'#64e6da'}"><animateMotion dur="3.5s" begin="${delay}s" repeatCount="indefinite" path="${d}"/></circle>`:''}`}
+$('#problem-visual').innerHTML=`<svg viewBox="0 0 1472 440" role="img" aria-label="主 agent 派工給三個 subagent，交接出現需求遺失、理解偏移、完成無證據，Entente 加上契約、澄清與驗證關卡">${defs}
+<text class="mono" x="22" y="28" fill="#99a5bf">PARALLEL AGENTS</text><text class="mono" x="1005" y="28" fill="#64e6da">ENTENTE / HANDOFF BOUNDARY</text>
+${wire('M253 220 H310 V84 H643','red',true)}${wire('M253 220 H643','red',true,1)}${wire('M253 220 H310 V356 H643','red',true,2)}
+${node(20,175,233,90,'主 Agent','派發一個共同目標','purple')}
+${[0,1,2].map((n)=>`<g class="pulse-node problem-group" data-problem="${n}"><rect x="365" y="${54+n*136}" width="212" height="60" rx="30" fill="#281726" stroke="#9d4e69"/><text x="391" y="${92+n*136}" class="label" style="fill:#ff9ab0">${['− 需求遺失','≠ 理解偏移','? 完成無證據'][n]}</text></g>${node(646,40+n*136,240,90,'Subagent '+String.fromCharCode(65+n),['限制沒有被帶過去','各自補上不同假設','「Done」沒有驗收結果'][n])}`).join('')}
+<path d="M930 50V393" stroke="#52627c" stroke-dasharray="3 8"/><rect x="980" y="49" width="472" height="343" rx="16" fill="#0d252633" stroke="#346762"/>
+<g class="pulse-node" data-problem="3"><text x="1010" y="91" font-size="23" fill="#64e6da">把交接變成三道可檢查的關卡</text>
+${[['Contract','目標、範圍與驗收'],['Clarification','理解不足，就先提問'],['Evidence','由檢查支持「完成」']].map((a,n)=>`<circle cx="1028" cy="${142+n*89}" r="15" fill="#173b3d" stroke="#64e6da"/><text x="1022" y="${148+n*89}" font-size="17" style="fill:#64e6da">${n+1}</text><text x="1060" y="${139+n*89}" font-size="24" font-weight="650">${a[0]}</text><text class="minor" x="1060" y="${168+n*89}">${a[1]}</text>`).join('')}</g></svg>`;
+$('#tree-visual').innerHTML=`<svg viewBox="0 0 1472 500" role="img" aria-label="左側 Session Tree 與 checkpoint，中央大型契約包含目標、輸入、範圍、驗收檢查及修復預算，右側子 Agent 收到同版本契約與 Context 封包">${defs}
+<text x="8" y="25" class="mono" style="fill:#64e6da">SESSION TREE / 資訊從哪裡來</text>
+${node(171,44,210,62,'Session','','purple')}
+${wire('M276 106 V126 H89 V151')}${wire('M276 126 H349 V151','cyan',true)}
+${node(8,151,168,76,'歷史分支','保留原始事件','','class="faint"')}
+${node(233,151,235,76,'需求與決策','event #12 · 人已確認','purple','class="pulse-node" data-tree="0"')}
+${wire('M89 227 V286')}${node(8,286,168,77,'其他任務','不帶入此次交接','','class="faint"')}
+${wire('M349 227 V259','cyan',true,1)}
+<g class="pulse-node" data-tree="0"><rect x="207" y="259" width="280" height="169" rx="12" fill="#13252e" stroke="#64e6da" stroke-width="1.8"/><text x="225" y="293" class="label">Checkpoint</text>
+<text x="225" y="326" font-size="18" style="fill:#cbb5ff">● 人已確認</text><text x="357" y="326" class="minor">event #12</text><text x="225" y="362" font-size="18" style="fill:#64e6da">● 機器驗證</text><text x="357" y="362" class="minor">check #08</text><text x="225" y="398" font-size="18" style="fill:#e8b56c">● Agent 自述</text><text x="357" y="398" class="minor">event #15</text></g>
+<path class="evidence-link" d="M470 276 H513 V188 H468" marker-end="url(#arrow)"/>
+${wire('M487 370 H538 V446 H603','cyan',true)}<text x="259" y="474" class="minor">相關項目＋後續增量 Δ</text>
+<g class="pulse-node" data-tree="1"><rect x="603" y="44" width="452" height="345" rx="15" class="contract-panel"/><text class="contract-title" x="628" y="88">契約 Contract</text><rect x="975" y="61" width="54" height="36" rx="6" fill="#b49aff22" stroke="#8c6ac9"/><text x="988" y="86" font-size="24" style="fill:#d7c3ff" data-version>v1</text>
+<text x="629" y="123" class="minor">定義什麼才算「完成」</text>
+${[['目標','實作登入功能'],['輸入','需求、檔案與來源'],['範圍','可改路徑與非目標'],['驗收檢查','用什麼檢查支持交付'],['修復預算','失敗後的重試上限']].map((r,i)=>`<line class="contract-rule" x1="627" y1="${140+i*47}" x2="1030" y2="${140+i*47}"/><text class="contract-key" x="629" y="${170+i*47}">${r[0]}</text><text class="contract-value" x="767" y="${170+i*47}">${r[1]}</text>`).join('')}</g>
+<g class="pulse-node" data-tree="2"><rect x="603" y="410" width="452" height="75" rx="11" fill="#102b2e" stroke="#64e6da" stroke-width="2"/><text x="627" y="442" font-size="24" font-weight="650">Context 封包</text><text x="627" y="468" class="minor">相關 item ＋ Δ · 大小上限 · 保留來源</text><text x="988" y="445" font-size="24" style="fill:#64e6da" data-version>v1</text></g>
+${wire('M1055 226 H1113 V257 H1199','purple',true)}${wire('M1055 446 H1149 V292 H1199','cyan',true,1.5)}
+<text x="1199" y="200" font-size="22" style="fill:#d5c1ff">同版本，一起交接</text>
+${node(1203,230,245,91,'子 Agent','先接受或澄清，再開工','purple','class="pulse-node" data-tree="3"')}
+<g class="pulse-node" data-tree="3"><path d="M1325 321 V368 H1185" class="wire purple" marker-end="url(#arrow)"/><text x="1193" y="405" font-size="21" style="fill:#d5c1ff">提問 → 人的回答</text><text x="1193" y="439" font-size="21" style="fill:#64e6da">契約與封包同步升版</text></g>
+</svg>`;
+let current=0,running=false,elapsed=0,last=0,slideTime=0,notesOpen=false;
+function resize(){const s=Math.min(innerWidth/1600,innerHeight/900);$('#stage').style.transform=`scale(${s})`;}
+addEventListener('resize',resize);resize();
+$('#page-buttons').innerHTML=durations.map((_,i)=>`<button data-page="${i}" aria-label="第 ${i+1} 頁">0${i+1}</button>`).join('');
+function fmt(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0')}
+function go(i,manual=true){current=Math.max(0,Math.min(6,i));slideTime=0;$$('.slide').forEach((s,n)=>{s.classList.toggle('active',n===current);s.setAttribute('aria-hidden',String(n!==current))});$$('[data-page]').forEach((b,n)=>b.setAttribute('aria-current',String(n===current)));if(manual){running=false;elapsed=starts[current];updateControls()}$('#note-copy').textContent=notes[current];$('#note-time').textContent=`第 ${current+1} 頁 / ${fmt(starts[current])}–${fmt(starts[current]+durations[current])} / 建議 ${durations[current]} 秒`;history.replaceState(null,'','#'+(current+1));animate(0);}
+function updateControls(){$('#autoplay').textContent=running?'Ⅱ 暫停自動播放':elapsed>0&&elapsed<120?'▶ 繼續自動播放':'▶ 兩分鐘自動播放';$('#timer').textContent=fmt(elapsed)+' / 02:00';$('#progress').style.width=elapsed/120*100+'%';}
+function animate(t){$$('[data-demo]').forEach(e=>e.classList.toggle('lit',+e.dataset.demo===Math.floor(t/3)%3));const p=Math.floor(t/2.7)%4;$$('[data-problem]').forEach(e=>e.classList.toggle('lit',+e.dataset.problem===p));const captions=['從 Session Tree 取出有來源的相關資訊','契約明定：做什麼、做到哪裡、怎樣才算完成','Context 封包＋同版本契約，一起交給子 Agent','有疑問就先澄清；回答後，契約與封包同步升為 v2'];$$('[data-tree]').forEach(e=>e.classList.toggle('lit',+e.dataset.tree===p));$('#tree-caption').innerHTML=`<b>${p+1}</b>${captions[p]}`;$$('[data-version]').forEach(e=>e.textContent=p===3?'v2':'v1');$$('[data-cover]').forEach((e,i)=>e.classList.toggle('lit',i===[0,1,2,1][Math.floor(t/1.25)%4]));$$('[data-message]').forEach(e=>e.style.opacity=+e.dataset.message<=Math.floor(t/2.5)%4?1:.65);const layer=Math.min(5,Math.floor((t%11)/1.15));$$('[data-layer]').forEach(e=>e.classList.toggle('lit',+e.dataset.layer<=layer));}
+function frame(now){if(!last)last=now;const dt=Math.min((now-last)/1000,.25);last=now;slideTime+=dt;animate(slideTime);if(running){elapsed=Math.min(120,elapsed+dt);let idx=starts.findLastIndex(s=>elapsed>=s);if(idx!==current)go(idx,false);if(elapsed>=120)running=false;updateControls()}requestAnimationFrame(frame)}
+$$('[data-page]').forEach(b=>b.onclick=()=>go(+b.dataset.page));$('#prev').onclick=()=>go(current-1);$('#next').onclick=()=>go(current+1);
+$('#autoplay').onclick=()=>{if(running){running=false}else{if(elapsed===0||elapsed>=120){elapsed=0;go(0,false)}running=true}updateControls()};
+function toggleNotes(){notesOpen=!notesOpen;$('#notes').hidden=!notesOpen;$('#show-notes').textContent=notesOpen?'隱藏講稿 N':'講稿 N'}$('#show-notes').onclick=toggleNotes;$('#close-notes').onclick=toggleNotes;
+async function fullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch{$('#toast').textContent='可使用瀏覽器 F11 進入全螢幕';$('#toast').hidden=false;setTimeout(()=>$('#toast').hidden=true,3000)}}$('#fullscreen').onclick=fullscreen;
+addEventListener('keydown',e=>{if(e.target.closest('button,a')&&e.key===' ')return;if(['ArrowRight','ArrowDown','PageDown',' '].includes(e.key)){e.preventDefault();go(current+1)}if(['ArrowLeft','ArrowUp','PageUp'].includes(e.key)){e.preventDefault();go(current-1)}if(e.key==='Home')go(0);if(e.key==='End')go(6);if(e.key.toLowerCase()==='n')toggleNotes();if(e.key.toLowerCase()==='f')fullscreen();if(e.key==='Escape'&&notesOpen)toggleNotes()});
+let touchX=0;addEventListener('touchstart',e=>touchX=e.changedTouches[0].clientX,{passive:true});addEventListener('touchend',e=>{const d=e.changedTouches[0].clientX-touchX;if(Math.abs(d)>65)go(current+(d<0?1:-1))},{passive:true});
+go(Math.max(0,Math.min(6,(parseInt(location.hash.slice(1))||1)-1)));requestAnimationFrame(frame);
+window.deck={go,get current(){return current},get running(){return running},get elapsed(){return elapsed},durations};
+</script></body></html>

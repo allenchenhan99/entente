@@ -1,5 +1,20 @@
 # Agent team log
 
+## 2026-09-06 - Publish the approved two-minute pitch v2
+
+- Owner: primary agent. User explicitly requested replacing original GitHub
+  Pages with the local `entente-report/reports/hackathon/pitch-120/v2` deck.
+  Main worktree is clean at `08790fb` after fetching original main. Reuse main
+  for this deployment; no new branch, worktree, agents, or live mission.
+- Adopt the exact local deck, changing only its relative image URLs for the
+  `/entente/` deployment base. Preserve the existing logo and standalone Archify
+  viewer; add the unchanged team Demo screenshot. Update deployment documentation
+  and the repository report link description. No video download or embedding.
+- Scope: presentation entry, screenshot, presentation README, report link wording,
+  and this log. The existing report worktree and earlier drafts remain intact.
+  Retirement: no temporary branch/worktree introduced; verify build and public
+  seven-page navigation, animation, and images after the authorized push.
+
 ## 2026-09-06 - Adopt the approved Archify README animation
 
 - Owner: main Codex agent. The user approved the published GIF and explicitly

@@ -132,7 +132,7 @@ npx tsx apps/cli/src/index.ts story --replay fixtures/events-live-4.jsonl --task
 
 The completed `live-4` fixture has an empty inbox; that is expected. In a live mission, the inbox lists handoffs that need human attention.
 
-**[Open the six-page report →](https://allenchenhan99.github.io/entente/)** It includes our scope model, rejected approaches, implementation, and evidence. One demo slot is reserved for a video of up to two minutes; the video is not yet included.
+**[Open the two-minute, seven-page report →](https://allenchenhan99.github.io/entente/)** Team Atrophied Intelligence presents the handoff problem, Contract and context design, terminal Demo, case results, contribution paths, and engineering scope. Diagrams animate automatically; the team Demo video is linked from the deck.
 
 ## How a handoff works
 
