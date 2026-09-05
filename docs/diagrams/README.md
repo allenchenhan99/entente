@@ -1,8 +1,9 @@
-# README handoff diagram POC
+# README handoff diagram
 
-This POC belongs to `danny0926/entente`. It replaces the README Mermaid block
-with a recording of the real Archify viewer, using the same seven nodes and
-eight relationships. The original `allenchenhan99/entente` README is unchanged.
+The README handoff diagram uses a recording of the real Archify viewer,
+preserving the documented seven nodes and eight relationships. The GIF plays
+directly in GitHub's README; selecting it opens the interactive viewer on
+[GitHub Pages](https://allenchenhan99.github.io/entente/diagrams/handoff.html).
 
 - `handoff.architecture.json`: authored source for Archify 2.16.
 - `../../presentation/public/diagrams/handoff.html`: validated standalone viewer.

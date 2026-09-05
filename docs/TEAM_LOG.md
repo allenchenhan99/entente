@@ -1,5 +1,28 @@
 # Agent team log
 
+## 2026-09-06 - Adopt the approved Archify README animation
+
+- Owner: main Codex agent. The user approved the published GIF and explicitly
+  requested adoption in `allenchenhan99/entente`. Scope remains the README
+  handoff diagram and its source, exports, reproduction notes, and this log.
+  The existing report draft, installer, runtime, and user changes stay outside
+  this work. No subagents or real coding agents were launched.
+- Integration mapping: fork POC commit `efe6d49` is retained unchanged above
+  original `main` at `a6ad6ca`; this follow-up normalizes the README and diagram
+  documentation links to original GitHub Pages. The approved GIF, SVG, diagram
+  specification, and validated HTML are adopted byte-for-byte. No force-push
+  or new named branch is needed; the existing detached POC worktree is reused.
+- POC publication evidence: fork Pages run `33978125919` and CI run
+  `33978125793` both succeeded. A real GitHub README browser check loaded the
+  1346x596 GIF and confirmed it animates without clicking; the public viewer's
+  SHA-256 matches the validated local HTML. The presentation build and Archify
+  validation already passed for these unchanged artifacts.
+- Adoption validation: inspect the complete diff against original `main`, run
+  `git diff --check`, compare media hashes, then verify original README autoplay
+  and original Pages after the authorized fast-forward publication. Retirement
+  condition: archive local raw QA evidence and remove the detached worktree
+  after public verification. No temporary remote branch or PR requires cleanup.
+
 ## 2026-09-06 - Archify README preview on the user's fork
 
 - Owner: main Codex agent. User explicitly requested a public POC on their
