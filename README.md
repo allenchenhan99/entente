@@ -17,7 +17,7 @@
   <a href="https://github.com/allenchenhan99/entente/issues">Design discussions</a>
 </p>
 
-**Turn ambiguous handoffs between coding agents into scoped, verifiable work.** Entente's coordination core, **RelayGraph**, runs above agent runtimes such as Claude Code and Codex. It defines what must be delivered, checks the evidence, and requests targeted repair when a criterion fails.
+**Turn ambiguous handoffs between coding agents into scoped, verifiable work.** Entente's coordination core runs above agent runtimes such as Claude Code and Codex. It defines what must be delivered, checks the evidence, and requests targeted repair when a criterion fails.
 
 - **Clarify before execution** — the recipient accepts a Task Contract or asks material questions before starting work.
 - **Check evidence, not just status** — relayd runs declared checks in the task worktree and records mismatches with the agent's self-report.

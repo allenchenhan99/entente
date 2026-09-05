@@ -2,7 +2,7 @@
   "name": "entente",
   "private": true,
   "version": "0.0.1",
-  "description": "RelayGraph: turn fuzzy natural-language handoffs between coding agents into confirmable, trackable, verifiable, retryable work contracts",
+  "description": "Entente — provenance engineering for coding agents: handoffs become confirmable, verifiable, retryable contracts; agents form a network with evidence and a way back",
   "license": "MIT",
   "type": "module",
   "bin": {
