@@ -374,7 +374,9 @@ export function runTui(
   const child = deps.spawn(command, args, {
     detached: false,
     stdio: 'inherit',
-    env: { ...deps.env, RELAY_TOOLS: tools },
+    // RELAY_TOOLS puts `relay` on a shell pane's PATH; RELAY_HOME is where the tool's own files are,
+    // so `--plan examples/…` finds what ships with it rather than looking under the mission's repo.
+    env: { ...deps.env, RELAY_TOOLS: tools, RELAY_HOME: options.workspaceRoot },
   });
 
   return new Promise<number>((resolve, reject) => {

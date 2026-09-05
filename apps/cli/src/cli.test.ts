@@ -1014,3 +1014,54 @@ describe('relay session token', () => {
     expect(io.err[0]).toContain('--token');
   });
 });
+
+describe('finding a plan', () => {
+  /** A CLI io whose posts are recorded, so a plan that loaded shows up as a POST to /plan. */
+  function planIo(cwd: string, env: Record<string, string | undefined> = {}) {
+    const routes: string[] = [];
+    const fetch = (async (url: string, init?: RequestInit) => {
+      routes.push(new URL(url).pathname);
+      const body = init?.method === 'POST' && String(url).endsWith('/missions')
+        ? { mission_id: 'm-1', planner_token: 't' }
+        : { task_ids: [] };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    return { io: { ...capture(), fetch, env, cwd, graph: fakeGraphApi() }, routes };
+  }
+
+  it('takes a plan under the working directory as given', async () => {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, 'mine.yaml'), 'tasks: []\n');
+    const { io, routes } = planIo(dir);
+
+    expect(await run(['up', 'a mission', '--plan', 'mine.yaml'], io)).toBe(0);
+    expect(routes.some((r) => r.endsWith('/plan'))).toBe(true);
+  });
+
+  it('falls back to the entente checkout, so `examples/…` works from the mission repo', async () => {
+    const home = tmpDir();
+    fs.mkdirSync(path.join(home, 'examples'));
+    fs.writeFileSync(path.join(home, 'examples', 'p.yaml'), 'tasks: []\n');
+    const { io, routes } = planIo(tmpDir(), { RELAY_HOME: home });
+
+    expect(await run(['up', 'a mission', '--plan', 'examples/p.yaml'], io)).toBe(0);
+    expect(routes.some((r) => r.endsWith('/plan'))).toBe(true);
+  });
+
+  it('an explicitly relative path is never rewritten', async () => {
+    const home = tmpDir();
+    fs.mkdirSync(path.join(home, 'examples'));
+    fs.writeFileSync(path.join(home, 'examples', 'p.yaml'), 'tasks: []\n');
+    const { io } = planIo(tmpDir(), { RELAY_HOME: home });
+
+    // `./examples/p.yaml` means here, and here it is not.
+    expect(await run(['up', 'a mission', '--plan', './examples/p.yaml'], io)).toBe(1);
+  });
+
+  it('a miss says where it looked', async () => {
+    const { io } = planIo(tmpDir());
+
+    expect(await run(['up', 'a mission', '--plan', 'nope.yaml'], io)).toBe(1);
+    expect(io.err.join('\n')).toMatch(/working directory, then in the entente checkout/);
+  });
+});

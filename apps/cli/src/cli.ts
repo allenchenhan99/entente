@@ -481,7 +481,7 @@ async function up(args: string[], io: CliIo): Promise<number> {
   if (values.planner !== undefined && values.planner !== 'claude-code' && values.planner !== 'codex') {
     throw new UsageError(`--planner must be claude-code or codex, got ${values.planner}`);
   }
-  const plan = values.plan !== undefined ? loadPlan(path.resolve(io.cwd, values.plan)) : undefined;
+  const plan = values.plan !== undefined ? loadPlan(resolvePlan(io, values.plan)) : undefined;
 
   const body: CreateMissionBody = {
     repo: path.resolve(io.cwd, values.repo ?? '.'),
@@ -842,12 +842,35 @@ function parseKnown<T extends OptionSpec>(args: string[], options: T) {
   }
 }
 
+/**
+ * Where to look for a plan: the working directory first, then the entente checkout the CLI came from.
+ *
+ * `relay` is normally run from the repo the mission is about — that is where its session token lives —
+ * while `examples/` ships with the tool, so a bare `examples/plan-delegation.yaml` names a file that
+ * is not under the cwd. Falling back to the tool's own directory is what makes that work; an absolute
+ * or explicitly-relative path (`./plan.yaml`) is taken as given and never rewritten.
+ */
+function resolvePlan(io: CliIo, file: string): string {
+  const fromCwd = path.resolve(io.cwd, file);
+  if (fs.existsSync(fromCwd) || path.isAbsolute(file) || file.startsWith('.')) return fromCwd;
+  const home = io.env.RELAY_HOME;
+  if (home !== undefined) {
+    const fromHome = path.resolve(home, file);
+    if (fs.existsSync(fromHome)) return fromHome;
+  }
+  return fromCwd;
+}
+
 function loadPlan(file: string): LoadPlanBody {
   let raw: unknown;
   try {
     raw = parseYaml(fs.readFileSync(file, 'utf8'));
   } catch (err) {
-    throw new CommandError(`cannot load plan ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new CommandError(
+      `cannot load plan ${file}: ${err instanceof Error ? err.message : String(err)}`
+      + '\n  a bare path is looked for in the working directory, then in the entente checkout'
+      + ' (RELAY_HOME); pass an absolute path to name one exactly',
+    );
   }
   const candidate = Array.isArray(raw) ? { tasks: raw } : raw;
   const parsed = LoadPlanBody.safeParse(candidate);
