@@ -34,6 +34,11 @@ export interface ClaudeCodeRuntimeDeps {
   homeDir?: string;
   /** Environment used to resolve HOME; defaults to `process.env`. */
   env?: Record<string, string | undefined>;
+  /**
+   * Model for every agent this runtime spawns — an alias (`haiku`, `sonnet`, `opus`) or a full id.
+   * Defaults to `RELAY_CLAUDE_MODEL`; unset leaves Claude Code on whatever the user configured.
+   */
+  model?: string;
 }
 
 /**
@@ -55,12 +60,14 @@ export class ClaudeCodeRuntime implements AgentRuntime {
   private readonly executable: string;
   private readonly homeDir: string;
   private readonly env: Record<string, string | undefined>;
+  private readonly model: string | undefined;
 
   constructor(deps: ClaudeCodeRuntimeDeps = {}) {
     const env = deps.env ?? process.env;
     this.executable = deps.executable ?? 'claude';
     this.homeDir = deps.homeDir ?? env.HOME ?? os.homedir();
     this.env = env;
+    this.model = deps.model ?? env.RELAY_CLAUDE_MODEL;
   }
 
   private async readJson(file: string): Promise<Record<string, unknown>> {
@@ -141,6 +148,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
 
   private commonArgv(mcpPath: string): string[] {
     return [
+      ...(this.model ? ['--model', this.model] : []),
       '--mcp-config', mcpPath,
       // Unattended agents cannot answer permission dialogs (any `ls`/`cat`/`mkdir` outside the allowlist, or a
       // read through the node_modules symlink, would block forever). Isolation comes from the git worktree and

@@ -226,3 +226,47 @@ describe('createRuntime', () => {
     expect(() => createRuntime('gemini' as never)).toThrow(/runtime/);
   });
 });
+
+describe('model selection', () => {
+  it('claude-code passes the model when one is configured, and nothing when it is not', async () => {
+    acceptBypass(tmp);
+    const chosen = new ClaudeCodeRuntime({ homeDir: tmp, env: { HOME: tmp, RELAY_CLAUDE_MODEL: 'haiku' } });
+    const { argv } = await chosen.prepare(spec, path.join(tmp, 'cfg'));
+    expect(argv.join(' ')).toContain('--model haiku');
+
+    const fallback = new ClaudeCodeRuntime({ homeDir: tmp, env: { HOME: tmp } });
+    const plain = await fallback.prepare(spec, path.join(tmp, 'cfg2'));
+    expect(plain.argv).not.toContain('--model');
+  });
+
+  it('codex passes the model too: its isolated CODEX_HOME ignores the user config.toml', async () => {
+    const chosen = new CodexRuntime({ homeDir: tmp, env: { HOME: tmp, RELAY_CODEX_MODEL: 'luna' } });
+    const { argv } = await chosen.prepare(spec, path.join(tmp, 'cfg'));
+    expect(argv.join(' ')).toContain('--model luna');
+
+    const fallback = new CodexRuntime({ homeDir: tmp, env: { HOME: tmp } });
+    const plain = await fallback.prepare(spec, path.join(tmp, 'cfg2'));
+    expect(plain.argv).not.toContain('--model');
+  });
+
+  it('an explicit dep beats the environment', async () => {
+    const runtime = new CodexRuntime({
+      homeDir: tmp,
+      env: { HOME: tmp, RELAY_CODEX_MODEL: 'from-env' },
+      model: 'explicit',
+    });
+    const { argv } = await runtime.prepare(spec, path.join(tmp, 'cfg'));
+    expect(argv.join(' ')).toContain('--model explicit');
+  });
+
+  it('the model survives a daemon restart, so a resumed agent is not silently downgraded', async () => {
+    acceptBypass(tmp);
+    const claude = new ClaudeCodeRuntime({ homeDir: tmp, env: { HOME: tmp, RELAY_CLAUDE_MODEL: 'haiku' } });
+    const resumed = await claude.resume(spec, path.join(tmp, 'cfg'));
+    expect(resumed.argv.join(' ')).toContain('--model haiku');
+
+    const codex = new CodexRuntime({ homeDir: tmp, env: { HOME: tmp, RELAY_CODEX_MODEL: 'luna' } });
+    const codexResumed = await codex.resume(spec, path.join(tmp, 'cfg3'));
+    expect(codexResumed.argv.join(' ')).toContain('--model luna');
+  });
+});

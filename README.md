@@ -75,6 +75,15 @@ Terminal hosts (`RELAY_HOST` for a hand-started `relayd`):
 | `relay` (default) | relayd itself (node-pty); `/panes*`, `/pty/:id`, `/metrics` served in-process |
 | `relayterm` | the Rust `termd` (`cargo build -p termd`, or `RELAY_TERMD=<binary>`); relayd spawns it and proxies the same routes to it |
 
+Agent models: unset, each runtime uses whatever the user configured. `RELAY_CLAUDE_MODEL` and
+`RELAY_CODEX_MODEL` pin one for every agent relayd spawns (an alias such as `haiku` or a full model id);
+they are passed as `--model` and survive a daemon restart. Codex agents run under an isolated
+`CODEX_HOME`, so `~/.codex/config.toml` does not reach them — this is how to choose their model.
+
+```bash
+RELAY_CLAUDE_MODEL=haiku RELAY_CODEX_MODEL=<codex-model> entente --repo ~/entente-demo/app
+```
+
 No agents, daemon, or API keys? Replay a recorded run directly:
 
 ```bash
