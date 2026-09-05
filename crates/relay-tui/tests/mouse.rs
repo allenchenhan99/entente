@@ -4,7 +4,7 @@
 mod support;
 
 use relay_tui::app::{App, Effect, Mode, Region, Viewport};
-use relay_tui::keys::{Key, Mouse, MouseKind};
+use relay_tui::keys::{Key, KeyCode, Mouse, MouseKind};
 use relay_tui::model::*;
 use support::*;
 
@@ -590,4 +590,87 @@ fn an_agent_you_launched_is_a_brain_without_any_planner() {
         "{:?}",
         naming["relay:3"]
     );
+}
+
+// --- scrolling a pane ----------------------------------------------------------------------------
+
+#[test]
+fn the_wheel_over_a_pane_scrolls_its_history() {
+    let mut app = app_with_panes();
+    let rect = *app.pane_rects.get("relay:1").unwrap();
+    assert_eq!(app.pane_scroll("relay:1"), 0, "starts at the live edge");
+
+    app.handle_mouse(Mouse::new(MouseKind::ScrollUp, rect.x + 2, rect.y + 2));
+    let back = app.pane_scroll("relay:1");
+    assert!(back > 0, "the wheel went back into the scrollback");
+
+    app.handle_mouse(Mouse::new(MouseKind::ScrollDown, rect.x + 2, rect.y + 2));
+    assert!(app.pane_scroll("relay:1") < back);
+}
+
+#[test]
+fn scrolling_a_pane_does_not_move_the_graph_or_the_selection() {
+    let mut app = app_with_panes();
+    let rect = *app.pane_rects.get("relay:1").unwrap();
+    let before = (app.selected.clone(), app.graph_view);
+
+    app.handle_mouse(Mouse::new(MouseKind::ScrollUp, rect.x + 2, rect.y + 2));
+
+    assert_eq!((app.selected.clone(), app.graph_view), before);
+}
+
+#[test]
+fn a_pane_cannot_scroll_past_the_live_edge() {
+    let mut app = app_with_panes();
+    let rect = *app.pane_rects.get("relay:1").unwrap();
+
+    for _ in 0..20 {
+        app.handle_mouse(Mouse::new(MouseKind::ScrollDown, rect.x + 2, rect.y + 2));
+    }
+
+    assert_eq!(
+        app.pane_scroll("relay:1"),
+        0,
+        "0 is the bottom, not a negative"
+    );
+}
+
+#[test]
+fn page_keys_scroll_the_focused_pane() {
+    let mut app = app_with_panes();
+
+    app.handle_key(Key::new(KeyCode::PageUp));
+    let back = app.pane_scroll("relay:1");
+    assert!(back > 0, "PgUp went back");
+
+    app.handle_key(Key::new(KeyCode::PageDown));
+    assert!(app.pane_scroll("relay:1") < back, "PgDn came forward");
+}
+
+#[test]
+fn typing_returns_the_pane_to_the_live_edge() {
+    let mut app = app_with_panes();
+    app.handle_key(Key::new(KeyCode::PageUp));
+    assert!(app.pane_scroll("relay:1") > 0);
+    let rect = *app.pane_rects.get("relay:1").unwrap();
+    click(&mut app, rect.x + 2, rect.y + 1); // the focused pane: starts typing
+
+    app.handle_key(Key::char('x'));
+
+    assert_eq!(
+        app.pane_scroll("relay:1"),
+        0,
+        "typing means you want to see what you are typing"
+    );
+}
+
+#[test]
+fn each_pane_keeps_its_own_position() {
+    let mut app = app_with_panes();
+    let second = *app.pane_rects.get("relay:2").unwrap();
+
+    app.handle_mouse(Mouse::new(MouseKind::ScrollUp, second.x + 2, second.y + 2));
+
+    assert!(app.pane_scroll("relay:2") > 0);
+    assert_eq!(app.pane_scroll("relay:1"), 0, "the other pane did not move");
 }

@@ -113,7 +113,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     // The focused pane.
     if let Some(pane) = app.pane_states.get(&focused) {
         let mut title = pane_title(app, pane);
-        if app.terminal_input {
+        // Scrolled back is not the live edge, and output arriving below must not be mistaken for what
+        // you are reading, so the title says so.
+        let scrolled = app.pane_scroll(&focused);
+        if scrolled > 0 {
+            title.push_str(&format!("  [↑{scrolled} · PgDn for live]"));
+        } else if app.terminal_input {
             title.push_str("  [typing · Esc leaves]");
         } else if active {
             title.push_str("  [i to type]");
@@ -132,6 +137,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
             .insert(focused.clone(), (pane_area.width, pane_area.height));
         // The whole slot, title row included: a click anywhere on a pane means that pane.
         app.pane_rects.insert(focused.clone(), viewport_of(big));
+        // Scrollback is the screen's own: set where the viewport sits, draw, then put it back so the
+        // model is never left holding a view state that belongs to the UI.
+        let back = app.pane_scroll(&focused);
+        let pane = app.pane_states.get_mut(&focused).expect("focused pane");
+        pane.parser.screen_mut().set_scrollback(back);
         let screen = pane.parser.screen();
         let widget = PseudoTerminal::new(screen);
         frame.render_widget(widget, pane_area);

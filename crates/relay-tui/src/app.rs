@@ -27,6 +27,10 @@ pub enum Region {
 
 const REGIONS: [Region; 4] = [Region::Tree, Region::Graph, Region::Panes, Region::Inbox];
 
+/// Rows a wheel notch or a page key moves a pane's scrollback.
+const SCROLL_ROWS: i32 = 3;
+const PAGE_ROWS: i32 = 10;
+
 impl Region {
     pub fn title(self) -> &'static str {
         match self {
@@ -339,6 +343,9 @@ pub struct App {
     graph_drag: Option<(u16, u16)>,
     /// Pane the user is being asked about before it is closed.
     pending_pane_close: Option<String>,
+    /// How far each pane is scrolled back, in rows. A pane at 0 is at the live edge; anything else is
+    /// history, and stays put while output arrives so it can actually be read.
+    pane_scroll: BTreeMap<String, usize>,
     /// Panes the user has closed. relayd keeps a killed pane in `/panes` — the record and its cast
     /// outlive the process — so the grid has to remember what was dismissed or a closed pane comes
     /// straight back on the next poll, looking as though `X` did nothing.
@@ -389,6 +396,7 @@ impl App {
             mouse_capture: true,
             graph_drag: None,
             pending_pane_close: None,
+            pane_scroll: BTreeMap::new(),
             dismissed_panes: std::collections::BTreeSet::new(),
             tick: 0,
         }
@@ -866,10 +874,14 @@ impl App {
                 return Vec::new();
             }
             return match self.focused_pane.clone() {
-                Some(pane_id) => vec![Effect::PaneInput {
-                    pane_id,
-                    data: key.encode(),
-                }],
+                Some(pane_id) => {
+                    // Typing means you want the live edge, as it does in any terminal.
+                    self.scroll_pane_to_bottom(&pane_id);
+                    vec![Effect::PaneInput {
+                        pane_id,
+                        data: key.encode(),
+                    }]
+                }
                 None => {
                     self.terminal_input = false;
                     Vec::new()
@@ -1057,6 +1069,18 @@ impl App {
                     }
                 }
             }
+            (KeyCode::PageUp, _) | (KeyCode::PageDown, _) => {
+                let rows = if key.code == KeyCode::PageUp {
+                    PAGE_ROWS
+                } else {
+                    -PAGE_ROWS
+                };
+                match self.focused_pane.clone() {
+                    Some(pane_id) => self.scroll_pane(&pane_id, rows),
+                    None => self.set_notice("no pane to scroll"),
+                }
+                Vec::new()
+            }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => self.cycle_region(),
             // In the graph the arrows pan the network; j/k still walk the objects.
             (KeyCode::Left, _) if self.region == Region::Graph => {
@@ -1222,9 +1246,42 @@ impl App {
         }
     }
 
-    /// The pane grid: a click focuses a pane, and a click into the pane that already has focus starts
-    /// typing into it — the way clicking into a text field does.
+    /// How far back a pane is scrolled, in rows.
+    pub fn pane_scroll(&self, pane_id: &str) -> usize {
+        self.pane_scroll.get(pane_id).copied().unwrap_or(0)
+    }
+
+    /// Scroll a pane through its own scrollback. Positive is back into history; the vt100 screen
+    /// clamps to what it actually kept, so this cannot run off the end.
+    pub fn scroll_pane(&mut self, pane_id: &str, rows: i32) {
+        let current = self.pane_scroll(pane_id) as i32;
+        let next = (current + rows).max(0) as usize;
+        if next == 0 {
+            self.pane_scroll.remove(pane_id);
+        } else {
+            self.pane_scroll.insert(pane_id.to_string(), next);
+        }
+    }
+
+    /// Back to the live edge — what typing into a pane should do, the way a terminal does.
+    pub fn scroll_pane_to_bottom(&mut self, pane_id: &str) {
+        self.pane_scroll.remove(pane_id);
+    }
+
+    /// The pane grid: a click focuses a pane, a click into the pane that already has focus starts
+    /// typing into it — the way clicking into a text field does — and the wheel scrolls its history.
     fn mouse_in_pane(&mut self, mouse: Mouse, pane_id: String) -> Vec<Effect> {
+        match mouse.kind {
+            MouseKind::ScrollUp => {
+                self.scroll_pane(&pane_id, SCROLL_ROWS);
+                return Vec::new();
+            }
+            MouseKind::ScrollDown => {
+                self.scroll_pane(&pane_id, -SCROLL_ROWS);
+                return Vec::new();
+            }
+            _ => {}
+        }
         if mouse.kind != MouseKind::Down {
             return Vec::new();
         }
