@@ -180,14 +180,18 @@ fn typing_into_a_pane_sends_the_keys_there() {
 }
 
 #[test]
-fn escape_leaves_a_pane_so_the_keys_are_the_apps_again() {
+fn ctrl_bracket_leaves_a_pane_so_the_keys_are_the_apps_again() {
     let mut app = app_with_panes();
     let rect = *app.pane_rects.get("relay:1").unwrap();
     click(&mut app, rect.x + 2, rect.y + rect.height / 2);
     assert!(app.terminal_input);
 
+    // Esc is the agent's: it stops a run in Claude Code and Codex, and taking it to leave the pane
+    // turned the one key you reach for to interrupt into one that took your keyboard away.
     app.handle_key(Key::ESC);
+    assert!(app.terminal_input, "Esc goes to the agent");
 
+    app.handle_key(Key::ctrl(']'));
     assert!(!app.terminal_input);
 }
 
@@ -1434,4 +1438,90 @@ fn a_question_answered_elsewhere_leaves_the_queue() {
         Some("Link expiry?> "),
         "one question left, so no count, and it is the right one"
     );
+}
+
+// --- scrolling a full-screen agent ---------------------------------------------------------------
+
+/// A pane whose program has switched to the alternate screen, as every coding agent does.
+fn full_screen_pane(setup: &[u8]) -> App {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![pane("relay:1", None, "brain", true)],
+        Some("relay:1".into()),
+    );
+    let state = app.ws_mut().pane_states.get_mut("relay:1").unwrap();
+    // `?1049h` is the alternate screen: no scrollback exists behind it, by definition.
+    state.parser.process(b"\x1b[?1049h");
+    state.parser.process(setup);
+    draw_rows(&mut app, 120, 32);
+    app
+}
+
+#[test]
+fn scrolling_a_full_screen_agent_sends_it_the_scroll_instead_of_moving_a_history_it_does_not_have()
+{
+    let mut app = full_screen_pane(b"");
+
+    let effects = app.scroll_pane("relay:1", 3);
+
+    // The alternate screen keeps nothing behind it, so `set_scrollback` clamped to zero and the wheel
+    // did nothing at all. What the app expects is what every terminal emulator sends it.
+    match effects.as_slice() {
+        [Effect::PaneInput { pane_id, data }] => {
+            assert_eq!(pane_id, "relay:1");
+            assert_eq!(data, b"\x1b[A\x1b[A\x1b[A", "three notches, three arrows");
+        }
+        other => panic!("expected input to the pane, got {other:?}"),
+    }
+    assert_eq!(
+        app.pane_scroll("relay:1"),
+        0,
+        "and nothing was scrolled here"
+    );
+
+    let down = app.scroll_pane("relay:1", -1);
+    match down.as_slice() {
+        [Effect::PaneInput { data, .. }] => assert_eq!(data, b"\x1b[B"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn an_app_that_asked_for_the_mouse_gets_wheel_events_rather_than_arrows() {
+    // `?1000h` turns mouse reporting on, `?1006h` asks for the SGR encoding.
+    let mut app = full_screen_pane(b"\x1b[?1000h\x1b[?1006h");
+
+    let effects = app.scroll_pane("relay:1", 1);
+
+    match effects.as_slice() {
+        [Effect::PaneInput { data, .. }] => {
+            // Button 64 is wheel-up; an app that asked to hear about the mouse is waiting for this,
+            // and arrow keys would be typed into whatever it has focused instead.
+            assert_eq!(String::from_utf8_lossy(data), "\x1b[<64;1;1M");
+        }
+        other => panic!("expected a wheel event, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_plain_shell_still_scrolls_its_own_history() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![pane("relay:1", None, "shell", true)],
+        Some("relay:1".into()),
+    );
+    let state = app.ws_mut().pane_states.get_mut("relay:1").unwrap();
+    for n in 0..80 {
+        state.parser.process(format!("line {n}\r\n").as_bytes());
+    }
+    draw_rows(&mut app, 120, 32);
+
+    // No alternate screen, so there is a history behind it and the scroll is ours to make.
+    assert!(
+        app.scroll_pane("relay:1", 3).is_empty(),
+        "nothing is sent to the pane"
+    );
+    assert_eq!(app.pane_scroll("relay:1"), 3);
 }

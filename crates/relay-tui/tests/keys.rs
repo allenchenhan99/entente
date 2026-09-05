@@ -320,7 +320,16 @@ fn keys_f_focuses_the_selected_tasks_pane_and_i_routes_input_to_it() {
         app.handle_key(Key::ctrl('c'))[0],
         Effect::PaneInput { .. }
     ));
-    app.handle_key(Key::ESC);
+    // Esc goes to the agent too: in Claude Code and Codex it is what stops a run, and swallowing it
+    // to leave the pane meant the one key you reach for to interrupt took your keyboard away instead.
+    assert!(matches!(
+        app.handle_key(Key::ESC)[0],
+        Effect::PaneInput { .. }
+    ));
+    assert!(app.terminal_input, "Esc did not leave the pane");
+
+    // Ctrl+] does, the way telnet's escape character always has — a chord no full-screen app binds.
+    app.handle_key(Key::ctrl(']'));
     assert!(!app.terminal_input);
     assert_eq!(app.handle_key(Key::char('q')), vec![Effect::Quit]);
 }

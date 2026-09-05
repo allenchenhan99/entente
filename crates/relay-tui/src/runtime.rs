@@ -289,7 +289,7 @@ impl<B: Backend> Runtime<B> {
         if let Some(pane_id) = self.pending_pane.clone() {
             if self.app.ws_mut().panes.contains(&pane_id) {
                 self.pending_pane = None;
-                // `t` asked for a terminal: focus it and put the keyboard in it, Esc to leave.
+                // `t` asked for a terminal: focus it and put the keyboard in it, Ctrl+] to leave.
                 let effects = self.app.open_pane_for_typing(pane_id);
                 self.run_effects(effects);
             }

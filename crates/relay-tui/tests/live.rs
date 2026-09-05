@@ -433,11 +433,13 @@ async fn live_sse_graph_refresh_pane_bytes_input_and_resize() {
         .collect();
     assert_eq!(inputs, vec![BASE64.encode(b"x"), BASE64.encode(b"\r")]);
     assert!(
-        screen(&rt).contains("[typing · Esc leaves]"),
+        screen(&rt).contains("[typing · Ctrl+] leaves]"),
         "{}",
         screen(&rt)
     );
-    press(&rt, Key::ESC);
+    // Esc reaches the agent — it is what stops a run in Claude Code and Codex — so leaving is a chord
+    // no full-screen app binds.
+    press(&rt, Key::ctrl(']'));
     until(&mut rt, "left typing mode", |rt| !rt.app.terminal_input).await;
 
     // A terminal resize changes the widget size → another resize frame.

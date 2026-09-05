@@ -1246,7 +1246,11 @@ impl App {
     /// Port of `useInput` in `keys.ts`, plus the pane grid.
     pub fn handle_key(&mut self, key: Key) -> Vec<Effect> {
         if self.terminal_input {
-            if key.code == KeyCode::Esc && !key.ctrl && !key.alt {
+            // Esc is the agent's key, not ours. In Claude Code and Codex it stops what the agent is
+            // doing, and swallowing it to leave the pane meant the one key you reach for to interrupt
+            // a run instead quietly took your keyboard away. Ctrl+] leaves, the way telnet's escape
+            // character has always worked, and it is a chord no full-screen app binds.
+            if key.ctrl && matches!(key.code, KeyCode::Char(']')) {
                 self.terminal_input = false;
                 return Vec::new();
             }
@@ -1501,9 +1505,11 @@ impl App {
                 };
                 match self.ws().focused_pane.clone() {
                     Some(pane_id) => self.scroll_pane(&pane_id, rows),
-                    None => self.set_notice("no pane to scroll"),
+                    None => {
+                        self.set_notice("no pane to scroll");
+                        Vec::new()
+                    }
                 }
-                Vec::new()
             }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => self.cycle_region(),
             // While you are reading, the arrows move the text; the graph gets them the rest of the time.
@@ -1713,7 +1719,21 @@ impl App {
 
     /// Scroll a pane through its own scrollback. Positive is back into history; the vt100 screen
     /// clamps to what it actually kept, so this cannot run off the end.
-    pub fn scroll_pane(&mut self, pane_id: &str, rows: i32) {
+    /// Scroll a pane by `rows` (positive is back through history).
+    ///
+    /// Returns the bytes to send the pane instead, when the scroll is not ours to make. A full-screen
+    /// application — every coding agent is one — switches the terminal to its alternate screen, which
+    /// by definition keeps no scrollback: there is nothing behind it to scroll to, `set_scrollback`
+    /// clamps to zero, and the wheel did nothing at all. What such an app expects is what every
+    /// terminal emulator sends it, which is input it can act on itself.
+    #[must_use]
+    pub fn scroll_pane(&mut self, pane_id: &str, rows: i32) -> Vec<Effect> {
+        if let Some(data) = self.pane_scroll_input(pane_id, rows) {
+            return vec![Effect::PaneInput {
+                pane_id: pane_id.to_string(),
+                data,
+            }];
+        }
         let current = self.pane_scroll(pane_id) as i32;
         let next = (current + rows).max(0) as usize;
         if next == 0 {
@@ -1721,6 +1741,52 @@ impl App {
         } else {
             self.pane_scroll.insert(pane_id.to_string(), next);
         }
+        Vec::new()
+    }
+
+    /// What to send a full-screen application in place of scrolling its (non-existent) scrollback.
+    ///
+    /// An app that asked for mouse reporting gets wheel events, which is what it is waiting for. One
+    /// that did not gets arrow keys — the "alternate scroll" convention every terminal emulator
+    /// implements for exactly this case, and what makes the wheel work in `less` and in an agent's
+    /// transcript alike. `None` means the pane keeps its own history and the scroll is ours to make.
+    fn pane_scroll_input(&self, pane_id: &str, rows: i32) -> Option<Vec<u8>> {
+        let pane = self.ws().pane_states.get(pane_id)?;
+        let screen = pane.parser.screen();
+        if !screen.alternate_screen() || rows == 0 {
+            return None;
+        }
+        let up = rows > 0;
+        let notches = rows.unsigned_abs() as usize;
+        if screen.mouse_protocol_mode() == vt100::MouseProtocolMode::None {
+            // `\x1bOA` rather than `\x1b[A` when the app put the cursor keys in application mode.
+            let arrow: &[u8] = match (screen.application_cursor(), up) {
+                (true, true) => b"\x1bOA",
+                (true, false) => b"\x1bOB",
+                (false, true) => b"\x1b[A",
+                (false, false) => b"\x1b[B",
+            };
+            return Some(arrow.repeat(notches));
+        }
+        // Wheel up is button 64, wheel down 65; the cell is where the pointer is, 1-based.
+        let button = if up { 64 } else { 65 };
+        let (col, row) = (1u16, 1u16);
+        let mut out = Vec::new();
+        for _ in 0..notches {
+            match screen.mouse_protocol_encoding() {
+                vt100::MouseProtocolEncoding::Sgr => {
+                    out.extend_from_slice(format!("\x1b[<{button};{col};{row}M").as_bytes());
+                }
+                // X10: three bytes offset by 32, which is why it cannot address past column 223.
+                _ => {
+                    out.extend_from_slice(b"\x1b[M");
+                    out.push(32 + button as u8);
+                    out.push(32 + col.min(223) as u8);
+                    out.push(32 + row.min(223) as u8);
+                }
+            }
+        }
+        Some(out)
     }
 
     /// A graph for a workspace that may not be the active one. The active workspace also refreshes
@@ -1853,14 +1919,8 @@ impl App {
     /// typing into it — the way clicking into a text field does — and the wheel scrolls its history.
     fn mouse_in_pane(&mut self, mouse: Mouse, pane_id: String) -> Vec<Effect> {
         match mouse.kind {
-            MouseKind::ScrollUp => {
-                self.scroll_pane(&pane_id, SCROLL_ROWS);
-                return Vec::new();
-            }
-            MouseKind::ScrollDown => {
-                self.scroll_pane(&pane_id, -SCROLL_ROWS);
-                return Vec::new();
-            }
+            MouseKind::ScrollUp => return self.scroll_pane(&pane_id, SCROLL_ROWS),
+            MouseKind::ScrollDown => return self.scroll_pane(&pane_id, -SCROLL_ROWS),
             _ => {}
         }
         if mouse.kind != MouseKind::Down {

@@ -211,7 +211,7 @@ pub const KEY_HELP: &[(&str, &str)] = &[
     ),
     (
         "i",
-        "inspect · in the pane grid: type into the focused terminal (Esc leaves)",
+        "inspect · in the pane grid: type into the focused terminal (Ctrl+] leaves; Esc goes to the agent)",
     ),
     (
         "a / c",
@@ -236,7 +236,7 @@ pub const KEY_HELP: &[(&str, &str)] = &[
     ),
     (
         "click a focused pane",
-        "type into it (Esc leaves) — clicking it again is the same as i",
+        "type into it (Ctrl+] leaves) — clicking it again is the same as i",
     ),
     (
         "drag / wheel",
