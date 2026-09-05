@@ -62,6 +62,9 @@ Generated from `packages/protocol/src` by `scripts/gen-protocol-docs.mjs`. JSON 
 - `integration_conflict`
 - `mission_verified`
 - `mission_failed`
+- `mission_canceled`
+- `task_deleted`
+- `mission_deleted`
 
 ## Task state layers
 

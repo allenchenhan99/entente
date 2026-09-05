@@ -3093,6 +3093,141 @@
         "payload"
       ],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "mission_canceled"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "task_deleted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "ts": {
+          "type": "string"
+        },
+        "mission_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string",
+          "pattern": "^(human|planner|relayd|agent:[a-z][a-z0-9_-]{0,31})$"
+        },
+        "type": {
+          "type": "string",
+          "const": "mission_deleted"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "seq",
+        "ts",
+        "mission_id",
+        "actor",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
     }
   ]
 }

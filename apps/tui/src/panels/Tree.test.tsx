@@ -1,6 +1,7 @@
 import { render } from 'ink-testing-library';
 import { describe, expect, it } from 'vitest';
 
+import { stripAnsi } from '../graph/canvas.js';
 import { objectGraph } from '../__fixtures__/graph.js';
 import { midClarificationState } from '../__fixtures__/states.js';
 import { Tree } from './Tree.js';
@@ -24,7 +25,9 @@ describe('tree objects', () => {
     const { lastFrame } = render(
       <Tree state={midClarificationState} graph={objectGraph} height={12} selected={{ kind: 'node', id: 't-backend-auth' }} />,
     );
-    const lines = (lastFrame() ?? '').split('\n');
+    // Styled rows carry ANSI, so compare what is actually on screen: a raw line never equals its own
+    // text, and its `length` counts escape bytes rather than the columns this test is about.
+    const lines = (lastFrame() ?? '').split('\n').map(stripAnsi);
 
     expect(lines).toContain('    wt .relay/wt/t-backend-auth');
     expect(lines).toContain('    wt .relay/wt/t-frontend-login · ? 2');
