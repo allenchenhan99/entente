@@ -1009,3 +1009,71 @@ fn a_workspace_goes_by_its_port_until_its_daemon_says_which_repo() {
 
     assert_eq!(app.ws().name, ":7421");
 }
+
+// --- reading something longer than the panel ------------------------------------------------------
+
+#[test]
+fn arrows_scroll_along_a_question_while_the_inspector_is_open() {
+    let mut app = replay_app("live-1");
+    app.inspector_open = true;
+
+    app.handle_key(Key::new(KeyCode::Right));
+    let moved = app.h_scroll;
+    assert!(moved > 0, "the text moved right");
+
+    app.handle_key(Key::new(KeyCode::Left));
+    assert!(app.h_scroll < moved, "and back left");
+}
+
+#[test]
+fn it_never_scrolls_past_the_left_edge() {
+    let mut app = replay_app("live-1");
+    app.inspector_open = true;
+
+    for _ in 0..10 {
+        app.handle_key(Key::new(KeyCode::Left));
+    }
+
+    assert_eq!(app.h_scroll, 0, "0 is the start, not a negative");
+}
+
+#[test]
+fn the_graph_keeps_the_arrows_when_nothing_is_being_read() {
+    let mut app = replay_app("live-1");
+    app.region = Region::Graph;
+    assert!(!app.inspector_open);
+
+    app.handle_key(Key::new(KeyCode::Right));
+
+    assert_eq!(app.h_scroll, 0, "the arrows panned the network instead");
+    assert!(app.graph_view.pan_x > 0.0);
+}
+
+#[test]
+fn reading_starts_from_the_left_again_when_the_selection_changes() {
+    let mut app = replay_app("live-1");
+    app.inspector_open = true;
+    app.handle_key(Key::new(KeyCode::Right));
+    assert!(app.h_scroll > 0);
+
+    app.select(Some(GraphObjectRef::node("t-frontend-login")));
+
+    assert_eq!(
+        app.h_scroll, 0,
+        "a different object is read from its own beginning"
+    );
+}
+
+#[test]
+fn the_panel_says_when_you_are_not_at_the_left() {
+    let mut app = replay_app("live-1");
+    app.inspector_open = true;
+    app.handle_key(Key::new(KeyCode::Right));
+
+    let text = String::from_iter(draw_rows(&mut app, 120, 32));
+
+    assert!(
+        text.contains("→"),
+        "a half-read line is never mistaken for a whole one:\n{text}"
+    );
+}

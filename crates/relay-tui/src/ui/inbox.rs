@@ -108,11 +108,14 @@ pub fn inbox_rows(app: &App, height: usize) -> Vec<InboxRow> {
 }
 
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
-    let title = if app.ws().graph.inbox.is_empty() {
+    let mut title = if app.ws().graph.inbox.is_empty() {
         Region::Inbox.title().to_string()
     } else {
         format!("{} ({})", Region::Inbox.title(), app.ws().graph.inbox.len())
     };
+    if app.h_scroll > 0 {
+        title.push_str(&format!("  →{}", app.h_scroll));
+    }
     let block = panel_block(&title, region_active(app, Region::Inbox), Borders::TOP);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -120,7 +123,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     app.inbox_viewport = viewport_of(inner);
     app.inbox_rows = rows.iter().map(|(_, r)| r.clone()).collect();
     frame.render_widget(
-        Paragraph::new(rows.into_iter().map(|(line, _)| line).collect::<Vec<_>>()),
+        Paragraph::new(rows.into_iter().map(|(line, _)| line).collect::<Vec<_>>())
+            .scroll((0, app.h_scroll)),
         inner,
     );
 }

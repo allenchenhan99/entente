@@ -30,6 +30,9 @@ const REGIONS: [Region; 4] = [Region::Tree, Region::Graph, Region::Panes, Region
 /// Rows a wheel notch or a page key moves a pane's scrollback.
 const SCROLL_ROWS: i32 = 3;
 const PAGE_ROWS: i32 = 10;
+/// Columns an arrow moves the text panels, and how far right they will go at all.
+const H_SCROLL_COLUMNS: i32 = 8;
+const MAX_H_SCROLL: u16 = 400;
 
 impl Region {
     pub fn title(self) -> &'static str {
@@ -411,6 +414,9 @@ pub struct App {
     pending_pane_close: Option<String>,
     /// Task the user is being asked about before it is deleted.
     pending_task_delete: Option<String>,
+    /// Columns the text panels are scrolled right. A question or a blocker is longer than any panel
+    /// is wide, and cutting it off is not the same as having read it.
+    pub h_scroll: u16,
     /// How far each pane is scrolled back, in rows. A pane at 0 is at the live edge; anything else is
     /// history, and stays put while output arrives so it can actually be read.
     pane_scroll: BTreeMap<String, usize>,
@@ -468,6 +474,7 @@ impl App {
             graph_drag: None,
             pending_pane_close: None,
             pending_task_delete: None,
+            h_scroll: 0,
             pane_scroll: BTreeMap::new(),
             dismissed_panes: std::collections::BTreeSet::new(),
             tick: 0,
@@ -818,6 +825,7 @@ impl App {
         }
         self.selected = reference.clone();
         self.actions.clear();
+        self.h_scroll = 0;
         let mut effects = match &reference {
             Some(r) if r.kind != RefKind::Inbox => vec![Effect::FetchActions(r.clone())],
             _ => Vec::new(),
@@ -1214,6 +1222,15 @@ impl App {
                 Vec::new()
             }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => self.cycle_region(),
+            // While you are reading, the arrows move the text; the graph gets them the rest of the time.
+            (KeyCode::Left, _) if self.inspector_open || self.region == Region::Inbox => {
+                self.scroll_horizontally(-H_SCROLL_COLUMNS);
+                Vec::new()
+            }
+            (KeyCode::Right, _) if self.inspector_open || self.region == Region::Inbox => {
+                self.scroll_horizontally(H_SCROLL_COLUMNS);
+                Vec::new()
+            }
             // In the graph the arrows pan the network; j/k still walk the objects.
             (KeyCode::Left, _) if self.region == Region::Graph => {
                 self.graph_view.pan_by(-8.0, 0.0);
@@ -1492,6 +1509,13 @@ impl App {
     /// The stored position, readable without touching the pane map.
     pub fn pane_scroll_of(&self, pane_id: &str) -> usize {
         self.pane_scroll.get(pane_id).copied().unwrap_or(0)
+    }
+
+    /// Scroll the text panels sideways. Nothing knows how long the longest line is until it is drawn,
+    /// so the limit is generous and the panels simply show nothing past their end.
+    pub fn scroll_horizontally(&mut self, columns: i32) {
+        let next = (self.h_scroll as i32 + columns).clamp(0, MAX_H_SCROLL as i32);
+        self.h_scroll = next as u16;
     }
 
     /// Correct the stored position to what the screen actually honoured, so the UI never reports a

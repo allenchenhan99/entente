@@ -221,7 +221,11 @@ pub const KEY_HELP: &[(&str, &str)] = &[
         "mark it failed (asks for the observed failure); f otherwise focuses the pane",
     ),
     ("x", "cancel the task (asks y/N)"),
-    ("↑/↓/←/→", "in the graph: pan the network"),
+    (
+        "←/→",
+        "while reading: scroll along a long question or blocker · in the graph: pan",
+    ),
+    ("↑/↓", "in the graph: pan the network"),
     ("+ / -", "in the graph: zoom · 0 refits"),
     (
         "click",

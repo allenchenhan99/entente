@@ -100,13 +100,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
         .border_style(Style::new().fg(Color::Cyan))
         .title(Line::styled(
-            format!(" {id}  describe · story · actions "),
+            // Say where you are when you are not at the left, so a half-read line is never mistaken
+            // for the whole of one.
+            if app.h_scroll > 0 {
+                format!(" {id}  describe · story · actions  →{} ", app.h_scroll)
+            } else {
+                format!(" {id}  describe · story · actions ")
+            },
             Style::new().fg(Color::Cyan).bold(),
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let lines = inspector_lines(app, inner.height as usize);
-    frame.render_widget(Paragraph::new(lines), inner);
+    // A question is longer than this popup is wide; ←/→ move along it rather than cutting it short.
+    frame.render_widget(Paragraph::new(lines).scroll((0, app.h_scroll)), inner);
     if let Some(p) = app.prompt_line() {
         if app.input_mode != Some(crate::app::InputMode::CancelConfirm) {
             let row =
