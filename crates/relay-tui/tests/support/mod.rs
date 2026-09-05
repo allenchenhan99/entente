@@ -1,6 +1,9 @@
 //! Shared helpers for the integration tests: fixture loading and a hand-written graph with an inbox.
 #![allow(dead_code)]
 
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
+use relay_tui::app::{App, Mode};
 use relay_tui::model::*;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
@@ -78,4 +81,29 @@ pub fn reply_actions() -> Vec<ObjectAction> {
             ..ActionTarget::default()
         },
     }]
+}
+
+/// An `App` loaded from a fixture, the way the replay source would leave it.
+pub fn replay_app(name: &str) -> App {
+    let mut app = App::new(Mode::Replay);
+    app.set_state(state(name));
+    app.set_graph(graph(name));
+    app
+}
+
+/// Draw one frame into a virtual terminal, so the panels record where they were drawn, and return the
+/// screen as trimmed rows.
+pub fn draw_rows(app: &mut App, width: u16, height: u16) -> Vec<String> {
+    let mut term = Terminal::new(TestBackend::new(width, height)).unwrap();
+    term.draw(|frame| relay_tui::ui::draw(frame, app)).unwrap();
+    let buffer = term.backend().buffer();
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).map(|c| c.symbol()).unwrap_or(" "))
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
 }

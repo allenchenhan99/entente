@@ -34,15 +34,22 @@ export function latestRunId(relayDir: string): string | undefined {
 }
 
 /**
- * `RELAY_RESUME=latest` (without `RELAY_RUN_ID`) selects the newest recorded run so `loadConfig` opens it.
- * Throws when nothing was recorded: the operator asked to resume, so silently starting a fresh run would hide
- * a mistake (wrong `RELAY_DIR`, for instance).
+ * `RELAY_RESUME` (without `RELAY_RUN_ID`) selects the newest recorded run so `loadConfig` opens it:
+ *
+ * - `latest` — resume, and fail when nothing was recorded. An operator who asks for a resume is told when
+ *   there is none, rather than getting a fresh run that hides a mistake (a wrong `RELAY_DIR`, say).
+ * - `auto` — resume if there is anything to resume, otherwise start a new run. What a launcher wants: it
+ *   cannot know whether this repo has been run before, and a first run must not be an error.
  */
 export function resolveResumeEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
-  if (env.RELAY_RESUME !== 'latest' || env.RELAY_RUN_ID) return env;
+  const mode = env.RELAY_RESUME;
+  if ((mode !== 'latest' && mode !== 'auto') || env.RELAY_RUN_ID) return env;
   const { relayDir } = loadConfig(env);
   const runId = latestRunId(relayDir);
-  if (!runId) throw new Error(`RELAY_RESUME=latest: no recorded run under ${path.join(relayDir, 'runs')}`);
+  if (!runId) {
+    if (mode === 'auto') return env;
+    throw new Error(`RELAY_RESUME=latest: no recorded run under ${path.join(relayDir, 'runs')}`);
+  }
   return { ...env, RELAY_RUN_ID: runId };
 }
 

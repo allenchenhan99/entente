@@ -200,3 +200,64 @@ describe('pty input keys', () => {
     expect(fs.readFileSync(capture, 'latin1')).toBe('ab\r\x1b\x03\x1b[A\x1b[B\x1b[D\x1b[C\t\x7f\x04');
   });
 });
+
+describe('POST /panes', () => {
+  it('spawns the pane a client asked for and returns its id', async () => {
+    const { host, srv } = await setup();
+
+    const res = await srv.json<{ pane_id: string }>('POST', '/panes', {
+      name: 'shell',
+      argv: ['/bin/sh', '-c', 'printf ready; sleep 5'],
+      cwd: process.cwd(),
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.pane_id).toMatch(/^relay:\d+$/);
+    expect(host.get(res.body.pane_id)?.info().role).toBe('shell');
+  });
+
+  it('refuses a body without an executable rather than spawning nothing', async () => {
+    const { srv } = await setup();
+
+    const res = await srv.json('POST', '/panes', { name: 'shell', argv: [], cwd: process.cwd() });
+
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('DELETE /panes/:id', () => {
+  it('kills the process and forgets the pane, so a closed pane does not come back', async () => {
+    const { host, srv } = await setup();
+    const created = await srv.json<{ pane_id: string }>('POST', '/panes', {
+      name: 'shell', argv: ['/bin/sh', '-c', 'sleep 30'], cwd: process.cwd(),
+    });
+    const paneId = created.body.pane_id;
+
+    const closed = await srv.json('DELETE', `/panes/${encodeURIComponent(paneId)}`);
+
+    expect(closed.status).toBe(200);
+    expect(host.get(paneId)).toBeUndefined();
+    const listed = await srv.json<{ panes: PaneInfo[] }>('GET', '/panes');
+    expect(listed.body.panes.map((p) => p.pane_id)).not.toContain(paneId);
+  });
+
+  it('is a 404 for a pane that was never there', async () => {
+    const { srv } = await setup();
+    const res = await srv.json('DELETE', '/panes/relay%3A99');
+    expect(res.status).toBe(404);
+  });
+
+  it('leaves the recording behind: closing a terminal is not erasing the run', async () => {
+    const { host, srv } = await setup();
+    const created = await srv.json<{ pane_id: string }>('POST', '/panes', {
+      name: 'shell', argv: ['/bin/sh', '-c', 'printf hello; sleep 30'], cwd: process.cwd(),
+    });
+    const paneId = created.body.pane_id;
+    const cast = host.get(paneId)!.castPath;
+    await until(() => fs.existsSync(cast));
+
+    await srv.json('DELETE', `/panes/${encodeURIComponent(paneId)}`);
+
+    expect(fs.existsSync(cast)).toBe(true);
+  });
+});

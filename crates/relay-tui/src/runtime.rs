@@ -4,7 +4,7 @@
 
 use crate::api::Client;
 use crate::app::{App, Command, Connection, Effect, Mode};
-use crate::keys::Key;
+use crate::keys::{Key, Mouse};
 use crate::model::*;
 use crate::replay::Fixture;
 use crate::ui;
@@ -31,6 +31,7 @@ pub const STORY_TAIL: usize = 50;
 #[derive(Debug)]
 pub enum Msg {
     Key(Key),
+    Mouse(Mouse),
     Resize,
     Tick,
     /// An SSE event arrived (its seq).
@@ -51,6 +52,10 @@ pub enum Msg {
     PaneFrame(String, PtyServerMessage),
     PaneClosed(String, String),
     Connection(Connection),
+    /// A pane was created on the daemon; focus it once the refreshed list arrives.
+    PaneOpened(String),
+    /// The daemon killed a pane the user closed; take it out of the grid.
+    PaneDismissed(String),
     Error(String),
     Notice(String),
     Quit,
@@ -71,6 +76,10 @@ pub struct Runtime<B: Backend> {
     refresh_pending: bool,
     tasks: Vec<JoinHandle<()>>,
     quit: bool,
+    /// Working directory a new shell pane starts in; the repo the mission is about.
+    pub workdir: String,
+    /// Pane this session asked the daemon to open, focused as soon as the daemon reports it.
+    pending_pane: Option<String>,
 }
 
 impl<B: Backend> Runtime<B> {
@@ -87,6 +96,8 @@ impl<B: Backend> Runtime<B> {
             tx,
             rx,
             pane_senders: BTreeMap::new(),
+            workdir: ".".to_string(),
+            pending_pane: None,
             refresh_pending: false,
             tasks: Vec::new(),
             quit: false,
@@ -202,6 +213,15 @@ impl<B: Backend> Runtime<B> {
     fn apply_panes(&mut self, panes: Vec<PaneInfo>, focused: Option<String>) {
         let effects = self.app.set_panes(panes, focused);
         self.run_effects(effects);
+        // A pane this session asked for is the one the user wants to be looking at.
+        if let Some(pane_id) = self.pending_pane.clone() {
+            if self.app.panes.contains(&pane_id) {
+                self.pending_pane = None;
+                // `t` asked for a terminal: focus it and put the keyboard in it, Esc to leave.
+                let effects = self.app.open_pane_for_typing(pane_id);
+                self.run_effects(effects);
+            }
+        }
         let missing: Vec<String> = self
             .app
             .panes
@@ -318,6 +338,18 @@ impl<B: Backend> Runtime<B> {
             Msg::Key(key) => {
                 self.app.notice = None;
                 self.app.handle_key(key)
+            }
+            Msg::Mouse(mouse) => self.app.handle_mouse(mouse),
+            Msg::PaneDismissed(pane_id) => {
+                self.app.dismiss_pane(&pane_id);
+                Vec::new()
+            }
+            Msg::PaneOpened(pane_id) => {
+                self.pending_pane = Some(pane_id.clone());
+                self.app
+                    .set_notice(format!("shell pane {pane_id} opening…"));
+                self.refresh_now();
+                Vec::new()
             }
             Msg::Resize => Vec::new(),
             Msg::Tick => {
@@ -453,6 +485,54 @@ impl<B: Backend> Runtime<B> {
                 if let Some(sender) = self.pane_senders.get(&pane_id) {
                     let _ = sender.send(PtyClientMessage::Resize { cols, rows });
                 }
+            }
+            // Handing the mouse back to the terminal is the terminal's business, not the app's; the
+            // runtime owns the escape sequences.
+            // A shell beside the agents, so a mission can be started without leaving the app. The UI never
+            // sends a command line: the shell comes from the environment and the cwd from --repo.
+            Effect::NewShellPane => {
+                let Source::Live(client) = &self.source else {
+                    self.app
+                        .set_notice("replay has no daemon to open a pane on");
+                    return;
+                };
+                let client = client.clone();
+                let tx = self.tx.clone();
+                let cwd = self.workdir.clone();
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+                self.tasks.push(tokio::spawn(async move {
+                    let msg = match client.create_pane("shell", &[shell], &cwd, 120, 40).await {
+                        Ok(pane_id) => Msg::PaneOpened(pane_id),
+                        Err(e) => Msg::Notice(format!("could not open a shell pane: {e}")),
+                    };
+                    let _ = tx.send(msg);
+                }));
+            }
+            Effect::KillPane(pane_id) => {
+                let Source::Live(client) = &self.source else {
+                    self.app
+                        .set_notice("replay has no daemon to close a pane on");
+                    return;
+                };
+                let client = client.clone();
+                let tx = self.tx.clone();
+                self.tasks.push(tokio::spawn(async move {
+                    // The host forgets the pane, so it stays closed across a restart of this client;
+                    // the grid drops it immediately rather than waiting for the next poll.
+                    let msg = match client.close_pane(&pane_id).await {
+                        Ok(()) => Msg::PaneDismissed(pane_id),
+                        Err(e) => Msg::Notice(format!("could not close {pane_id}: {e}")),
+                    };
+                    let _ = tx.send(msg);
+                }));
+            }
+            Effect::SetMouseCapture(on) => {
+                let mut out = std::io::stdout();
+                let _ = if on {
+                    crossterm::execute!(out, crossterm::event::EnableMouseCapture)
+                } else {
+                    crossterm::execute!(out, crossterm::event::DisableMouseCapture)
+                };
             }
             Effect::FocusPane(pane_id) => {
                 if let Source::Live(client) = &self.source {

@@ -48,6 +48,11 @@ pub fn status_text(app: &App) -> String {
     // Errors and notices come before the metrics so they survive truncation on narrow terminals.
     if let Some(e) = &app.error {
         parts.push(format!("ERROR {e}"));
+    } else if app.input_mode == Some(crate::app::InputMode::ClosePaneConfirm) {
+        // Asked here, not in the inspector: the pane it is about must stay visible.
+        if let Some(prompt) = app.prompt_line() {
+            parts.push(prompt);
+        }
     } else if let Some(n) = &app.notice {
         parts.push(n.clone());
     }

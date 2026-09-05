@@ -3,7 +3,7 @@
 //! WebSocket frames, fetches) come out — so every rule here is unit-testable without a terminal or a server.
 //! The rules mirror `apps/tui/src/keys.ts` and `App.tsx` (see `keys.rs` for the map).
 
-use crate::keys::{Key, KeyCode};
+use crate::keys::{Key, KeyCode, Mouse, MouseKind};
 use crate::metrics::FrameStats;
 use crate::model::*;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -38,12 +38,76 @@ impl Region {
     }
 }
 
+/// A screen rectangle, in `App`'s own terms so the state machine never depends on a terminal library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Viewport {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl Viewport {
+    pub const EMPTY: Viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
+
+    pub fn contains(&self, col: u16, row: u16) -> bool {
+        self.width > 0
+            && self.height > 0
+            && col >= self.x
+            && row >= self.y
+            && col < self.x + self.width
+            && row < self.y + self.height
+    }
+}
+
+/// Pan and zoom over the graph's fixed world box. The nodes never move; this does.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GraphView {
+    pub pan_x: f64,
+    pub pan_y: f64,
+    pub zoom: f64,
+}
+
+impl Default for GraphView {
+    fn default() -> Self {
+        Self {
+            pan_x: 0.0,
+            pan_y: 0.0,
+            zoom: 1.0,
+        }
+    }
+}
+
+impl GraphView {
+    pub const MIN_ZOOM: f64 = 0.5;
+    pub const MAX_ZOOM: f64 = 6.0;
+    /// Panning stops here, so the network can never be dragged off screen and lost.
+    pub const MAX_PAN: f64 = 90.0;
+
+    pub fn zoom_by(&mut self, factor: f64) {
+        self.zoom = (self.zoom * factor).clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
+    }
+
+    /// Pan in world units; the step shrinks as you zoom in, so it always feels the same on screen.
+    pub fn pan_by(&mut self, dx: f64, dy: f64) {
+        self.pan_x = (self.pan_x + dx / self.zoom).clamp(-Self::MAX_PAN, Self::MAX_PAN);
+        self.pan_y = (self.pan_y + dy / self.zoom).clamp(-Self::MAX_PAN, Self::MAX_PAN);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Answer,
     Reply,
     ReviewFailure,
     CancelConfirm,
+    /// `X`: close the focused pane. Kills a process, so it asks first.
+    ClosePaneConfirm,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,6 +284,13 @@ pub enum Effect {
     },
     /// `POST /panes/:id/focus`.
     FocusPane(String),
+    /// Grab the mouse for the app, or hand it back to the terminal so the user can select text.
+    SetMouseCapture(bool),
+    /// `POST /panes/:id/kill` — end the process in a pane.
+    KillPane(String),
+    /// Open a shell pane beside the agents. The runtime fills in the shell and the repo, since `App`
+    /// knows neither the environment nor the filesystem.
+    NewShellPane,
     Quit,
 }
 
@@ -251,6 +322,27 @@ pub struct App {
     pub frames: FrameStats,
     /// (cols, rows) each pane widget was last drawn with; filled by `ui::panes`.
     pub pane_areas: BTreeMap<String, (u16, u16)>,
+    /// Where each panel was last drawn, and what its rows mean — filled during render, read to turn a
+    /// click into the object under it. `App` stays terminal-free: these are plain rectangles.
+    pub graph_viewport: Viewport,
+    pub tree_viewport: Viewport,
+    /// The object on each row of the mission tree, top to bottom (`None` for headers and detail rows).
+    pub tree_rows: Vec<Option<GraphObjectRef>>,
+    pub inbox_viewport: Viewport,
+    pub inbox_rows: Vec<Option<GraphObjectRef>>,
+    /// Where each pane's widget was drawn, so a click can find the pane under it.
+    pub pane_rects: BTreeMap<String, Viewport>,
+    pub graph_view: GraphView,
+    /// True while the app holds the mouse; `m` hands it back so the terminal can select text.
+    pub mouse_capture: bool,
+    /// Where a background drag started, in cells.
+    graph_drag: Option<(u16, u16)>,
+    /// Pane the user is being asked about before it is closed.
+    pending_pane_close: Option<String>,
+    /// Panes the user has closed. relayd keeps a killed pane in `/panes` — the record and its cast
+    /// outlive the process — so the grid has to remember what was dismissed or a closed pane comes
+    /// straight back on the next poll, looking as though `X` did nothing.
+    dismissed_panes: std::collections::BTreeSet<String>,
     pub tick: u64,
 }
 
@@ -287,6 +379,17 @@ impl App {
             last_seq: 0,
             frames: FrameStats::default(),
             pane_areas: BTreeMap::new(),
+            graph_viewport: Viewport::EMPTY,
+            tree_viewport: Viewport::EMPTY,
+            tree_rows: Vec::new(),
+            inbox_viewport: Viewport::EMPTY,
+            inbox_rows: Vec::new(),
+            pane_rects: BTreeMap::new(),
+            graph_view: GraphView::default(),
+            mouse_capture: true,
+            graph_drag: None,
+            pending_pane_close: None,
+            dismissed_panes: std::collections::BTreeSet::new(),
             tick: 0,
         }
     }
@@ -307,7 +410,14 @@ impl App {
                 .graph
                 .nodes
                 .iter()
+                // Only what the network actually draws, so j/k never lands on an invisible node.
+                .filter(|n| crate::ui::graph::is_visible(n))
                 .map(|n| GraphObjectRef::node(n.id.clone()))
+                .chain(
+                    self.unattached_agents()
+                        .into_iter()
+                        .map(|n| GraphObjectRef::node(n.id)),
+                )
                 .chain(
                     self.graph
                         .edges
@@ -376,6 +486,17 @@ impl App {
 
     /// New `/panes` listing: new panes get a screen model sized like the PTY; known ones keep theirs.
     pub fn set_panes(&mut self, panes: Vec<PaneInfo>, focused: Option<String>) -> Vec<Effect> {
+        // Forget dismissals for panes the daemon no longer lists, so the set cannot grow forever.
+        let listed: std::collections::BTreeSet<String> =
+            panes.iter().map(|p| p.pane_id.clone()).collect();
+        self.dismissed_panes.retain(|id| listed.contains(id));
+        let panes: Vec<PaneInfo> = panes
+            .into_iter()
+            .filter(|p| !self.dismissed_panes.contains(&p.pane_id))
+            .collect();
+        self.pane_states
+            .retain(|id, _| !self.dismissed_panes.contains(id));
+
         self.panes = panes.iter().map(|p| p.pane_id.clone()).collect();
         for info in panes {
             match self.pane_states.get_mut(&info.pane_id) {
@@ -561,6 +682,21 @@ impl App {
             InputMode::Reply => Some(format!("reply> {}", self.input_value)),
             InputMode::ReviewFailure => Some(format!("observed failure> {}", self.input_value)),
             InputMode::CancelConfirm => Some("cancel task? y/N".to_string()),
+            // Naming what is about to die, and what survives it: killing an agent's terminal does not
+            // end its task, which then waits for an agent that is gone.
+            InputMode::ClosePaneConfirm => {
+                let pane_id = self.pending_pane_close.clone().unwrap_or_default();
+                Some(
+                    match self.pane_states.get(&pane_id).map(|p| p.info.clone()) {
+                        Some(info) if info.task_id.is_some() => format!(
+                            "close {}'s terminal ({pane_id})? its task keeps waiting for it  y/N",
+                            info.role
+                        ),
+                        Some(info) => format!("close the {} pane ({pane_id})?  y/N", info.role),
+                        None => format!("close {pane_id}?  y/N"),
+                    },
+                )
+            }
         }
     }
 
@@ -679,6 +815,7 @@ impl App {
         self.input_mode = None;
         self.input_value.clear();
         self.pending_action = None;
+        self.pending_pane_close = None;
     }
 
     fn begin_input(&mut self, action: ObjectAction, mode: InputMode) -> Vec<Effect> {
@@ -741,6 +878,30 @@ impl App {
         }
         if key.is_ctrl_c() {
             return vec![Effect::Quit];
+        }
+
+        if self.input_mode == Some(InputMode::ClosePaneConfirm) {
+            let answer = key.plain_char().map(|c| c.to_ascii_lowercase());
+            let mut effects = Vec::new();
+            if answer == Some('y') {
+                if let Some(pane_id) = self.pending_pane_close.clone() {
+                    let alive = self
+                        .pane_states
+                        .get(&pane_id)
+                        .map(|p| p.alive())
+                        .unwrap_or(false);
+                    if alive {
+                        effects.push(Effect::KillPane(pane_id));
+                    } else {
+                        // Nothing to kill; the pane is only a record now.
+                        self.dismiss_pane(&pane_id);
+                    }
+                }
+            }
+            if answer == Some('y') || answer == Some('n') || key.code == KeyCode::Esc {
+                self.reset_input();
+            }
+            return effects;
         }
 
         if self.input_mode == Some(InputMode::CancelConfirm) {
@@ -897,6 +1058,60 @@ impl App {
                 }
             }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => self.cycle_region(),
+            // In the graph the arrows pan the network; j/k still walk the objects.
+            (KeyCode::Left, _) if self.region == Region::Graph => {
+                self.graph_view.pan_by(-8.0, 0.0);
+                Vec::new()
+            }
+            (KeyCode::Right, _) if self.region == Region::Graph => {
+                self.graph_view.pan_by(8.0, 0.0);
+                Vec::new()
+            }
+            (KeyCode::Up, _) if self.region == Region::Graph => {
+                self.graph_view.pan_by(0.0, 8.0);
+                Vec::new()
+            }
+            (KeyCode::Down, _) if self.region == Region::Graph => {
+                self.graph_view.pan_by(0.0, -8.0);
+                Vec::new()
+            }
+            (_, Some('+')) | (_, Some('=')) => {
+                self.graph_view.zoom_by(1.25);
+                Vec::new()
+            }
+            (_, Some('-')) | (_, Some('_')) => {
+                self.graph_view.zoom_by(1.0 / 1.25);
+                Vec::new()
+            }
+            (_, Some('0')) => {
+                self.graph_view = GraphView::default();
+                Vec::new()
+            }
+            (_, Some('X')) => {
+                match self.focused_pane.clone() {
+                    Some(pane_id) => {
+                        self.error = None;
+                        self.pending_pane_close = Some(pane_id);
+                        self.input_mode = Some(InputMode::ClosePaneConfirm);
+                    }
+                    None => self.set_notice("no pane to close"),
+                }
+                Vec::new()
+            }
+            (_, Some('t')) => {
+                self.set_notice("opening a shell pane…");
+                vec![Effect::NewShellPane]
+            }
+            (_, Some('m')) => {
+                self.mouse_capture = !self.mouse_capture;
+                self.graph_drag = None;
+                self.set_notice(if self.mouse_capture {
+                    "mouse: the app has it (m releases it to the terminal)"
+                } else {
+                    "mouse: the terminal has it — select text as usual (m takes it back)"
+                });
+                vec![Effect::SetMouseCapture(self.mouse_capture)]
+            }
             (KeyCode::Down, _) | (_, Some('j')) => self.move_selection(1),
             (KeyCode::Up, _) | (_, Some('k')) => self.move_selection(-1),
             (_, Some('?')) => {
@@ -906,6 +1121,188 @@ impl App {
             (_, Some('q')) => vec![Effect::Quit],
             _ => Vec::new(),
         }
+    }
+
+    // --- the graph's own input ---------------------------------------------------------------------
+
+    /// A click, drag or wheel anywhere in the app. The panel under the pointer decides what it means;
+    /// what no panel claims is left alone, so the terminal keeps everything the app does not use.
+    pub fn handle_mouse(&mut self, mouse: Mouse) -> Vec<Effect> {
+        if !self.mouse_capture || self.help_open || self.inspector_open || self.input_mode.is_some()
+        {
+            return Vec::new();
+        }
+        if self.tree_viewport.contains(mouse.col, mouse.row) {
+            return self.mouse_in_rows(mouse, Region::Tree);
+        }
+        if self.inbox_viewport.contains(mouse.col, mouse.row) {
+            return self.mouse_in_rows(mouse, Region::Inbox);
+        }
+        if let Some(pane_id) = self.pane_at(mouse.col, mouse.row) {
+            return self.mouse_in_pane(mouse, pane_id);
+        }
+        if !self.graph_viewport.contains(mouse.col, mouse.row) {
+            // A press elsewhere ends a drag that started on the canvas; nothing else.
+            if mouse.kind == MouseKind::Up {
+                self.graph_drag = None;
+            }
+            return Vec::new();
+        }
+        match mouse.kind {
+            MouseKind::Down => {
+                self.region = Region::Graph;
+                let hit = self.hit_at(mouse.col, mouse.row);
+                match hit {
+                    // A press on an object selects it; a press on the background begins a pan.
+                    Some(reference) => {
+                        self.graph_drag = None;
+                        self.select(Some(reference))
+                    }
+                    None => {
+                        self.graph_drag = Some((mouse.col, mouse.row));
+                        Vec::new()
+                    }
+                }
+            }
+            MouseKind::Drag => {
+                let Some((from_col, from_row)) = self.graph_drag else {
+                    return Vec::new();
+                };
+                let cells_x = mouse.col as f64 - from_col as f64;
+                let cells_y = mouse.row as f64 - from_row as f64;
+                let (world_x, world_y) = self.world_per_cell();
+                // Drag moves the world with the pointer, so the view moves the other way.
+                self.graph_view
+                    .pan_by(-cells_x * world_x, cells_y * world_y);
+                self.graph_drag = Some((mouse.col, mouse.row));
+                Vec::new()
+            }
+            MouseKind::Up => {
+                self.graph_drag = None;
+                Vec::new()
+            }
+            MouseKind::ScrollUp => {
+                self.graph_view.zoom_by(1.2);
+                Vec::new()
+            }
+            MouseKind::ScrollDown => {
+                self.graph_view.zoom_by(1.0 / 1.2);
+                Vec::new()
+            }
+        }
+    }
+
+    /// A list panel: a click selects the row's object, the wheel walks the selection.
+    fn mouse_in_rows(&mut self, mouse: Mouse, region: Region) -> Vec<Effect> {
+        let (viewport, rows) = match region {
+            Region::Inbox => (self.inbox_viewport, &self.inbox_rows),
+            _ => (self.tree_viewport, &self.tree_rows),
+        };
+        match mouse.kind {
+            MouseKind::Down => {
+                let index = (mouse.row - viewport.y) as usize;
+                // Rows that carry nothing (headers, an agent's detail line) still move focus to the
+                // panel: the click was deliberate even when it did not land on an object.
+                let target = rows.get(index).cloned().flatten();
+                self.region = region;
+                match target {
+                    Some(reference) => self.select(Some(reference)),
+                    None => Vec::new(),
+                }
+            }
+            MouseKind::ScrollUp => {
+                self.region = region;
+                self.move_selection(-1)
+            }
+            MouseKind::ScrollDown => {
+                self.region = region;
+                self.move_selection(1)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The pane grid: a click focuses a pane, and a click into the pane that already has focus starts
+    /// typing into it — the way clicking into a text field does.
+    fn mouse_in_pane(&mut self, mouse: Mouse, pane_id: String) -> Vec<Effect> {
+        if mouse.kind != MouseKind::Down {
+            return Vec::new();
+        }
+        self.region = Region::Panes;
+        if self.focused_pane.as_deref() == Some(pane_id.as_str()) {
+            if self
+                .focused_pane_state()
+                .map(|p| p.alive())
+                .unwrap_or(false)
+            {
+                self.terminal_input = true;
+            } else {
+                self.set_notice("that pane's process has exited");
+            }
+            return Vec::new();
+        }
+        self.focus_pane(pane_id, true)
+    }
+
+    /// Which pane was drawn under a cell.
+    fn pane_at(&self, col: u16, row: u16) -> Option<String> {
+        self.pane_rects
+            .iter()
+            .find(|(_, rect)| rect.contains(col, row))
+            .map(|(id, _)| id.clone())
+    }
+
+    /// Take a closed pane out of the grid. The daemon keeps it — the recording is worth more than the
+    /// row it occupied — but this view is done with it.
+    pub fn dismiss_pane(&mut self, pane_id: &str) {
+        self.dismissed_panes.insert(pane_id.to_string());
+        self.panes.retain(|id| id != pane_id);
+        self.pane_states.remove(pane_id);
+        self.pane_rects.remove(pane_id);
+        if self.focused_pane.as_deref() == Some(pane_id) {
+            self.terminal_input = false;
+            self.focused_pane = self
+                .first_alive_pane()
+                .or_else(|| self.panes.first().cloned());
+        }
+        self.set_notice(format!("closed {pane_id}"));
+    }
+
+    /// Focus a pane and put the keyboard straight into it — what `t` wants: a terminal you can type in.
+    pub fn open_pane_for_typing(&mut self, pane_id: String) -> Vec<Effect> {
+        let effects = self.focus_pane(pane_id, true);
+        self.region = Region::Panes;
+        if self
+            .focused_pane_state()
+            .map(|p| p.alive())
+            .unwrap_or(false)
+        {
+            self.terminal_input = true;
+        }
+        effects
+    }
+
+    /// World units covered by one cell, horizontally and vertically, at the current view.
+    fn world_per_cell(&self) -> (f64, f64) {
+        let (x_bounds, y_bounds) =
+            crate::ui::graph::view_bounds(&self.graph_view, self.graph_viewport);
+        (
+            (x_bounds[1] - x_bounds[0]) / self.graph_viewport.width.max(1) as f64,
+            (y_bounds[1] - y_bounds[0]) / self.graph_viewport.height.max(1) as f64,
+        )
+    }
+
+    /// Agents relayd is hosting that no contract accounts for; they are on the network too.
+    pub fn unattached_agents(&self) -> Vec<GraphNode> {
+        crate::ui::graph::unattached_agents(&self.graph, self.pane_states.values().map(|p| &p.info))
+    }
+
+    /// The object drawn under a cell, if any.
+    pub fn hit_at(&self, col: u16, row: u16) -> Option<GraphObjectRef> {
+        let point =
+            crate::ui::graph::cell_to_world(&self.graph_view, self.graph_viewport, col, row);
+        let discs = crate::ui::graph::layout_net(&self.graph, &self.unattached_agents());
+        crate::ui::graph::hit_test(&self.graph, &discs, point)
     }
 
     // --- pane sizing -------------------------------------------------------------------------------

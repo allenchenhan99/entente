@@ -243,7 +243,7 @@ describe('up', () => {
           RELAY_DIR: relayDir,
           RELAY_PORT: '9444',
           RELAY_HOST: 'relay',
-          RELAY_RESUME: 'latest',
+          RELAY_RESUME: 'auto',
         },
       }),
     ]);

@@ -273,3 +273,34 @@ async fn spawn_passes_cwd_env_term_and_relay_pane_id_and_numbers_panes_from_firs
     );
     srv.shutdown().await;
 }
+
+#[tokio::test]
+async fn closing_a_pane_forgets_it_but_keeps_its_recording() {
+    let srv = common::start().await;
+    let id = srv.spawn_sh("read x").await;
+    assert!(srv.cast_dir.join("relay:1.cast").exists());
+
+    assert_eq!(srv.delete(&format!("/panes/{id}")).await.status, 200);
+
+    // Gone from the list, so a client that closed it does not get it back on the next poll.
+    assert_eq!(srv.get("/panes").await.body["panes"], json!([]));
+    assert_eq!(srv.get(&format!("/panes/{id}")).await.status, 404);
+    // The record of what happened in it is not the pane, and it stays.
+    assert!(srv.cast_dir.join("relay:1.cast").exists());
+    // A second close is a 404: there is nothing left to close.
+    assert_eq!(srv.delete(&format!("/panes/{id}")).await.status, 404);
+    srv.shutdown().await;
+}
+
+#[tokio::test]
+async fn closing_the_focused_pane_clears_the_focus() {
+    let srv = common::start().await;
+    let id = srv.spawn_sh("read x").await;
+    srv.post(&format!("/panes/{id}/focus"), json!({})).await;
+    assert_eq!(srv.get("/panes").await.body["focused_pane"], id);
+
+    srv.delete(&format!("/panes/{id}")).await;
+
+    assert_eq!(srv.get("/panes").await.body.get("focused_pane"), None);
+    srv.shutdown().await;
+}

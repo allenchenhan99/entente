@@ -162,6 +162,45 @@ impl From<crossterm::event::KeyEvent> for Key {
     }
 }
 
+/// A mouse event, abstracted the way `Key` is: `App` and its tests never touch crossterm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseKind {
+    /// Left button pressed.
+    Down,
+    /// Moved with the left button held.
+    Drag,
+    Up,
+    ScrollUp,
+    ScrollDown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mouse {
+    pub kind: MouseKind,
+    pub col: u16,
+    pub row: u16,
+}
+
+impl Mouse {
+    pub const fn new(kind: MouseKind, col: u16, row: u16) -> Self {
+        Self { kind, col, row }
+    }
+
+    /// The events worth acting on; everything else (other buttons, bare motion) is dropped.
+    pub fn from_crossterm(event: crossterm::event::MouseEvent) -> Option<Self> {
+        use crossterm::event::{MouseButton, MouseEventKind as K};
+        let kind = match event.kind {
+            K::Down(MouseButton::Left) => MouseKind::Down,
+            K::Drag(MouseButton::Left) => MouseKind::Drag,
+            K::Up(MouseButton::Left) => MouseKind::Up,
+            K::ScrollUp => MouseKind::ScrollUp,
+            K::ScrollDown => MouseKind::ScrollDown,
+            _ => return None,
+        };
+        Some(Self::new(kind, event.column, event.row))
+    }
+}
+
 /// One line of the help overlay per binding: (key, meaning). The order is the Ink TUI's help line.
 pub const KEY_HELP: &[(&str, &str)] = &[
     ("j/k ↑/↓", "move selection"),
@@ -182,6 +221,24 @@ pub const KEY_HELP: &[(&str, &str)] = &[
         "mark it failed (asks for the observed failure); f otherwise focuses the pane",
     ),
     ("x", "cancel the task (asks y/N)"),
+    ("↑/↓/←/→", "in the graph: pan the network"),
+    ("+ / -", "in the graph: zoom · 0 refits"),
+    (
+        "click",
+        "select what you clicked: an agent, an inbox item, a node or edge, a pane",
+    ),
+    (
+        "click a focused pane",
+        "type into it (Esc leaves) — clicking it again is the same as i",
+    ),
+    (
+        "drag / wheel",
+        "in the graph: pan · zoom · in a list: walk the selection",
+    ),
+    (
+        "m",
+        "release the mouse to the terminal (so you can select text) and take it back",
+    ),
     ("Esc", "close the inspector / help / input"),
     ("?", "toggle this help"),
     ("q / Ctrl-C", "quit"),

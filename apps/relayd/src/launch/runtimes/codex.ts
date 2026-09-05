@@ -32,6 +32,12 @@ export interface CodexRuntimeDeps {
   env?: Record<string, string | undefined>;
   /** Executable name; defaults to `codex` on PATH. */
   executable?: string;
+  /**
+   * Model for every agent this runtime spawns. Defaults to `RELAY_CODEX_MODEL`; unset leaves Codex on
+   * its own default. The agent runs under an isolated `CODEX_HOME`, so the user's `~/.codex/config.toml`
+   * does not apply — this flag is the way to choose.
+   */
+  model?: string;
 }
 
 /** Escapes a string for a TOML basic (double-quoted) string. */
@@ -136,11 +142,13 @@ export class CodexRuntime implements AgentRuntime {
   readonly kind = 'codex' as const;
   private readonly homeDir: string;
   private readonly executable: string;
+  private readonly model: string | undefined;
 
   constructor(deps: CodexRuntimeDeps = {}) {
     const env = deps.env ?? process.env;
     this.homeDir = deps.homeDir ?? env.HOME ?? os.homedir();
     this.executable = deps.executable ?? 'codex';
+    this.model = deps.model ?? env.RELAY_CODEX_MODEL;
   }
 
   private async writeConfig(spec: LaunchSpec, configDir: string): Promise<void> {
@@ -153,7 +161,10 @@ export class CodexRuntime implements AgentRuntime {
   }
 
   private commonArgv(spec: LaunchSpec): string[] {
-    return [this.executable, '-C', spec.cwd, '-a', 'never', '-s', 'workspace-write'];
+    return [
+      this.executable, '-C', spec.cwd, '-a', 'never', '-s', 'workspace-write',
+      ...(this.model ? ['--model', this.model] : []),
+    ];
   }
 
   async prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {

@@ -172,6 +172,39 @@ impl Client {
         Ok(())
     }
 
+    /// `POST /panes` — spawn a pane. The caller decides what runs in it; the TUI only ever asks for a shell.
+    pub async fn create_pane(
+        &self,
+        name: &str,
+        argv: &[String],
+        cwd: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<String> {
+        let body = serde_json::json!({
+            "name": name, "argv": argv, "cwd": cwd, "cols": cols, "rows": rows,
+        });
+        let value = self.post_json("/panes", &body).await?;
+        value
+            .get("pane_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| anyhow::anyhow!("POST /panes: no pane_id in the reply"))
+    }
+
+    /// `DELETE /panes/:id` — kill the process if it still runs, and have the host forget the pane, so
+    /// closing it survives this client exiting. The cast and the event log are untouched.
+    pub async fn close_pane(&self, pane_id: &str) -> Result<()> {
+        let url = self.url(&format!("/panes/{}", encode_component(pane_id)));
+        let response = self.authorize(self.http.delete(url)).send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("DELETE /panes/{pane_id} → {status}: {}", body.trim());
+        }
+        Ok(())
+    }
+
     pub async fn focus_pane(&self, pane_id: &str) -> Result<()> {
         self.post_json(&format!("/panes/{pane_id}/focus"), &serde_json::json!({}))
             .await?;

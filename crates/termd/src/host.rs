@@ -245,6 +245,19 @@ impl Host {
         Ok(())
     }
 
+    /// Kill the process if it still runs, then forget the pane: it leaves `/panes`, so a client that
+    /// closed it does not get it back on the next poll. The cast file stays on disk.
+    pub async fn remove(&self, pane_id: &str, grace: Duration) -> Result<(), PaneNotFound> {
+        let pane = self.require(pane_id)?;
+        pane.kill(grace).await;
+        self.panes.lock().unwrap().retain(|p| p.id != pane_id);
+        let mut focused = self.focused.lock().unwrap();
+        if focused.as_deref() == Some(pane_id) {
+            *focused = None;
+        }
+        Ok(())
+    }
+
     pub async fn kill_all(&self, grace: Duration) {
         let panes = self.panes();
         futures_util::future::join_all(panes.iter().map(|p| p.kill(grace))).await;
