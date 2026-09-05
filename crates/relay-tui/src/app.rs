@@ -1944,11 +1944,17 @@ impl App {
 
     /// Is a planner agent actually there? The graph always has the node; a pane is what says someone
     /// is doing the job.
+    /// Is there an agent on the network that the human is prompting directly?
+    ///
+    /// `planner` is what relayd calls one it spawned itself; `brain` is what it calls one the human
+    /// opened in a terminal. Both are the same thing to the network, and only checking for the first
+    /// hid the planner node whenever the session had been started by hand — which took the subs'
+    /// caller with it, so four agents a brain had called were drawn as four unrelated brains.
     pub fn planner_present(&self) -> bool {
         self.ws()
             .pane_states
             .values()
-            .any(|p| p.info.role == "planner")
+            .any(|p| p.info.role == "planner" || p.info.role == "brain")
     }
 
     /// Agents relayd is hosting that no contract accounts for; they are on the network too.

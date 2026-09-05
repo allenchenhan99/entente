@@ -139,7 +139,7 @@ fn clicking_a_pane_focuses_it() {
         .get("relay:2")
         .expect("the second pane was drawn");
 
-    click(&mut app, rect.x + 2, rect.y + 1);
+    click(&mut app, rect.x + 2, rect.y + rect.height / 2);
 
     assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:2"));
     assert_eq!(app.region, Region::Panes);
@@ -157,7 +157,7 @@ fn clicking_the_focused_pane_again_starts_typing_into_it() {
         .get("relay:1")
         .expect("the focused pane was drawn");
 
-    click(&mut app, rect.x + 2, rect.y + 1);
+    click(&mut app, rect.x + 2, rect.y + rect.height / 2);
 
     assert!(
         app.terminal_input,
@@ -169,7 +169,7 @@ fn clicking_the_focused_pane_again_starts_typing_into_it() {
 fn typing_into_a_pane_sends_the_keys_there() {
     let mut app = app_with_panes();
     let rect = *app.pane_rects.get("relay:1").unwrap();
-    click(&mut app, rect.x + 2, rect.y + 1);
+    click(&mut app, rect.x + 2, rect.y + rect.height / 2);
 
     let effects = app.handle_key(Key::char('x'));
 
@@ -183,7 +183,7 @@ fn typing_into_a_pane_sends_the_keys_there() {
 fn escape_leaves_a_pane_so_the_keys_are_the_apps_again() {
     let mut app = app_with_panes();
     let rect = *app.pane_rects.get("relay:1").unwrap();
-    click(&mut app, rect.x + 2, rect.y + 1);
+    click(&mut app, rect.x + 2, rect.y + rect.height / 2);
     assert!(app.terminal_input);
 
     app.handle_key(Key::ESC);
@@ -319,7 +319,7 @@ fn x_says_so_when_there_is_no_pane_to_close() {
 fn a_capital_x_typed_into_a_pane_is_just_a_letter() {
     let mut app = app_with_panes();
     let rect = *app.pane_rects.get("relay:1").unwrap();
-    click(&mut app, rect.x + 2, rect.y + 1);
+    click(&mut app, rect.x + 2, rect.y + rect.height / 2);
     assert!(app.terminal_input);
 
     let effects = app.handle_key(Key::char('X'));
@@ -653,7 +653,7 @@ fn typing_returns_the_pane_to_the_live_edge() {
     app.handle_key(Key::new(KeyCode::PageUp));
     assert!(app.pane_scroll("relay:1") > 0);
     let rect = *app.pane_rects.get("relay:1").unwrap();
-    click(&mut app, rect.x + 2, rect.y + 1); // the focused pane: starts typing
+    click(&mut app, rect.x + 2, rect.y + rect.height / 2); // the focused pane: starts typing
 
     app.handle_key(Key::char('x'));
 
@@ -669,7 +669,11 @@ fn each_pane_keeps_its_own_position() {
     let mut app = app_with_panes();
     let second = *app.pane_rects.get("relay:2").unwrap();
 
-    app.handle_mouse(Mouse::new(MouseKind::ScrollUp, second.x + 2, second.y + 2));
+    app.handle_mouse(Mouse::new(
+        MouseKind::ScrollUp,
+        second.x + 2,
+        second.y + second.height / 2,
+    ));
 
     assert!(app.pane_scroll("relay:2") > 0);
     assert_eq!(app.pane_scroll("relay:1"), 0, "the other pane did not move");
