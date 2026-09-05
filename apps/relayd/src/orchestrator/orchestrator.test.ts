@@ -1,3 +1,4 @@
+import { replay } from '@relay/protocol';
 import { describe, it, expect } from 'vitest';
 import { createTestRelay, sampleContract } from '../fakes/test-harness.js';
 
@@ -434,6 +435,81 @@ describe('integration', () => {
     r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'a' });
     await r.orchestrator.settled();
     expect(r.ofType('mission_failed')[0].payload.reason).toMatch(/integration check failed/);
+  });
+});
+
+describe('cancel and delete', () => {
+  it('cancelling a mission cancels every task of it that was still running', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+
+    await r.orchestrator.cancelMission(mission_id, 'changed my mind');
+
+    expect(r.ofType('task_canceled').map((e) => e.task_id)).toContain('t-a');
+    expect(r.ofType('mission_canceled')).toHaveLength(1);
+    expect(replay(r.store.all()).missions[mission_id]!.status).toBe('canceled');
+  });
+
+  it('refuses to delete work that is still live, and says how to stop it', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+
+    await expect(r.orchestrator.deleteTask('t-a')).rejects.toThrow(/cancel it before deleting/);
+    expect(replay(r.store.all()).tasks['t-a']).toBeDefined();
+  });
+
+  it('deletes a cancelled task: gone from the state, still in the log', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    await r.orchestrator.cancel('t-a', 'not needed');
+
+    await r.orchestrator.deleteTask('t-a', 'tidying up');
+
+    expect(replay(r.store.all()).tasks['t-a']).toBeUndefined();
+    // The tombstone is the record of the deletion, and everything before it is untouched.
+    expect(r.ofType('task_deleted').map((e) => e.task_id)).toEqual(['t-a']);
+    expect(r.ofType('task_proposed').map((e) => e.task_id)).toContain('t-a');
+  });
+
+  it('kills the pane of a task it deletes, so nothing is left running for it', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    await r.orchestrator.cancel('t-a');
+    const killedByCancel = r.host.calls.kill.length;
+
+    await r.orchestrator.deleteTask('t-a');
+
+    expect(r.host.calls.kill.length).toBeGreaterThanOrEqual(killedByCancel);
+  });
+
+  it('refuses to delete a task another one depends on, rather than stranding it', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    await r.orchestrator.proposeTask(mission_id, { ...sampleContract('t-b'), dependencies: ['t-a'] }, 'human');
+    await r.orchestrator.cancel('t-a');
+
+    await expect(r.orchestrator.deleteTask('t-a')).rejects.toThrow(/dependency of t-b/);
+    expect(replay(r.store.all()).tasks['t-a']).toBeDefined();
+  });
+
+  it('deleting a mission takes its tasks with it', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    await r.orchestrator.cancelMission(mission_id);
+
+    await r.orchestrator.deleteMission(mission_id, 'abandoned');
+
+    const state = replay(r.store.all());
+    expect(state.missions[mission_id]).toBeUndefined();
+    expect(state.tasks['t-a']).toBeUndefined();
+    expect(r.ofType('mission_deleted')).toHaveLength(1);
+  });
+
+  it('refuses to delete a mission that was never stopped', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+
+    await expect(r.orchestrator.deleteMission(mission_id)).rejects.toThrow(/cancel it before deleting/);
   });
 });
 

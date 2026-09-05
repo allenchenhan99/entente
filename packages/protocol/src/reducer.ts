@@ -174,6 +174,8 @@ function missionTransition(mission: MissionView, event: Event): Partial<MissionV
       return { status: 'verified' };
     case 'mission_failed':
       return { status: 'failed' };
+    case 'mission_canceled':
+      return { status: 'canceled' };
     case 'mission_clarification_requested':
       return { open_questions: event.payload.questions };
     case 'mission_clarification_answered': {
@@ -225,6 +227,38 @@ export function reduce(state: State, event: Event): State {
   let missions = state.missions;
   let tasks = state.tasks;
   let metrics = state.metrics;
+
+  // --- tombstones -----------------------------------------------------------------------------
+  // Deletion removes a key, which a transition patch cannot express, so it is handled here. The
+  // event stays in the log; only the derived state forgets.
+  if (event.type === 'task_deleted' && event.task_id !== undefined) {
+    const { [event.task_id]: gone, ...rest } = tasks;
+    if (gone !== undefined) {
+      tasks = rest;
+      const mission = missions[gone.mission_id];
+      if (mission) {
+        missions = {
+          ...missions,
+          [gone.mission_id]: { ...mission, task_ids: mission.task_ids.filter((id) => id !== gone.id) },
+        };
+      }
+    }
+    // A survivor may have been waiting on it; recompute so nothing is left blocked on a task that is
+    // no longer there. (relayd refuses the delete in that case, but the reducer must be total.)
+    return { ...state, last_seq: event.seq, missions, tasks: recomputeDependencies(tasks) };
+  }
+  if (event.type === 'mission_deleted') {
+    const { [event.mission_id]: goneMission, ...restMissions } = missions;
+    if (goneMission !== undefined) {
+      missions = restMissions;
+      tasks = recomputeDependencies(
+        Object.fromEntries(Object.entries(tasks).filter(([, t]) => t.mission_id !== event.mission_id)),
+      );
+    }
+    // Metrics are left alone on purpose: they record what happened, and forgetting a task in the view
+    // does not unmake the repairs or the mismatches it produced.
+    return { ...state, last_seq: event.seq, missions, tasks };
+  }
 
   // --- missions -------------------------------------------------------------------------------
   if (event.type === 'mission_created') {

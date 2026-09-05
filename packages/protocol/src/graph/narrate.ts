@@ -41,6 +41,17 @@ export function narrate(event: Event, state: State): string {
       return `${who} verif${who === 'you' ? 'y' : 'ies'} the mission: integration check passed`;
     case 'mission_failed':
       return `${who} mark${s(who)} the mission failed: ${clip(event.payload.reason)}`;
+    case 'mission_canceled':
+      return `${who} cancel${s(who)} the mission${event.payload.reason ? `: ${clip(event.payload.reason)}` : ''}`;
+
+    // --- tombstones ------------------------------------------------------------------------------
+    // The event stays in the log, so the story of a deletion is still tellable afterwards.
+    case 'task_deleted':
+      return `${who} delete${s(who)} ${event.task_id ?? 'a task'} from the board`
+        + `${event.payload.reason ? `: ${clip(event.payload.reason)}` : ''} (its history stays in the log)`;
+    case 'mission_deleted':
+      return `${who} delete${s(who)} the mission from the board`
+        + `${event.payload.reason ? `: ${clip(event.payload.reason)}` : ''} (its history stays in the log)`;
 
     // --- contract --------------------------------------------------------------------------------
     case 'task_proposed': {

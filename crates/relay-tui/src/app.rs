@@ -112,6 +112,8 @@ pub enum InputMode {
     CancelConfirm,
     /// `X`: close the focused pane. Kills a process, so it asks first.
     ClosePaneConfirm,
+    /// `D`: forget a cancelled or failed task. Asks first, and says what survives.
+    DeleteTaskConfirm,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -292,6 +294,8 @@ pub enum Effect {
     SetMouseCapture(bool),
     /// `POST /panes/:id/kill` — end the process in a pane.
     KillPane(String),
+    /// `DELETE /tasks/:id` — forget work that is over. The event log keeps it.
+    DeleteTask(String),
     /// Open a shell pane beside the agents. The runtime fills in the shell and the repo, since `App`
     /// knows neither the environment nor the filesystem.
     NewShellPane,
@@ -343,6 +347,8 @@ pub struct App {
     graph_drag: Option<(u16, u16)>,
     /// Pane the user is being asked about before it is closed.
     pending_pane_close: Option<String>,
+    /// Task the user is being asked about before it is deleted.
+    pending_task_delete: Option<String>,
     /// How far each pane is scrolled back, in rows. A pane at 0 is at the live edge; anything else is
     /// history, and stays put while output arrives so it can actually be read.
     pane_scroll: BTreeMap<String, usize>,
@@ -396,6 +402,7 @@ impl App {
             mouse_capture: true,
             graph_drag: None,
             pending_pane_close: None,
+            pending_task_delete: None,
             pane_scroll: BTreeMap::new(),
             dismissed_panes: std::collections::BTreeSet::new(),
             tick: 0,
@@ -692,6 +699,13 @@ impl App {
             InputMode::CancelConfirm => Some("cancel task? y/N".to_string()),
             // Naming what is about to die, and what survives it: killing an agent's terminal does not
             // end its task, which then waits for an agent that is gone.
+            // Deleting is forgetting, not undoing: say what stays, so the choice is an informed one.
+            InputMode::DeleteTaskConfirm => {
+                let task = self.pending_task_delete.clone().unwrap_or_default();
+                Some(format!(
+                    "delete {task} from the board? the event log and its recording keep it  y/N"
+                ))
+            }
             InputMode::ClosePaneConfirm => {
                 let pane_id = self.pending_pane_close.clone().unwrap_or_default();
                 Some(
@@ -824,6 +838,7 @@ impl App {
         self.input_value.clear();
         self.pending_action = None;
         self.pending_pane_close = None;
+        self.pending_task_delete = None;
     }
 
     fn begin_input(&mut self, action: ObjectAction, mode: InputMode) -> Vec<Effect> {
@@ -890,6 +905,20 @@ impl App {
         }
         if key.is_ctrl_c() {
             return vec![Effect::Quit];
+        }
+
+        if self.input_mode == Some(InputMode::DeleteTaskConfirm) {
+            let answer = key.plain_char().map(|c| c.to_ascii_lowercase());
+            let mut effects = Vec::new();
+            if answer == Some('y') {
+                if let Some(task_id) = self.pending_task_delete.clone() {
+                    effects.push(Effect::DeleteTask(task_id));
+                }
+            }
+            if answer == Some('y') || answer == Some('n') || key.code == KeyCode::Esc {
+                self.reset_input();
+            }
+            return effects;
         }
 
         if self.input_mode == Some(InputMode::ClosePaneConfirm) {
@@ -1109,6 +1138,19 @@ impl App {
             }
             (_, Some('0')) => {
                 self.graph_view = GraphView::default();
+                Vec::new()
+            }
+            (_, Some('D')) => {
+                match self.deletable_task() {
+                    Some(task_id) => {
+                        self.error = None;
+                        self.pending_task_delete = Some(task_id);
+                        self.input_mode = Some(InputMode::DeleteTaskConfirm);
+                    }
+                    None => self.set_notice(
+                        "only cancelled or failed work can be deleted — x cancels the selected task",
+                    ),
+                }
                 Vec::new()
             }
             (_, Some('X')) => {
@@ -1347,6 +1389,18 @@ impl App {
             (x_bounds[1] - x_bounds[0]) / self.graph_viewport.width.max(1) as f64,
             (y_bounds[1] - y_bounds[0]) / self.graph_viewport.height.max(1) as f64,
         )
+    }
+
+    /// The selected task, if it is over and so may be forgotten. relayd is the authority and refuses
+    /// anything else; this is so the key can say why rather than posting a request that will fail.
+    pub fn deletable_task(&self) -> Option<String> {
+        let task_id = self.selected_task_id()?;
+        let node = self.graph.node(&task_id)?;
+        matches!(
+            node.task_state,
+            Some(TaskState::Canceled) | Some(TaskState::Failed)
+        )
+        .then_some(task_id)
     }
 
     /// Is a planner agent actually there? The graph always has the node; a pane is what says someone

@@ -75,7 +75,8 @@ export const USAGE = `usage:
   relay status [--port N]
   relay clarify <task-id|mission-id> Q1="..." [Q2="..."] [--port N]
   relay review <task-id> <AC-id> pass|fail ["observed failure"] [--port N]
-  relay cancel <task-id> ["reason"] [--port N]
+  relay cancel <task-id|mission-id> ["reason"] [--port N]
+  relay delete <task-id|mission-id> ["reason"] [--port N]   forget canceled or failed work (the event log keeps it)
   relay reply <task-id> "message" [--port N]       answer a blocked agent
   relay revise <task-id> field=value|field+=value … [--port N]   patch a contract before it is verified (goal, recipient, runtime, inputs, constraints, non_goals; += appends)
   relay replay <file.jsonl>
@@ -125,6 +126,7 @@ export async function run(argv: string[], io: Partial<CliIo> = {}): Promise<numb
       case 'clarify': return await clarify(rest, full);
       case 'review': return await review(rest, full);
       case 'cancel': return await cancel(rest, full);
+      case 'delete': return await remove(rest, full);
       case 'reply': return await reply(rest, full);
       case 'revise': return await revise(rest, full);
       case 'replay': return replay(rest, full);
@@ -597,13 +599,33 @@ async function revise(args: string[], io: CliIo): Promise<number> {
   return 0;
 }
 
+/** `m-…` is a mission, everything else a task — the ids say which, so the commands need no flag. */
+const isMissionId = (id: string): boolean => id.startsWith('m-');
+
 async function cancel(args: string[], io: CliIo): Promise<number> {
   const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
-  const [taskId, reason] = positionals;
-  if (!taskId) throw new UsageError('relay cancel needs a task id');
+  const [id, reason] = positionals;
+  if (!id) throw new UsageError('relay cancel needs a task or mission id');
   const body: CancelBody = reason !== undefined ? { reason } : {};
-  await new Client(io, values).post(routes.cancel(taskId), body);
-  io.stdout(`${taskId} canceled`);
+  const client = new Client(io, values);
+  if (isMissionId(id)) {
+    await client.post(routes.cancelMission(id), body);
+    io.stdout(`${id} canceled, with every task of it that was still running`);
+    return 0;
+  }
+  await client.post(routes.cancel(id), body);
+  io.stdout(`${id} canceled`);
+  return 0;
+}
+
+async function remove(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseKnown(args, { port: { type: 'string' } });
+  const [id, reason] = positionals;
+  if (!id) throw new UsageError('relay delete needs a task or mission id');
+  const route = isMissionId(id) ? routes.mission(id) : routes.task(id);
+  const query = reason === undefined ? '' : `?reason=${encodeURIComponent(reason)}`;
+  await new Client(io, values).delete(`${route}${query}`);
+  io.stdout(`${id} deleted from the board; its history stays in the event log`);
   return 0;
 }
 
@@ -1033,6 +1055,10 @@ class Client {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
+  }
+
+  async delete<T = unknown>(route: string): Promise<T> {
+    return this.request<T>(route, { method: 'DELETE' });
   }
 
   async getText(route: string): Promise<string> {

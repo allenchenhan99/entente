@@ -181,6 +181,24 @@ export function createApp(opts: AppOptions): Hono {
     return c.json({ ok: true });
   });
 
+  app.post(routes.cancelMission(':id'), async (c) => {
+    const body = await parseBody(c, CancelBody);
+    if (!body.ok) return body.res;
+    await orchestrator.cancelMission(c.req.param('id')!, body.data.reason);
+    return c.json({ ok: true });
+  });
+
+  // Deleting is a DELETE, and takes its reason as a query parameter so the body can stay empty.
+  app.delete(routes.task(':id'), async (c) => {
+    await orchestrator.deleteTask(c.req.param('id')!, c.req.query('reason'));
+    return c.json({ ok: true });
+  });
+
+  app.delete(routes.mission(':id'), async (c) => {
+    await orchestrator.deleteMission(c.req.param('id')!, c.req.query('reason'));
+    return c.json({ ok: true });
+  });
+
   if (opts.withMcp !== false) mountMcp(app, orchestrator);
   return app;
 }

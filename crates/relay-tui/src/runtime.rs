@@ -508,6 +508,23 @@ impl<B: Backend> Runtime<B> {
                     let _ = tx.send(msg);
                 }));
             }
+            Effect::DeleteTask(task_id) => {
+                let Source::Live(client) = &self.source else {
+                    self.app.set_notice("replay has no daemon to delete on");
+                    return;
+                };
+                let client = client.clone();
+                let tx = self.tx.clone();
+                self.tasks.push(tokio::spawn(async move {
+                    let msg = match client.delete_task(&task_id).await {
+                        Ok(()) => Msg::Notice(format!("{task_id} deleted; the event log keeps it")),
+                        Err(e) => Msg::Notice(format!("could not delete {task_id}: {e}")),
+                    };
+                    let _ = tx.send(msg);
+                    // The graph is what says it is gone, so ask for it rather than guessing.
+                    let _ = tx.send(Msg::Refresh);
+                }));
+            }
             Effect::KillPane(pane_id) => {
                 let Source::Live(client) = &self.source else {
                     self.app

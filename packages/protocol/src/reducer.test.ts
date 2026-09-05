@@ -81,10 +81,13 @@ describe('reducer', () => {
       log.add('mission_clarification_answered', { answers: [{ question_id: 'Q1', answer: 'magic link', answered_by: 'human', at: '2026-09-05T10:06:00+08:00' }] }, { actor: 'human' });
       log.add('mission_verified', {}, { actor: 'human' });
       log.add('mission_failed', { reason: 'boom' });
+      log.add('mission_canceled', { reason: 'changed my mind' });
+      log.add('task_deleted', { reason: 'tidying up' }, { task_id: BACKEND });
+      log.add('mission_deleted', { reason: 'abandoned' });
 
       const seen = new Set<EventType>(log.events.map((e) => e.type));
       expect([...EVENT_TYPES].filter((t) => !seen.has(t))).toEqual([]);
-      expect(EVENT_TYPES).toHaveLength(36);
+      expect(EVENT_TYPES).toHaveLength(39);
 
       let state = initialState();
       for (const e of log.events) {
@@ -129,6 +132,9 @@ describe('reducer', () => {
         integration_conflict: { task_id: BACKEND, files: [] },
         mission_verified: {},
         mission_failed: { reason: 'r' },
+        mission_canceled: { reason: 'r' },
+        task_deleted: { reason: 'r' },
+        mission_deleted: { reason: 'r' },
         blocker_replied: { message: 'use the fake sender' },
         mission_clarification_requested: { questions: [{ id: 'Q1', text: 'Which mechanism?', blocking: true }] },
         mission_clarification_answered: { answers: [{ question_id: 'Q1', answer: 'magic link', answered_by: 'human', at: 'x' }] },
@@ -512,3 +518,84 @@ describe('reducer', () => {
 // Type-level check: State stays assignable from reducer output.
 const _s: State = replay([]);
 void _s;
+
+describe('tombstones', () => {
+  const withTwoTasks = () => {
+    const log = new EventLog();
+    log.add('mission_created', mission());
+    log.add('task_proposed', { contract: contract({ id: BACKEND }) }, { task_id: BACKEND });
+    log.add('task_proposed', { contract: contract({ id: FRONTEND, recipient: 'frontend' }) }, { task_id: FRONTEND });
+    return log;
+  };
+
+  it('task_deleted drops the task from the state and from its mission', () => {
+    const log = withTwoTasks();
+    log.add('task_canceled', { reason: 'not needed' }, { task_id: BACKEND });
+    const before = replay(log.events);
+    expect(before.tasks[BACKEND]).toBeDefined();
+    expect(before.missions[MISSION_ID]!.task_ids).toContain(BACKEND);
+
+    log.add('task_deleted', { reason: 'tidying up' }, { task_id: BACKEND });
+    const after = replay(log.events);
+
+    expect(after.tasks[BACKEND]).toBeUndefined();
+    expect(after.missions[MISSION_ID]!.task_ids).toEqual([FRONTEND]);
+    expect(after.tasks[FRONTEND]).toBeDefined();
+  });
+
+  it('the log still holds the whole story: replaying up to the delete shows the task alive', () => {
+    const log = withTwoTasks();
+    log.add('task_canceled', {}, { task_id: BACKEND });
+    const upToDelete = log.events.length;
+    log.add('task_deleted', {}, { task_id: BACKEND });
+
+    // The point of a tombstone rather than an edit: history is intact, only the view forgets.
+    expect(replay(log.events.slice(0, upToDelete)).tasks[BACKEND]).toBeDefined();
+    expect(replay(log.events).tasks[BACKEND]).toBeUndefined();
+  });
+
+  it('mission_deleted takes its tasks with it and leaves other missions alone', () => {
+    const log = withTwoTasks();
+    const other = 'm-other';
+    log.add('mission_created', { ...mission(), id: other }, { mission_id: other });
+    log.add('task_proposed', { contract: contract({ id: E2E, mission_id: other }) }, { task_id: E2E, mission_id: other });
+
+    log.add('mission_deleted', { reason: 'abandoned' });
+    const after = replay(log.events);
+
+    expect(after.missions[MISSION_ID]).toBeUndefined();
+    expect(after.tasks[BACKEND]).toBeUndefined();
+    expect(after.tasks[FRONTEND]).toBeUndefined();
+    expect(after.missions[other]).toBeDefined();
+    expect(after.tasks[E2E]).toBeDefined();
+  });
+
+  it('mission_canceled sets the status without deleting anything', () => {
+    const log = withTwoTasks();
+    log.add('mission_canceled', { reason: 'changed my mind' });
+    const after = replay(log.events);
+
+    expect(after.missions[MISSION_ID]!.status).toBe('canceled');
+    expect(after.tasks[BACKEND]).toBeDefined();
+  });
+
+  it('deleting what was never there changes nothing, so the reducer stays total', () => {
+    const log = withTwoTasks();
+    const before = replay(log.events);
+    log.add('task_deleted', {}, { task_id: 't-never-existed' });
+
+    const after = replay(log.events);
+    expect(after.tasks).toEqual(before.tasks);
+    expect(after.missions).toEqual(before.missions);
+  });
+
+  it('metrics are not rewritten: forgetting a task does not unmake its repairs', () => {
+    const log = withTwoTasks();
+    log.add('repair_requested', { repair: repair(1) }, { task_id: BACKEND });
+    const withRepair = replay(log.events).metrics.repairs_total;
+    expect(withRepair).toBe(1);
+
+    log.add('task_deleted', {}, { task_id: BACKEND });
+    expect(replay(log.events).metrics.repairs_total).toBe(1);
+  });
+});

@@ -709,3 +709,87 @@ fn closing_a_contracted_agents_pane_leaves_its_node_alone() {
         "the task still exists: closing a terminal is not cancelling the work"
     );
 }
+
+// --- deleting work that is over ------------------------------------------------------------------
+
+/// An app whose selected task is in the given state.
+fn app_with_task_state(state: TaskState) -> App {
+    let mut app = App::new(Mode::Replay);
+    let mut g = graph("live-1");
+    for node in g.nodes.iter_mut() {
+        if node.id == "t-backend-auth" {
+            node.task_state = Some(state);
+        }
+    }
+    app.set_graph(g);
+    app.select(Some(GraphObjectRef::node("t-backend-auth")));
+    app
+}
+
+#[test]
+fn d_asks_before_deleting_and_says_what_survives() {
+    let mut app = app_with_task_state(TaskState::Canceled);
+
+    let effects = app.handle_key(Key::char('D'));
+
+    assert!(effects.is_empty(), "nothing until the question is answered");
+    let prompt = app.prompt_line().expect("a question");
+    assert!(prompt.contains("t-backend-auth"), "{prompt}");
+    assert!(
+        prompt.contains("event log"),
+        "deleting is forgetting, not undoing — the prompt says what stays: {prompt}"
+    );
+}
+
+#[test]
+fn answering_yes_deletes_the_task() {
+    let mut app = app_with_task_state(TaskState::Canceled);
+    app.handle_key(Key::char('D'));
+
+    let effects = app.handle_key(Key::char('y'));
+
+    assert!(
+        matches!(effects.as_slice(), [Effect::DeleteTask(id)] if id == "t-backend-auth"),
+        "{effects:?}"
+    );
+}
+
+#[test]
+fn answering_no_deletes_nothing() {
+    let mut app = app_with_task_state(TaskState::Failed);
+    app.handle_key(Key::char('D'));
+
+    let effects = app.handle_key(Key::char('n'));
+
+    assert!(effects.is_empty());
+    assert!(app.prompt_line().is_none());
+}
+
+#[test]
+fn live_work_cannot_be_deleted_and_the_key_says_why() {
+    let mut app = app_with_task_state(TaskState::Executing);
+
+    let effects = app.handle_key(Key::char('D'));
+
+    assert!(effects.is_empty());
+    assert!(app.prompt_line().is_none(), "no question is even asked");
+    assert!(
+        app.notice
+            .as_deref()
+            .is_some_and(|n| n.contains("cancelled or failed")),
+        "{:?}",
+        app.notice
+    );
+}
+
+#[test]
+fn a_failed_task_can_be_deleted_too() {
+    let app = app_with_task_state(TaskState::Failed);
+    assert_eq!(app.deletable_task().as_deref(), Some("t-backend-auth"));
+}
+
+#[test]
+fn completed_work_is_not_deletable_it_is_the_record_of_what_was_done() {
+    let app = app_with_task_state(TaskState::Completed);
+    assert_eq!(app.deletable_task(), None);
+}

@@ -74,6 +74,9 @@ const payloads: { [T in EventType]: Extract<Event, { type: T }>['payload'] } = {
   integration_conflict: { task_id: BACKEND, files: ['src/auth/token.ts'] },
   mission_verified: {},
   mission_failed: { reason: 'integration check failed' },
+  mission_canceled: { reason: 'changed my mind' },
+  task_deleted: { reason: 'tidying up' },
+  mission_deleted: { reason: 'abandoned' },
 };
 
 const actorFor: Partial<Record<EventType, string>> = {
@@ -107,7 +110,7 @@ function event<T extends EventType>(type: T, overrides: Partial<{ task_id: strin
 describe('narrate', () => {
   it('returns one non-empty sentence for every EVENT_TYPES member, never echoing the raw type', () => {
     const state = backendState();
-    expect(EVENT_TYPES).toHaveLength(36);
+    expect(EVENT_TYPES).toHaveLength(39);
     for (const type of EVENT_TYPES) {
       const line = narrate(event(type), state);
       expect(line.trim().length, type).toBeGreaterThan(0);

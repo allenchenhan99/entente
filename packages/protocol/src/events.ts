@@ -66,6 +66,16 @@ export const EventSchemas = [
   ev('integration_conflict', z.object({ task_id: z.string(), files: z.array(z.string()) })),
   ev('mission_verified', z.object({})),
   ev('mission_failed', z.object({ reason: z.string() })),
+  /** The human stopped a whole mission: every live task is canceled with it. */
+  ev('mission_canceled', z.object({ reason: z.string().optional() })),
+  /**
+   * Tombstones. The log is append-only and stays complete — replaying up to any earlier point still
+   * shows the task alive, and its cast and evidence are untouched on disk — but the reduced state
+   * drops it, so it leaves the graph, the tree and `relay status`. Only work that is over can be
+   * deleted; relayd refuses anything live.
+   */
+  ev('task_deleted', z.object({ reason: z.string().optional() })),
+  ev('mission_deleted', z.object({ reason: z.string().optional() })),
 ] as const;
 
 export const Event = z.discriminatedUnion('type', [...EventSchemas]);

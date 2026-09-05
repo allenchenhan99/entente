@@ -65,6 +65,14 @@ export const routes = {
   clarify: (taskId: string) => `/tasks/${taskId}/clarify`,
   review: (taskId: string) => `/tasks/${taskId}/review`,
   cancel: (taskId: string) => `/tasks/${taskId}/cancel`,
+  /** `POST` CancelBody — stop a whole mission; every task of it still running is canceled too. */
+  cancelMission: (missionId: string) => `/missions/${missionId}/cancel`,
+  /**
+   * `DELETE` — forget work that is over. The log keeps it: a tombstone is appended, so replay and the
+   * recordings are intact and nothing on disk is touched. relayd refuses anything still live.
+   */
+  task: (taskId: string) => `/tasks/${taskId}`,
+  mission: (missionId: string) => `/missions/${missionId}`,
   reply: (taskId: string) => `/tasks/${taskId}/reply`,
   revise: (taskId: string) => `/tasks/${taskId}/revise`,
   mcp: '/mcp',

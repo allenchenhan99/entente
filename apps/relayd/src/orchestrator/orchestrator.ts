@@ -115,6 +115,15 @@ export interface Orchestrator {
   clarify(taskId: string, answers: Array<{ question_id: string; answer: string }>, answeredBy: Sender): Promise<{ contract_version: number }>;
   review(taskId: string, body: ReviewBody): Promise<void>;
   cancel(taskId: string, reason?: string): Promise<void>;
+  /** Stop a whole mission: every task of it that is still live is canceled too. */
+  cancelMission(missionId: string, reason?: string): Promise<void>;
+  /**
+   * Forget a task, or a mission and its tasks. Only work that is over can be deleted, and the log
+   * keeps it: these append a tombstone the reducer honours, so replay and the recordings are intact.
+   * Nothing on disk is touched — worktrees, branches and evidence stay where they are.
+   */
+  deleteTask(taskId: string, reason?: string): Promise<void>;
+  deleteMission(missionId: string, reason?: string): Promise<void>;
 
   getContract(taskId: string): GetContractOutput;
   respond(taskId: string, response: RespondInputT): RespondOutput;
@@ -243,6 +252,13 @@ export const INTEGRATION_CRITERION = 'AC-0';
 export const plannerTaskId = (missionId: string): string => `planner:${missionId}`;
 export const isPlannerTaskId = (id: string): boolean => id.startsWith('planner:');
 /** Per-agent config directory (`mcp.json`, `CODEX_HOME`); planners use `agents/planner-<mission>`. */
+/** Task states with nothing left running. */
+const TERMINAL_TASK_STATES: ReadonlySet<string> = new Set(['completed', 'failed', 'canceled']);
+/** What may be deleted: work that is over and did not land. A completed task is the record of work
+ *  done, so removing it is not a tidy-up — cancel is not the path to that. */
+const DELETABLE_TASK_STATES: ReadonlySet<string> = new Set(['canceled', 'failed']);
+const DELETABLE_MISSION_STATES: ReadonlySet<string> = new Set(['canceled', 'failed']);
+
 export const agentConfigDir = (relayDir: string, taskId: string): string =>
   path.join(relayDir, 'agents', isPlannerTaskId(taskId) ? `planner-${taskId.slice('planner:'.length)}` : taskId);
 
@@ -937,6 +953,59 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
   };
 
+  const cancelMission: Orchestrator['cancelMission'] = async (missionId, reason) => {
+    const m = mustMission(missionId);
+    if (m.status === 'canceled') return;
+    for (const taskId of m.taskIds) {
+      const rec = tasks.get(taskId);
+      if (rec && !TERMINAL_TASK_STATES.has(rec.taskState)) await cancel(taskId, reason);
+    }
+    m.status = 'canceled';
+    emit({ mission_id: missionId, actor: 'human', type: 'mission_canceled', payload: reason === undefined ? {} : { reason } });
+  };
+
+  /** Deleting is for work that is over; anything else has to be stopped first, deliberately. */
+  const requireOver = (what: string, state: string): void => {
+    if (!DELETABLE_TASK_STATES.has(state)) {
+      throw conflict(`${what} is ${state}; cancel it before deleting it`);
+    }
+  };
+
+  const deleteTask: Orchestrator['deleteTask'] = async (taskId, reason) => {
+    const rec = mustTask(taskId);
+    requireOver(`task ${taskId}`, rec.taskState);
+    // A survivor waiting on this one would wait forever, so say so instead of stranding it.
+    const dependents = [...tasks.values()].filter(
+      (t) => t.id !== taskId && current(t).dependencies.includes(taskId),
+    );
+    if (dependents.length > 0) {
+      throw conflict(
+        `task ${taskId} is a dependency of ${dependents.map((t) => t.id).join(', ')}; `
+        + 'delete those first, or revise them to drop the dependency',
+      );
+    }
+    if (rec.paneId) await deps.host.kill(rec.paneId).catch(() => undefined);
+    emitTask(rec, 'human', 'task_deleted', reason === undefined ? {} : { reason });
+    tasks.delete(taskId);
+    const m = missions.get(rec.missionId);
+    if (m) m.taskIds = m.taskIds.filter((id) => id !== taskId);
+  };
+
+  const deleteMission: Orchestrator['deleteMission'] = async (missionId, reason) => {
+    const m = mustMission(missionId);
+    if (!DELETABLE_MISSION_STATES.has(m.status)) {
+      throw conflict(`mission ${missionId} is ${m.status}; cancel it before deleting it`);
+    }
+    for (const taskId of [...m.taskIds]) {
+      const rec = tasks.get(taskId);
+      if (rec?.paneId) await deps.host.kill(rec.paneId).catch(() => undefined);
+      tasks.delete(taskId);
+    }
+    if (m.plannerPaneId) await deps.host.kill(m.plannerPaneId).catch(() => undefined);
+    emit({ mission_id: missionId, actor: 'human', type: 'mission_deleted', payload: reason === undefined ? {} : { reason } });
+    missions.delete(missionId);
+  };
+
   // ---------- integration ----------
   const topoOrder = (ids: string[]): string[] => {
     const set = new Set(ids);
@@ -1232,6 +1301,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   return {
     createMission,
+    cancelMission,
+    deleteTask,
+    deleteMission,
     spawnPlanner,
     askHuman,
     awaitAnswers,
