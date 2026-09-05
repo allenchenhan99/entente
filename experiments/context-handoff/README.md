@@ -15,29 +15,30 @@ expensive part. So the benchmark measures tokens **and** first-pass success.
 
 ## Why this case is shaped the way it is
 
-Derived from a real session (`D:\vscode_python\unvisited`, session `84912a87`, 36
-delegations, 2 compaction points, 2523 sidechain lines). Measured facts from that session:
+Derived from measurements of a real session — `asis/FINDINGS.md` has the full numbers and
+the scripts that produce them. Two results from it set the design:
 
-| Observation | Number |
-| --- | --- |
-| Near-identical benchmark delegations | 20 |
-| Total characters the main agent hand-wrote for them | 128,654 (~32k tokens) |
-| A standing decision ("Trip.Planner is broken, do not test it") restated | 20/20 |
-| A human instruction from an earlier turn ("keep summaries concise") restated | 20/20 |
-| Evidence directory paths restated | 20/20 |
-| **Exact line-level overlap between those prompts** | **10%** |
+**1. The brief is 0.8% of a delegation's cost.** Across 20 delegations the main agent
+hand-wrote ~1,608 tokens of briefing each, while the child it launched then spent ~199,582
+non-cache-read tokens — **124× the brief**. So "stop re-writing the same briefing" targets
+a rounding error, and a benchmark that compared prompt sizes would be measuring the wrong
+thing.
 
-The last row is the important one. The main agent did **not** copy-paste; it re-expressed
-the same facts in different words every time:
+**2. One wasted child run cost 6.8× every brief in the session combined.** A task that had
+to be re-delegated burned 218,226 non-cache-read tokens on its failed attempt, against
+32,164 for all twenty briefs put together.
 
-```
-case06: "Trip.Planner is confirmed broken via a CORS bug, do NOT test it, only test TripGenie"
-case07: "Trip.Planner is CONFIRMED BROKEN via a CORS bug, do NOT test it, TripGenie only"
-```
+Together those say the value of a handoff is **not** that it saves prompt tokens — it is
+that a child which knows the standing facts does not have to be run twice. The economics
+are entirely in rework, so this benchmark measures **first-pass success and repair rounds**,
+and reports **cost per passed task**. Prompt size is not a headline metric here.
 
-So the redundancy is **semantic, not lexical**. Prompt caching, string dedup and
-copy-paste templates cannot capture it. An item-based checkpoint can. This benchmark is
-built to test exactly that claim, and to falsify it if it is wrong.
+The redundancy is still real and still shapes the *mechanism*: the same standing decision
+was restated in 20/20 briefs and a human instruction from an earlier turn in 20/20, yet
+exact line overlap between those briefs was only 10% — the main agent paraphrased rather
+than copy-pasted. So the duplication is semantic, not lexical, which is why prompt caching
+and string dedup cannot capture it and an item-based checkpoint can. That argues for
+*which* mechanism, not for *whether* the spend is worth chasing.
 
 ## Experimental design
 
