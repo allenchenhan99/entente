@@ -988,6 +988,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       await deps.host.kill(rec.paneId);
       rec.runtimeState = 'exited';
     }
+    // Cancelling the last thing anyone was waiting for can finish the mission; nothing else re-checks.
+    await maybeIntegrate(rec.missionId);
   };
 
   const cancelMission: Orchestrator['cancelMission'] = async (missionId, reason) => {
@@ -1031,6 +1033,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     tasks.delete(taskId);
     const m = missions.get(rec.missionId);
     if (m) m.taskIds = m.taskIds.filter((id) => id !== taskId);
+    // Removing a task can leave a mission with nothing outstanding, the same as cancelling one.
+    await maybeIntegrate(rec.missionId);
   };
 
   const deleteMission: Orchestrator['deleteMission'] = async (missionId, reason) => {
@@ -1069,10 +1073,16 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const maybeIntegrate = async (missionId: string): Promise<void> => {
     const m = missions.get(missionId);
     if (!m || m.integrationStarted || m.taskIds.length === 0) return;
-    if (!m.taskIds.every((id) => tasks.get(id)?.taskState === 'completed')) return;
+    const states = m.taskIds.map((id) => tasks.get(id)?.taskState);
+    // A cancelled task is one the human said is not wanted, so it does not hold the mission open — but
+    // it is not integrated either. A failed one still blocks: integrating around work that did not
+    // succeed would produce a "verified" mission missing a piece nobody decided to drop.
+    if (!states.every((state) => state === 'completed' || state === 'canceled')) return;
+    const completed = m.taskIds.filter((id) => tasks.get(id)?.taskState === 'completed');
+    if (completed.length === 0) return;
     m.integrationStarted = true;
     m.status = 'integrating';
-    const order = topoOrder(m.taskIds);
+    const order = topoOrder(completed);
     const branchOf = (id: string) => tasks.get(id)!.worktree?.branch ?? `relay/${id}`;
     emit({ mission_id: missionId, actor: 'relayd', type: 'integration_started', payload: { branch: INTEGRATION_BRANCH, order } });
     try {

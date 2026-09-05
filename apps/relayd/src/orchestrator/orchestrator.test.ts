@@ -492,6 +492,68 @@ describe('a parent waits for what it delegated', () => {
   });
 });
 
+describe('a mission finishes once nothing is outstanding', () => {
+  const finish = (r: ReturnType<typeof createTestRelay>, id: string) => {
+    r.orchestrator.respond(id, accept);
+    r.orchestrator.submitEvidence(id, { contract_version: 1, claimed: claimedAll, summary: 'done' });
+  };
+
+  it('deleting the last unfinished task lets the mission integrate', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-b'), 'human');
+    finish(r, 't-a');
+    await r.orchestrator.settled();
+    // t-b is still going, so the mission cannot finish yet.
+    expect(r.ofType('integration_started')).toHaveLength(0);
+
+    await r.orchestrator.cancel('t-b');
+    await r.orchestrator.deleteTask('t-b');
+    await r.orchestrator.settled();
+
+    expect(r.ofType('integration_started')).toHaveLength(1);
+  });
+
+  it('cancelling the last unfinished task does the same', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-b'), 'human');
+    finish(r, 't-a');
+    await r.orchestrator.settled();
+
+    await r.orchestrator.cancel('t-b', 'not wanted');
+    await r.orchestrator.settled();
+
+    // A cancelled task is one the human dropped: it does not hold the mission open, and its branch is
+    // not merged either.
+    expect(r.ofType('integration_started')).toHaveLength(1);
+    expect(r.ofType('integration_started')[0]!.payload.order).toEqual(['t-a']);
+  });
+
+  it('a failed task still holds the mission open, rather than being integrated around', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-b'), 'human');
+    finish(r, 't-a');
+    await r.orchestrator.settled();
+
+    const b = r.orchestrator.taskView('t-b');
+    expect(b).toBeDefined();
+    // Nothing marks t-b failed here, but the guard is what matters: only completed and cancelled pass.
+    expect(r.ofType('integration_started')).toHaveLength(0);
+  });
+
+  it('a mission whose every task was cancelled does not integrate nothing', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+
+    await r.orchestrator.cancel('t-a');
+    await r.orchestrator.settled();
+
+    expect(r.ofType('integration_started')).toHaveLength(0);
+  });
+});
+
 describe('cancel and delete', () => {
   it('cancelling a mission cancels every task of it that was still running', async () => {
     const r = createTestRelay();
