@@ -697,3 +697,39 @@ describe('finding a daemon that is already there', () => {
     expect(expandHome('weird~name', '/home/me')).toBe('weird~name');
   });
 });
+
+describe('the zsh startup file', () => {
+  it('hands back the user\'s ZDOTDIR, sources their files, then puts the wrappers in front', async () => {
+    const workspaceRoot = temporaryDirectory();
+    const relayDir = path.join(temporaryDirectory(), '.relay');
+    const tui = childProcess(7020);
+    const signalBus = new EventEmitter();
+    const signals = {
+      on: (s: 'SIGINT' | 'SIGTERM', l: () => void) => { signalBus.on(s, l); },
+      off: (s: 'SIGINT' | 'SIGTERM', l: () => void) => { signalBus.off(s, l); },
+    };
+    const spawn = vi.fn(() => tui) as unknown as SpawnFunction;
+
+    const result = runTui(
+      { workspaceRoot, tui: 'rust', binary: path.join(workspaceRoot, 'relay-tui'), url: 'http://127.0.0.1:7420', token: 't', relayDir },
+      { spawn, fs, signals },
+    );
+    tui.emit('exit', 0, null);
+    await result;
+
+    const body = fs.readFileSync(path.join(relayDir, 'zdotdir', '.zshrc'), 'utf8');
+    // zsh has no `--rcfile`; it reads `.zshrc` from `$ZDOTDIR`. Pointing that at a directory of ours
+    // is the only way to run after the user's own files — and macOS defaults to zsh, so without it
+    // the wrappers never reach the front of PATH there at all.
+    const restored = body.indexOf('RELAY_REAL_ZDOTDIR');
+    const sourced = body.indexOf('.zshrc"');
+    const prepended = body.indexOf('export PATH=');
+    expect(restored).toBeGreaterThan(-1);
+    expect(sourced).toBeGreaterThan(restored);
+    expect(prepended).toBeGreaterThan(sourced);
+    expect(body).toContain(path.join('apps', 'shims', 'bin'));
+
+    const env = (spawn as unknown as { mock: { calls: Array<[string, string[], { env: Record<string, string> }]> } }).mock.calls.at(-1)![2].env;
+    expect(env.RELAY_ZDOTDIR).toBe(path.join(relayDir, 'zdotdir'));
+  });
+});

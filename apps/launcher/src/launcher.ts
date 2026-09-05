@@ -400,6 +400,21 @@ export function runTui(
       `export PATH=${JSON.stringify(shims)}:${JSON.stringify(tools)}:"$PATH"`,
       '',
     ].join('\n'));
+    // zsh has no `--rcfile`. It reads `.zshrc` from `$ZDOTDIR`, so the same ordering is arranged by
+    // pointing that at a directory of ours — and handing the user's own ZDOTDIR back first, so their
+    // startup files load exactly as they normally would. macOS defaults to zsh, so without this the
+    // wrappers never reach the front of PATH there at all.
+    const zdotdir = path.join(path.dirname(shellRc), 'zdotdir');
+    deps.fs.mkdirSync(zdotdir, { recursive: true });
+    deps.fs.writeFileSync(path.join(zdotdir, '.zshrc'), [
+      '# Written by entente. Restores your own ZDOTDIR, sources your startup files, then puts the',
+      '# RelayGraph wrappers in front of them.',
+      'ZDOTDIR="${RELAY_REAL_ZDOTDIR:-$HOME}"',
+      'export ZDOTDIR',
+      '[ -f "$ZDOTDIR/.zshrc" ] && . "$ZDOTDIR/.zshrc"',
+      `export PATH=${JSON.stringify(shims)}:${JSON.stringify(tools)}:"$PATH"`,
+      '',
+    ].join('\n'));
   } catch {
     // A read-only or missing relay dir just means the pane is a plain shell; nothing else changes.
   }
@@ -411,7 +426,12 @@ export function runTui(
     env: {
       ...deps.env,
       RELAY_TOOLS: `${shims}${path.delimiter}${tools}`,
-      ...(shellRc === undefined ? {} : { RELAY_SHELL_RC: shellRc }),
+      ...(shellRc === undefined
+        ? {}
+        : {
+            RELAY_SHELL_RC: shellRc,
+            RELAY_ZDOTDIR: path.join(path.dirname(shellRc), 'zdotdir'),
+          }),
       RELAY_HOME: options.workspaceRoot,
     },
   });

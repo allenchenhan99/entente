@@ -97,11 +97,7 @@ fn shell_argv(shell: &str) -> Vec<String> {
     let Ok(rc) = std::env::var("RELAY_SHELL_RC") else {
         return vec![shell.to_string()];
     };
-    let name = std::path::Path::new(shell)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
-    match name {
+    match shell_name(shell) {
         // `--rcfile` replaces the startup file rather than adding to it, so ours sources theirs.
         "bash" => vec![
             shell.to_string(),
@@ -109,8 +105,36 @@ fn shell_argv(shell: &str) -> Vec<String> {
             rc,
             "-i".to_string(),
         ],
+        // zsh has no `--rcfile`; it reads `$ZDOTDIR/.zshrc`, so the ordering is arranged through the
+        // environment instead. See `shell_env_for`.
         _ => vec![shell.to_string()],
     }
+}
+
+fn shell_name(shell: &str) -> &str {
+    std::path::Path::new(shell)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+}
+
+/// Environment for a pane's shell, including whatever it takes to get our startup file to run last.
+///
+/// bash takes a file on the command line; zsh takes a directory in `ZDOTDIR` and reads `.zshrc` from
+/// it. macOS defaults to zsh, so without this the wrappers never reach the front of PATH there and
+/// opening an agent registers nothing at all — the one thing this whole path exists to do.
+fn shell_env_for(shell: &str, mut env: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    if shell_name(shell) != "zsh" {
+        return env;
+    }
+    let Ok(zdotdir) = std::env::var("RELAY_ZDOTDIR") else {
+        return env;
+    };
+    // The user's own ZDOTDIR, so our `.zshrc` can hand it back before sourcing theirs.
+    let theirs = std::env::var("ZDOTDIR").unwrap_or_default();
+    env.insert("RELAY_REAL_ZDOTDIR".to_string(), theirs);
+    env.insert("ZDOTDIR".to_string(), zdotdir);
+    env
 }
 
 pub enum Source {
@@ -697,6 +721,7 @@ impl<B: Backend> Runtime<B> {
                 let mut env = shell_env();
                 env.insert("RELAY_URL".to_string(), self.app.ws().url.clone());
                 env.insert("RELAY_REPO".to_string(), cwd.clone());
+                let env = shell_env_for(&shell, env);
                 let argv = shell_argv(&shell);
                 self.tasks.push(tokio::spawn(async move {
                     let msg = match client
@@ -974,6 +999,86 @@ mod shell_tests {
         match previous {
             Some(v) => std::env::set_var(key, v),
             None => std::env::remove_var(key),
+        }
+    }
+}
+
+#[cfg(test)]
+mod zsh_tests {
+    use super::{shell_argv, shell_env_for};
+    use std::collections::BTreeMap;
+
+    /// macOS defaults to zsh, and zsh has no `--rcfile`. Passing bash's flag to it would be an error
+    /// on its command line, so the ordering is arranged through `ZDOTDIR` instead.
+    #[test]
+    fn zsh_is_started_plainly_and_pointed_at_our_startup_directory() {
+        temp_env(
+            &[
+                ("RELAY_SHELL_RC", Some("/repo/.relay/shell-rc")),
+                ("RELAY_ZDOTDIR", Some("/repo/.relay/zdotdir")),
+                ("ZDOTDIR", Some("/home/me/dotfiles")),
+            ],
+            || {
+                assert_eq!(shell_argv("/bin/zsh"), vec!["/bin/zsh"]);
+                let env = shell_env_for("/bin/zsh", BTreeMap::new());
+                assert_eq!(
+                    env.get("ZDOTDIR").map(String::as_str),
+                    Some("/repo/.relay/zdotdir")
+                );
+                // Handed back so our `.zshrc` can source their files exactly as they normally load.
+                assert_eq!(
+                    env.get("RELAY_REAL_ZDOTDIR").map(String::as_str),
+                    Some("/home/me/dotfiles")
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn bash_is_untouched_by_any_of_it() {
+        temp_env(
+            &[
+                ("RELAY_SHELL_RC", Some("/repo/.relay/shell-rc")),
+                ("RELAY_ZDOTDIR", Some("/repo/.relay/zdotdir")),
+            ],
+            || {
+                assert_eq!(
+                    shell_argv("/bin/bash"),
+                    vec!["/bin/bash", "--rcfile", "/repo/.relay/shell-rc", "-i"]
+                );
+                assert!(shell_env_for("/bin/bash", BTreeMap::new()).is_empty());
+            },
+        );
+    }
+
+    #[test]
+    fn a_shell_we_do_not_know_gets_nothing_rather_than_a_flag_it_would_reject() {
+        temp_env(&[("RELAY_SHELL_RC", Some("/repo/.relay/shell-rc"))], || {
+            assert_eq!(shell_argv("/usr/bin/fish"), vec!["/usr/bin/fish"]);
+            assert!(shell_env_for("/usr/bin/fish", BTreeMap::new()).is_empty());
+        });
+    }
+
+    fn temp_env(vars: &[(&str, Option<&str>)], body: impl FnOnce()) {
+        use std::sync::Mutex;
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous: Vec<(String, Option<String>)> = vars
+            .iter()
+            .map(|(k, _)| ((*k).to_string(), std::env::var(k).ok()))
+            .collect();
+        for (k, v) in vars {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+        body();
+        for (k, v) in previous {
+            match v {
+                Some(v) => std::env::set_var(&k, v),
+                None => std::env::remove_var(&k),
+            }
         }
     }
 }
