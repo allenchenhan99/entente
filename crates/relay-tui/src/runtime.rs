@@ -502,6 +502,24 @@ impl<B: Backend> Runtime<B> {
                     let _ = tx.send(msg);
                 }));
             }
+            Effect::KillPane(pane_id) => {
+                let Source::Live(client) = &self.source else {
+                    self.app
+                        .set_notice("replay has no daemon to close a pane on");
+                    return;
+                };
+                let client = client.clone();
+                let tx = self.tx.clone();
+                self.tasks.push(tokio::spawn(async move {
+                    let msg = match client.kill_pane(&pane_id).await {
+                        // The pane list is what says it is gone, so ask for it rather than guessing.
+                        Ok(()) => Msg::Notice(format!("closed {pane_id}")),
+                        Err(e) => Msg::Notice(format!("could not close {pane_id}: {e}")),
+                    };
+                    let _ = tx.send(msg);
+                    let _ = tx.send(Msg::Refresh);
+                }));
+            }
             Effect::SetMouseCapture(on) => {
                 let mut out = std::io::stdout();
                 let _ = if on {

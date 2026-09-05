@@ -106,6 +106,8 @@ pub enum InputMode {
     Reply,
     ReviewFailure,
     CancelConfirm,
+    /// `X`: close the focused pane. Kills a process, so it asks first.
+    ClosePaneConfirm,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -284,6 +286,8 @@ pub enum Effect {
     FocusPane(String),
     /// Grab the mouse for the app, or hand it back to the terminal so the user can select text.
     SetMouseCapture(bool),
+    /// `POST /panes/:id/kill` — end the process in a pane.
+    KillPane(String),
     /// Open a shell pane beside the agents. The runtime fills in the shell and the repo, since `App`
     /// knows neither the environment nor the filesystem.
     NewShellPane,
@@ -333,6 +337,8 @@ pub struct App {
     pub mouse_capture: bool,
     /// Where a background drag started, in cells.
     graph_drag: Option<(u16, u16)>,
+    /// Pane the user is being asked about before it is closed.
+    pending_pane_close: Option<String>,
     pub tick: u64,
 }
 
@@ -378,6 +384,7 @@ impl App {
             graph_view: GraphView::default(),
             mouse_capture: true,
             graph_drag: None,
+            pending_pane_close: None,
             tick: 0,
         }
     }
@@ -652,6 +659,21 @@ impl App {
             InputMode::Reply => Some(format!("reply> {}", self.input_value)),
             InputMode::ReviewFailure => Some(format!("observed failure> {}", self.input_value)),
             InputMode::CancelConfirm => Some("cancel task? y/N".to_string()),
+            // Naming what is about to die, and what survives it: killing an agent's terminal does not
+            // end its task, which then waits for an agent that is gone.
+            InputMode::ClosePaneConfirm => {
+                let pane_id = self.pending_pane_close.clone().unwrap_or_default();
+                Some(
+                    match self.pane_states.get(&pane_id).map(|p| p.info.clone()) {
+                        Some(info) if info.task_id.is_some() => format!(
+                            "close {}'s terminal ({pane_id})? its task keeps waiting for it  y/N",
+                            info.role
+                        ),
+                        Some(info) => format!("close the {} pane ({pane_id})?  y/N", info.role),
+                        None => format!("close {pane_id}?  y/N"),
+                    },
+                )
+            }
         }
     }
 
@@ -770,6 +792,7 @@ impl App {
         self.input_mode = None;
         self.input_value.clear();
         self.pending_action = None;
+        self.pending_pane_close = None;
     }
 
     fn begin_input(&mut self, action: ObjectAction, mode: InputMode) -> Vec<Effect> {
@@ -832,6 +855,20 @@ impl App {
         }
         if key.is_ctrl_c() {
             return vec![Effect::Quit];
+        }
+
+        if self.input_mode == Some(InputMode::ClosePaneConfirm) {
+            let answer = key.plain_char().map(|c| c.to_ascii_lowercase());
+            let mut effects = Vec::new();
+            if answer == Some('y') {
+                if let Some(pane_id) = self.pending_pane_close.clone() {
+                    effects.push(Effect::KillPane(pane_id));
+                }
+            }
+            if answer == Some('y') || answer == Some('n') || key.code == KeyCode::Esc {
+                self.reset_input();
+            }
+            return effects;
         }
 
         if self.input_mode == Some(InputMode::CancelConfirm) {
@@ -1015,6 +1052,17 @@ impl App {
             }
             (_, Some('0')) => {
                 self.graph_view = GraphView::default();
+                Vec::new()
+            }
+            (_, Some('X')) => {
+                match self.focused_pane.clone() {
+                    Some(pane_id) => {
+                        self.error = None;
+                        self.pending_pane_close = Some(pane_id);
+                        self.input_mode = Some(InputMode::ClosePaneConfirm);
+                    }
+                    None => self.set_notice("no pane to close"),
+                }
                 Vec::new()
             }
             (_, Some('t')) => {

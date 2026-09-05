@@ -192,6 +192,13 @@ impl Client {
             .ok_or_else(|| anyhow::anyhow!("POST /panes: no pane_id in the reply"))
     }
 
+    /// `POST /panes/:id/kill` — SIGTERM, then SIGKILL, on the host's schedule.
+    pub async fn kill_pane(&self, pane_id: &str) -> Result<()> {
+        self.post_json(&format!("/panes/{pane_id}/kill"), &serde_json::json!({}))
+            .await?;
+        Ok(())
+    }
+
     pub async fn focus_pane(&self, pane_id: &str) -> Result<()> {
         self.post_json(&format!("/panes/{pane_id}/focus"), &serde_json::json!({}))
             .await?;

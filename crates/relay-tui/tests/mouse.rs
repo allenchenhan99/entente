@@ -238,3 +238,95 @@ fn viewports_are_cleared_when_a_panel_is_not_drawn() {
         Vec::new()
     );
 }
+
+#[test]
+fn x_asks_before_closing_a_pane_and_names_what_survives() {
+    let mut app = app_with_panes();
+
+    let effects = app.handle_key(Key::char('X'));
+
+    assert!(
+        effects.is_empty(),
+        "nothing happens until the question is answered"
+    );
+    let prompt = app.prompt_line().expect("a question");
+    assert!(prompt.contains("relay:1"), "{prompt}");
+    assert!(prompt.contains("backend"), "{prompt}");
+    assert!(
+        prompt.contains("task keeps waiting"),
+        "an agent's pane says what closing it does not do: {prompt}"
+    );
+}
+
+#[test]
+fn answering_yes_closes_the_pane() {
+    let mut app = app_with_panes();
+    app.handle_key(Key::char('X'));
+
+    let effects = app.handle_key(Key::char('y'));
+
+    assert!(
+        matches!(effects.as_slice(), [Effect::KillPane(id)] if id == "relay:1"),
+        "{effects:?}"
+    );
+    assert!(app.prompt_line().is_none(), "the question is done");
+}
+
+#[test]
+fn answering_no_or_escaping_closes_nothing() {
+    for answer in [Key::char('n'), Key::ESC] {
+        let mut app = app_with_panes();
+        app.handle_key(Key::char('X'));
+
+        let effects = app.handle_key(answer);
+
+        assert!(effects.is_empty(), "{effects:?}");
+        assert!(app.prompt_line().is_none());
+    }
+}
+
+#[test]
+fn a_shell_pane_is_asked_about_differently_since_no_task_waits_on_it() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![pane("relay:9", None, "shell", true)],
+        Some("relay:9".to_string()),
+    );
+    app.handle_key(Key::char('X'));
+
+    let prompt = app.prompt_line().expect("a question");
+    assert!(prompt.contains("shell"), "{prompt}");
+    assert!(!prompt.contains("task keeps waiting"), "{prompt}");
+}
+
+#[test]
+fn x_says_so_when_there_is_no_pane_to_close() {
+    let mut app = drawn_app();
+
+    let effects = app.handle_key(Key::char('X'));
+
+    assert!(effects.is_empty());
+    assert!(app.prompt_line().is_none(), "no question without a pane");
+    assert!(
+        app.notice.as_deref().is_some_and(|n| n.contains("no pane")),
+        "{:?}",
+        app.notice
+    );
+}
+
+#[test]
+fn a_capital_x_typed_into_a_pane_is_just_a_letter() {
+    let mut app = app_with_panes();
+    let rect = *app.pane_rects.get("relay:1").unwrap();
+    click(&mut app, rect.x + 2, rect.y + 1);
+    assert!(app.terminal_input);
+
+    let effects = app.handle_key(Key::char('X'));
+
+    assert!(
+        matches!(effects.as_slice(), [Effect::PaneInput { data, .. }] if data == b"X"),
+        "{effects:?}"
+    );
+    assert!(app.prompt_line().is_none());
+}
