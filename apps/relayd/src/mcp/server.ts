@@ -83,11 +83,20 @@ export function buildMcpServer(orchestrator: Orchestrator, subject: TokenSubject
 
   // Agent networking: the caller (a recipient) is the parent of the subtask it proposes.
   server.registerTool(RECIPIENT_TOOLS.propose_subtask, {
-    description: 'Delegate a separable unit of your task as a new contract you are the sender of (same mission, parent_task = you). Linted like any contract; its allowed_paths must be disjoint from yours and it may not depend on you. Lint errors are returned so you can fix and re-propose with the same id.',
+    description: 'Delegate a separable unit of your task as a new contract you are the sender of (same mission, parent_task = you). Pass reuse_session (from relay_find_agents) to give the work to an agent that has already worked in that code rather than one that knows nothing. Linted like any contract; its allowed_paths must be disjoint from yours and it may not depend on you. Lint errors are returned so you can fix and re-propose with the same id.',
     inputSchema: ProposeSubtaskInput,
-  }, (args) => asRecipient(async (taskId) => ok(await orchestrator.proposeSubtask(taskId, args.contract))));
+  }, (args) => asRecipient(async (taskId) => ok(await orchestrator.proposeSubtask(taskId, args.contract, args.reuse_session))));
 
   // Not a heartbeat: waiting on another task must not mark the caller as working (the orchestrator does not `touch`).
+  server.registerTool(RECIPIENT_TOOLS.find_agents, {
+    description:
+      'Agents that have worked in this repository and the sessions that still remember it, with the '
+      + 'tasks they completed and the paths their contracts allowed. Pass a free agent\'s session_id as '
+      + 'reuse_session to relay_propose_subtask to give it the work instead of spawning one that knows '
+      + 'nothing. Facts only: what relayd verified and what the contracts allowed, never what an agent '
+      + 'said about itself.',
+  }, () => asRecipient(async () => ok(orchestrator.findAgents())));
+
   server.registerTool(RECIPIENT_TOOLS.await_task, {
     description: 'Wait (up to timeout_s) until another task (typically your subtask) reaches completed / failed / canceled; returns pending with its states on timeout (call again). You cannot await yourself.',
     inputSchema: AwaitTaskInput,

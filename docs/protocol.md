@@ -88,6 +88,7 @@ Generated from `packages/protocol/src` by `scripts/gen-protocol-docs.mjs`. JSON 
 | `relay_await_reply` |  |
 | `relay_propose_subtask` |  |
 | `relay_await_task` |  |
+| `relay_find_agents` |  |
 
 ### Planner
 

@@ -1,5 +1,7 @@
 import { replay } from '@relay/protocol';
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createTestRelay, sampleContract } from '../fakes/test-harness.js';
 
 const mission = { repo: '/repo', title: 'Add login' };
@@ -435,6 +437,114 @@ describe('integration', () => {
     r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'a' });
     await r.orchestrator.settled();
     expect(r.ofType('mission_failed')[0].payload.reason).toMatch(/integration check failed/);
+  });
+});
+
+describe('reusing an agent', () => {
+  const child = (over = {}) => sampleContract('t-a-schema', over);
+
+  const sessionOf = (r: ReturnType<typeof createTestRelay>, taskId: string) =>
+    replay(r.store.all()).tasks[taskId]!.agent!.session_id;
+
+  it('lists the agents that have worked here, with what they worked on', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+
+    const { agents } = r.orchestrator.findAgents();
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0]!.role).toBe('a');
+    expect(agents[0]!.session_id).toBe(sessionOf(r, 't-a'));
+    expect(agents[0]!.tasks.map((t) => t.id)).toEqual(['t-a']);
+  });
+
+  it('writes the registry to agents.md whenever an agent appears', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+
+    const file = fs.readFileSync(path.join(r.dir, '.relay', 'agents.md'), 'utf8');
+
+    expect(file).toContain('# Agents');
+    expect(file).toContain(sessionOf(r, 't-a'));
+    expect(file).toContain('reuse_session');
+  });
+
+  it('reuses a free agent by resuming its session rather than starting a new one', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    const subSession = sessionOf(r, 't-a-schema');
+    r.orchestrator.respond('t-a-schema', accept);
+    r.orchestrator.submitEvidence('t-a-schema', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+
+    await r.orchestrator.proposeSubtask('t-a', sampleContract('t-a-more'), subSession);
+    await r.orchestrator.settled();
+
+    // The same session id: the agent that comes back is the one that remembers.
+    expect(sessionOf(r, 't-a-more')).toBe(subSession);
+  });
+
+  it('refuses to reuse an agent that is still working', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    const busy = sessionOf(r, 't-a-schema');
+
+    await expect(r.orchestrator.proposeSubtask('t-a', sampleContract('t-a-more'), busy))
+      .rejects.toThrow(/still working/);
+  });
+
+  it('refuses a session that does not exist, rather than spawning a stranger', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+
+    await expect(r.orchestrator.proposeSubtask('t-a', child(), 'nope'))
+      .rejects.toThrow(/no agent has session nope/);
+  });
+
+  it('refuses to resume a session of the wrong runtime', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    const session = sessionOf(r, 't-a-schema');
+    r.orchestrator.respond('t-a-schema', accept);
+    r.orchestrator.submitEvidence('t-a-schema', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+
+    await expect(
+      r.orchestrator.proposeSubtask('t-a', sampleContract('t-a-more', { runtime: 'codex' }), session),
+    ).rejects.toThrow(/is a claude-code session/);
+  });
+
+  it('a finished subtask closes its terminal but keeps its session', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    const session = sessionOf(r, 't-a-schema');
+    r.orchestrator.respond('t-a-schema', accept);
+    r.orchestrator.submitEvidence('t-a-schema', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+
+    // The pane is gone…
+    expect(r.ofType('agent_exited').map((e) => e.task_id)).toContain('t-a-schema');
+    // …and the session is still there to be called again.
+    expect(r.orchestrator.findAgents().agents.some((a) => a.session_id === session && !a.live)).toBe(true);
+  });
+
+  it('a top-level agent keeps its terminal: that is the one you are watching', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+
+    expect(r.ofType('agent_exited').map((e) => e.task_id)).not.toContain('t-a');
   });
 });
 

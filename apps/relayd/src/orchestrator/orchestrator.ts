@@ -8,8 +8,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { z } from 'zod';
 import {
-  TaskContract, Mission, ProposeTaskOutput, RespondOutput, AwaitContractOutput, AwaitVerdictOutput,
-  SubmitEvidenceOutput, GetContractOutput, AwaitTaskOutput, AWAIT_TIMEOUT_MAX_S, hasLintErrors, replay,
+  TaskContract,
+  Mission,
+  ProposeTaskOutput,
+  RespondOutput,
+  AwaitContractOutput,
+  AwaitVerdictOutput,
+  SubmitEvidenceOutput,
+  GetContractOutput,
+  AwaitTaskOutput,
+  AWAIT_TIMEOUT_MAX_S,
+  hasLintErrors,
+  replay,
+  agentRegistry,
+  agentRegistryMarkdown,
+  type AgentEntry,
+  RECIPIENT_TOOLS,
 } from '@relay/protocol';
 import type {
   Event, TaskContractInput, ContractResponse, Clarification, EvidenceSubmission, EvidenceRecord, RepairContract,
@@ -105,7 +119,7 @@ export interface Orchestrator {
    * `allowed_paths` must be disjoint from the parent's (`overlapping_scope` at error severity) and it may not
    * depend on the parent (400: cycle). Otherwise identical to `proposeTask`, including lint and spawn gating.
    */
-  proposeSubtask(parentTaskId: string, input: TaskContractInput): Promise<ProposeTaskOutput>;
+  proposeSubtask(parentTaskId: string, input: TaskContractInput, reuseSession?: string): Promise<ProposeTaskOutput>;
   /**
    * Long-poll until `taskId` is completed / failed / canceled; `pending` (with both states) on timeout.
    * Any task may be awaited; `callerTaskId` (when known) may not await itself (400) or a task of another mission.
@@ -115,6 +129,11 @@ export interface Orchestrator {
   clarify(taskId: string, answers: Array<{ question_id: string; answer: string }>, answeredBy: Sender): Promise<{ contract_version: number }>;
   review(taskId: string, body: ReviewBody): Promise<void>;
   cancel(taskId: string, reason?: string): Promise<void>;
+  /**
+   * Agents that have worked here and can be resumed. Derived from the log, never self-reported: an
+   * agent saying what it is good at is a claim, and what it completed is a fact.
+   */
+  findAgents(): { agents: AgentEntry[] };
   /** Stop a whole mission: every task of it that is still live is canceled too. */
   cancelMission(missionId: string, reason?: string): Promise<void>;
   /**
@@ -185,6 +204,8 @@ interface MissionRecord {
 interface TaskRecord {
   id: string;
   missionId: string;
+  /** A runtime session to reopen instead of starting fresh; set when a caller asked to reuse an agent. */
+  reuseSession?: string;
   versions: TaskContract[];
   lint: LintResult[];
   response?: ContractResponse;
@@ -416,20 +437,26 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
       const token = issueToken(taskId);
       rec.token = token;
-      const sessionId = randomUUID();
+      // Reusing an agent means reopening its runtime session, which is the same mechanism a daemon
+      // restart uses: the id is the memory. A fresh id is a fresh agent that knows nothing.
+      const reused = rec.reuseSession;
+      const sessionId = reused ?? randomUUID();
       rec.sessionId = sessionId;
       const runtime = deps.runtimes[contract.runtime];
       if (!runtime) throw new Error(`no runtime registered for ${contract.runtime}`);
       const configDir = agentConfigDir(deps.relayDir, taskId);
-      const launch = await runtime.prepare(
-        { taskId, token, mcpUrl: deps.mcpUrl, sessionId, cwd: worktree.path, role: 'recipient', contractSummary: contract.goal },
-        configDir,
-      );
+      const spec = { taskId, token, mcpUrl: deps.mcpUrl, sessionId, cwd: worktree.path, role: 'recipient' as const, contractSummary: contract.goal };
+      const launch = reused !== undefined && runtime.resume
+        ? await runtime.resume(spec, configDir)
+        : await runtime.prepare(spec, configDir);
       const { paneId } = await deps.host.spawn({ name: contract.recipient, cwd: worktree.path, argv: launch.argv, env: launch.env, prompt: launch.prompt, taskId: contract.id });
       rec.paneId = paneId;
       rec.spawned = true;
       rec.runtimeState = 'idle';
       emitTask(rec, 'relayd', 'agent_spawned', { runtime: contract.runtime, pane_id: paneId, session_id: sessionId, cwd: worktree.path });
+      // A new agent belongs in the registry the moment it exists, which is what "updated whenever a
+      // new subagent is created" asks for.
+      writeAgentsFile();
     } finally {
       rec.spawning = false;
     }
@@ -447,7 +474,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   // ---------- proposals / revisions ----------
   /** Shared by `proposeTask` (planner / human) and `proposeSubtask` (a recipient agent, `parentTask` set). */
-  const propose = async (missionId: string, input: TaskContractInput, sender: Sender, parentTask?: string): Promise<ProposeTaskOutput> => {
+  const propose = async (missionId: string, input: TaskContractInput, sender: Sender, parentTask?: string, reuseSession?: string): Promise<ProposeTaskOutput> => {
     const m = mustMission(missionId);
     const existing = tasks.get(input.id);
     if (existing && existing.missionId !== missionId) {
@@ -485,6 +512,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         taskState: 'proposed', handoffState: 'proposed', runtimeState: 'unspawned',
         spawned: false, spawning: false, attempt: 0, attempts: [], submissions: [], checksStarted: new Set(), verdicts: new Map(),
         repairs: [], repairAckPending: false, escalated: false, proposedAt: clock(), replies: [], repliesRead: 0,
+        ...(reuseSession === undefined ? {} : { reuseSession }),
       };
       tasks.set(rec.id, rec);
       m.taskIds.push(rec.id);
@@ -517,7 +545,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return out;
   };
 
-  const proposeSubtask: Orchestrator['proposeSubtask'] = async (parentTaskId, input) => {
+  const proposeSubtask: Orchestrator['proposeSubtask'] = async (parentTaskId, input, reuseSession) => {
     const parent = mustTask(parentTaskId);
     if (parent.taskState === 'completed' || parent.taskState === 'canceled' || parent.taskState === 'failed') {
       throw conflict(`task ${parentTaskId} is ${parent.taskState}; it cannot delegate any more work`);
@@ -551,7 +579,17 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       .filter((r) => r.rule === 'overlapping_scope')
       .map((r) => `${r.rule}: ${r.message} (a subtask's scope must be disjoint from its parent's)`);
     if (overlaps.length > 0) return { status: 'lint_error', task_id: input.id, errors: overlaps, warnings: [] };
-    return propose(parent.missionId, input, agentActor(parent), parentTaskId);
+    // An agent is only reusable if it is free and of the right runtime; refusing is better than
+    // quietly spawning a fresh one when the caller asked for a particular memory.
+    if (reuseSession !== undefined) {
+      const entry = agentRegistry(deps.store.state()).find((a) => a.session_id === reuseSession);
+      if (!entry) throw new RelayError(400, `no agent has session ${reuseSession}; call ${RECIPIENT_TOOLS.find_agents}`);
+      if (entry.live) throw conflict(`agent ${entry.role} (${reuseSession}) is still working; it cannot take another task`);
+      if (entry.runtime !== input.runtime) {
+        throw new RelayError(400, `agent ${entry.role} (${reuseSession}) is a ${entry.runtime} session, and this contract asks for ${input.runtime}`);
+      }
+    }
+    return propose(parent.missionId, input, agentActor(parent), parentTaskId, reuseSession);
   };
 
   const revise = async (rec: TaskRecord, next: TaskContract, actor: Sender): Promise<number> => {
@@ -770,6 +808,21 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           }
         }
         emitTask(rec, 'relayd', 'task_completed', {});
+        // A subtask's terminal is nothing to look at once its work has landed, and leaving it open
+        // fills the grid with finished agents. The process ends; the session does not — it is in the
+        // log, and `reuse_session` reopens it with everything it learned. A top-level agent's pane
+        // stays, because that is the one you were watching.
+        if (current(rec).parent_task !== undefined && rec.paneId) {
+          try {
+            await deps.host.kill(rec.paneId);
+            rec.runtimeState = 'exited';
+            emitTask(rec, 'relayd', 'agent_exited', { pane_id: rec.paneId, exit_reason: 'subtask complete; session kept for reuse' });
+          } catch (error) {
+            log(`could not close the pane of ${rec.id}: ${String(error)}`);
+          }
+        }
+        // Its work is done and its session is now free to be called again.
+        writeAgentsFile();
         await landSubtaskInParent(rec);
         await spawnDependants(rec.id, rec.missionId);
         await maybeIntegrate(rec.missionId);
@@ -990,6 +1043,24 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
     // Cancelling the last thing anyone was waiting for can finish the mission; nothing else re-checks.
     await maybeIntegrate(rec.missionId);
+  };
+
+  const findAgents: Orchestrator['findAgents'] = () => ({ agents: agentRegistry(deps.store.state()) });
+
+  /**
+   * Rewrite `<relayDir>/agents.md` so a human, and an agent with a file tool, can read the registry.
+   * Best effort: the file is a rendering of the log, so failing to write it loses nothing.
+   */
+  const writeAgentsFile = (): void => {
+    try {
+      fs.mkdirSync(deps.relayDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(deps.relayDir, 'agents.md'),
+        agentRegistryMarkdown(deps.store.state(), clock()),
+      );
+    } catch (error) {
+      log(`could not write agents.md: ${String(error)}`);
+    }
   };
 
   const cancelMission: Orchestrator['cancelMission'] = async (missionId, reason) => {
@@ -1353,6 +1424,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   return {
     createMission,
+    findAgents,
     cancelMission,
     deleteTask,
     deleteMission,
