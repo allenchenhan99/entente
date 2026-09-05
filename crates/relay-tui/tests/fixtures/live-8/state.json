@@ -4,7 +4,7 @@
     "m-38c26e": {
       "mission": {
         "id": "m-38c26e",
-        "repo": "/Users/allenchenhan99/entente-demo/app",
+        "repo": "/Users/relay-demo/entente-demo/app",
         "title": "Add secure login to this application.",
         "success_definition": "",
         "integration_check": "npx vitest run",
@@ -454,7 +454,7 @@
       "task_state": "completed",
       "handoff_state": "verified",
       "worktree": {
-        "path": "/Users/allenchenhan99/entente-demo/app/.relay/wt/t-backend-auth",
+        "path": "/Users/relay-demo/entente-demo/app/.relay/wt/t-backend-auth",
         "branch": "relay/t-backend-auth"
       },
       "agent": {
@@ -469,7 +469,7 @@
           "task_id": "t-backend-auth",
           "contract_version": 2,
           "attempt": 1,
-          "git_diff_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/attempt-1.patch",
+          "git_diff_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/attempt-1.patch",
           "changed_files": [
             "src/app.ts",
             "src/auth/routes.ts",
@@ -482,12 +482,12 @@
           "checks": {
             "AC-1": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/AC-1.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/AC-1.txt",
               "duration_ms": 1328
             },
             "AC-2": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/AC-2.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/AC-2.txt",
               "duration_ms": 958
             },
             "AC-3": {
@@ -498,7 +498,7 @@
             },
             "AC-5": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/AC-5.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/AC-5.txt",
               "duration_ms": 1102
             }
           },
@@ -850,7 +850,7 @@
       "task_state": "completed",
       "handoff_state": "verified",
       "worktree": {
-        "path": "/Users/allenchenhan99/entente-demo/app/.relay/wt/t-frontend-login",
+        "path": "/Users/relay-demo/entente-demo/app/.relay/wt/t-frontend-login",
         "branch": "relay/t-frontend-login"
       },
       "agent": {
@@ -865,7 +865,7 @@
           "task_id": "t-frontend-login",
           "contract_version": 3,
           "attempt": 1,
-          "git_diff_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-frontend-login/attempt-1.patch",
+          "git_diff_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-frontend-login/attempt-1.patch",
           "changed_files": [
             "public/login.html",
             "tests/ui/login.test.mjs"
@@ -873,7 +873,7 @@
           "checks": {
             "AC-1": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-frontend-login/AC-1.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-frontend-login/AC-1.txt",
               "duration_ms": 29
             },
             "AC-2": {

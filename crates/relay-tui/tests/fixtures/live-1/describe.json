@@ -17,7 +17,7 @@
     "lines": [
       "role: backend (claude-code, pane wP:p9)",
       "runtime: exited · task: completed · handoff: verified",
-      "worktree: /Users/allenchenhan99/entente-demo/app/.relay/wt/t-backend-auth (relay/t-backend-auth)",
+      "worktree: /Users/relay-demo/entente-demo/app/.relay/wt/t-backend-auth (relay/t-backend-auth)",
       "attempt: 2 · repairs: 1"
     ]
   },
@@ -26,7 +26,7 @@
     "lines": [
       "role: frontend (codex, pane wP:pA)",
       "runtime: exited · task: canceled · handoff: proposed",
-      "worktree: /Users/allenchenhan99/entente-demo/app/.relay/wt/t-frontend-login (relay/t-frontend-login)",
+      "worktree: /Users/relay-demo/entente-demo/app/.relay/wt/t-frontend-login (relay/t-frontend-login)",
       "attempt: 0"
     ]
   },

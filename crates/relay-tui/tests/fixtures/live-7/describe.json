@@ -17,7 +17,7 @@
     "lines": [
       "role: backend (claude-code, pane relay:3)",
       "runtime: exited · task: completed · handoff: verified",
-      "worktree: /Users/allenchenhan99/entente-demo/app/.relay/wt/t-backend-auth (relay/t-backend-auth)",
+      "worktree: /Users/relay-demo/entente-demo/app/.relay/wt/t-backend-auth (relay/t-backend-auth)",
       "attempt: 2 · repairs: 1",
       "subtasks: t-token-store"
     ]
@@ -27,7 +27,7 @@
     "lines": [
       "role: token-dev (codex, pane relay:2)",
       "runtime: exited · task: completed · handoff: verified",
-      "worktree: /Users/allenchenhan99/entente-demo/app/.relay/wt/t-token-store (relay/t-token-store)",
+      "worktree: /Users/relay-demo/entente-demo/app/.relay/wt/t-token-store (relay/t-token-store)",
       "attempt: 1",
       "parent: t-backend-auth"
     ]

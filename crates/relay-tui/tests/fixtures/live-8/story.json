@@ -4,7 +4,7 @@
       "seq": 1,
       "ts": "2026-09-04T17:02:22.416Z",
       "actor": "human",
-      "line": "you create mission \"Add secure login to this application.\" in /Users/allenchenhan99/entente-demo/app"
+      "line": "you create mission \"Add secure login to this application.\" in /Users/relay-demo/entente-demo/app"
     },
     {
       "seq": 2,
@@ -25,7 +25,7 @@
       "ts": "2026-09-04T17:02:22.554Z",
       "task_id": "t-backend-auth",
       "actor": "relayd",
-      "line": "RelayGraph creates worktree relay/t-backend-auth at /Users/allenchenhan99/entente-demo/app/.relay/wt/t-backend-auth"
+      "line": "RelayGraph creates worktree relay/t-backend-auth at /Users/relay-demo/entente-demo/app/.relay/wt/t-backend-auth"
     },
     {
       "seq": 5,
@@ -53,7 +53,7 @@
       "ts": "2026-09-04T17:02:24.712Z",
       "task_id": "t-frontend-login",
       "actor": "relayd",
-      "line": "RelayGraph creates worktree relay/t-frontend-login at /Users/allenchenhan99/entente-demo/app/.relay/wt/t-frontend-login"
+      "line": "RelayGraph creates worktree relay/t-frontend-login at /Users/relay-demo/entente-demo/app/.relay/wt/t-frontend-login"
     },
     {
       "seq": 9,

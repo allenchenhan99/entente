@@ -248,3 +248,6 @@ The [Relay Terminal plan](docs/relay-terminal-plan.md) records the Phase 2 web-t
 ## License
 
 [MIT](LICENSE) — contributions and reproducible coordination failures are welcome.
+
+See [third-party sources, licenses, and data provenance](THIRD_PARTY_NOTICES.md)
+for dependency inventories, runtime terms, assets, and synthetic fixture data.

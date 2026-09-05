@@ -44,7 +44,7 @@ replays both files and pins the expected end state and metrics.
   contract accepted, evidence with 4 machine checks passing, `human_review` on AC-3 failed by the reviewer,
   delta repair `r1`, agent reports a blocker (cannot reproduce) while still adding regression tests, second
   evidence, reviewer passes AC-3, task verified. The Codex frontend task was canceled in this run (its MCP
-  approval config was fixed afterwards). Absolute paths in payloads are from the recording machine.
+  approval config was fixed afterwards). Absolute paths retain the recorded directory structure with an anonymized home directory.
 - `events-live-2.jsonl` — full mission run (2026-09-04): both recipients (Claude Code backend, Codex frontend)
   asked for clarification before writing code (7 answers → contracts v2), worked in parallel, submitted evidence
   verified by relayd's checks plus one human review, then both branches were merged into `relay/integration`,
@@ -80,3 +80,13 @@ replays both files and pins the expected end state and metrics.
   AC-3, the integration branch ran the whole suite inside the check sandbox, mission verified. `metrics-live-8.json`
   is termd's `HostMetrics` for the run: Claude prompt accepted in 30 ms, Codex needed one Enter retry (5 s) for its
   large paste. `crates/relay-tui/tests/fixtures/live-8` is the relay-tui replay dump of this log.
+
+## Recorded path anonymization
+
+The live JSONL logs and Rust replay fixtures under
+`crates/relay-tui/tests/fixtures/` use `/Users/relay-demo` in place of the
+recording user's home directory. This is a synthetic offline replay path.
+Repository, worktree, and evidence suffixes are preserved so matching paths
+remain consistent. Event IDs, sequence numbers, timestamps, checks, and verdicts
+are unchanged. Apply the same replacement to new recordings before publication.
+This change sanitizes the current files; it does not rewrite Git history.

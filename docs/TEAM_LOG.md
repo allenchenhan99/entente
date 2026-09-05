@@ -175,3 +175,38 @@
 - Branch audit for this task: one active report work line; zero new remote
   branches; one temporary detached publication worktree to retire at checkpoint;
   zero uncertain branches introduced. Existing user benchmark work is preserved.
+
+
+## 2026-09-06: disclosure and replay-data cleanup
+
+- Owner: primary agent; no subagents or new branches. User designated GitHub
+  main as authoritative, preserving the separate presentation work.
+- Main workspace fast-forwarded to origin/main `2058d93d1780106da504ddea00b24250ee293d01`.
+  Previous local changes (including untracked files) are preserved in the local
+  stash named `Local backup before syncing GitHub main for disclosure cleanup 2026-09-06`.
+  The report worktree was not modified. The temporary detached disclosure worktree
+  was clean and removed after adopting the main workspace.
+- Scope: live JSONL and Rust replay data, P3 synthetic-data annotation, third-party
+  disclosure/inventories and their documentation-only generator, README notice link.
+  No production implementation, lockfile, presentation, or PRD-link edits.
+- Replaced 272 personal home-path occurrences in 20 fixture files with
+  `/Users/relay-demo`. Comparison against HEAD across all 29 JSON/JSONL fixtures
+  confirms only this substitution (apart from checkout line endings).
+- Validation on Node 22.23.2: TypeScript `tsc -b` passed; narrow Vitest run of
+  protocol fixtures and TUI replay passed (2 files, 16 tests). The initial TUI
+  attempt required building workspace exports first; the post-build rerun passed.
+  All 441 live events passed Event.parse and reducer replay. All Rust fixture
+  JSON parsed. Cargo is unavailable, so Rust compilation/tests were not run.
+- Dependency disclosure: 758 npm entries from three lockfiles; 307 Rust entries
+  with crates.io metadata checksums matched to Cargo.lock. Every entry has a
+  declared license, version, and source. No dependency versions changed.
+- Logo provenance follow-up: the maintainer confirmed on 2026-09-06 that GPT
+  generated the logo; THIRD_PARTY_NOTICES.md now records this source. No exact
+  model version, generation date, or separate asset license was supplied.
+  Current-file anonymization does not rewrite older commits
+  or presentation links pinned to them. The user authorized committing and pushing
+  this cleanup only; publication excludes unrelated local backups and report work.
+- Branch audit: 1 active task branch (main), 0 retired branches, 2 existing
+  branches outside this task retained (experiment and report; retirement status
+  uncertain). No remote branches created/deleted; temporary worktree retired.
+  Final untracked source is limited to the intended third-party disclosure files.

@@ -4,7 +4,7 @@
     "m-0041e3": {
       "mission": {
         "id": "m-0041e3",
-        "repo": "/Users/allenchenhan99/entente-demo/app",
+        "repo": "/Users/relay-demo/entente-demo/app",
         "title": "Add secure login to this application.",
         "success_definition": "",
         "integration_check": "npx vitest run",
@@ -246,7 +246,7 @@
       "task_state": "completed",
       "handoff_state": "verified",
       "worktree": {
-        "path": "/Users/allenchenhan99/entente-demo/app/.relay/wt/t-backend-auth",
+        "path": "/Users/relay-demo/entente-demo/app/.relay/wt/t-backend-auth",
         "branch": "relay/t-backend-auth"
       },
       "agent": {
@@ -261,7 +261,7 @@
           "task_id": "t-backend-auth",
           "contract_version": 1,
           "attempt": 1,
-          "git_diff_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/attempt-1.patch",
+          "git_diff_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/attempt-1.patch",
           "changed_files": [
             "src/app.ts",
             "src/auth/login-tokens.ts",
@@ -275,12 +275,12 @@
           "checks": {
             "AC-1": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/AC-1.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/AC-1.txt",
               "duration_ms": 1248
             },
             "AC-2": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/AC-2.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/AC-2.txt",
               "duration_ms": 939
             },
             "AC-3": {
@@ -291,7 +291,7 @@
             },
             "AC-5": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/AC-5.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/AC-5.txt",
               "duration_ms": 993
             }
           },
@@ -301,7 +301,7 @@
           "task_id": "t-backend-auth",
           "contract_version": 1,
           "attempt": 2,
-          "git_diff_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/attempt-2.patch",
+          "git_diff_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/attempt-2.patch",
           "changed_files": [
             "src/app.ts",
             "src/auth/login-tokens.ts",
@@ -315,12 +315,12 @@
           "checks": {
             "AC-1": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/AC-1.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/AC-1.txt",
               "duration_ms": 1065
             },
             "AC-2": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/AC-2.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/AC-2.txt",
               "duration_ms": 917
             },
             "AC-3": {
@@ -331,7 +331,7 @@
             },
             "AC-5": {
               "status": "passed",
-              "output_path": "/Users/allenchenhan99/entente-demo/app/.relay/evidence/t-backend-auth/AC-5.txt",
+              "output_path": "/Users/relay-demo/entente-demo/app/.relay/evidence/t-backend-auth/AC-5.txt",
               "duration_ms": 1015
             }
           },
@@ -493,7 +493,7 @@
       "task_state": "canceled",
       "handoff_state": "proposed",
       "worktree": {
-        "path": "/Users/allenchenhan99/entente-demo/app/.relay/wt/t-frontend-login",
+        "path": "/Users/relay-demo/entente-demo/app/.relay/wt/t-frontend-login",
         "branch": "relay/t-frontend-login"
       },
       "agent": {
