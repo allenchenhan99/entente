@@ -61,17 +61,16 @@ pub struct Disc {
 /// task has produced something to check. Until then its status is `pending` and it is a lifeless dot
 /// taking space a 40-column panel does not have.
 pub fn is_visible(node: &GraphNode, planner_present: bool) -> bool {
-    // The object model always carries a planner node. Whether anyone is doing that job is a different
-    // question, and its pane is what answers it: no planner spawned, no brain on the network.
-    if node.kind == GraphNodeKind::Planner && !planner_present {
-        return false;
+    match node.kind {
+        // The network is the agents and what runs between them. The human is not one of them — you are
+        // the one reading it — and neither is the verifier: relayd runs the checks itself, so it is
+        // machinery, not a party to a handoff. Whether a task passed is on the task's own node.
+        GraphNodeKind::Human | GraphNodeKind::Verifier => false,
+        // The object model always carries a planner node; whether anyone is doing that job is a
+        // different question, and its pane is what answers it.
+        GraphNodeKind::Planner => planner_present,
+        GraphNodeKind::Agent => true,
     }
-    // The human is not an agent on the network: you are the one reading it. What you asked for is
-    // drawn as the brain you asked it of.
-    if node.kind == GraphNodeKind::Human {
-        return false;
-    }
-    !(node.kind == GraphNodeKind::Verifier && node.status == VisualStatus::Pending)
 }
 
 /// Is this agent's work over, with nothing left for anyone to do?
@@ -635,22 +634,20 @@ mod tests {
     }
 
     #[test]
-    fn brains_sit_above_their_subs_and_the_verifier_below_both() {
+    fn brains_sit_above_the_subs_they_called() {
         let discs = layout_net(&graph_with_a_sub("live-1"), &[], true);
         let brain = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
         let sub = discs.iter().find(|d| d.id == "t-frontend-login").unwrap();
-        let verifier = discs.iter().find(|d| d.id == "verifier").unwrap();
 
         assert!(
-            !discs.iter().any(|d| d.id == "human"),
-            "the human is not an agent on the network"
+            !discs.iter().any(|d| d.id == "human" || d.id == "verifier"),
+            "neither the human nor the verifier is an agent on the network"
         );
         assert!(
             brain.y > sub.y,
             "the agent you prompted is drawn above the one it called"
         );
-        assert!(sub.y > verifier.y, "the verifier is below both layers");
-        assert!(sub.radius > verifier.radius, "agents are the big discs");
+        assert!(sub.is_agent && brain.is_agent, "both layers are agents");
     }
 
     #[test]
@@ -798,26 +795,17 @@ mod tests {
     }
 
     #[test]
-    fn the_verifier_is_hidden_until_there_is_something_to_verify() {
+    fn the_verifier_is_never_on_the_network() {
+        // relayd runs the checks itself, so the verifier is machinery rather than a party to a
+        // handoff; whether a task passed is on the task's own node.
         let mut graph = fixture("live-1").graph;
-        for node in graph.nodes.iter_mut() {
-            if node.kind == GraphNodeKind::Verifier {
-                node.status = VisualStatus::Pending;
-            }
-        }
-        assert!(
-            !layout_net(&graph, &[], true)
-                .iter()
-                .any(|d| d.id == "verifier"),
-            "relayd verifies; the node means nothing until a task has produced something"
-        );
-
         for node in graph.nodes.iter_mut() {
             if node.kind == GraphNodeKind::Verifier {
                 node.status = VisualStatus::Working;
             }
         }
-        assert!(layout_net(&graph, &[], true)
+
+        assert!(!layout_net(&graph, &[], true)
             .iter()
             .any(|d| d.id == "verifier"));
     }
@@ -1047,7 +1035,10 @@ mod tests {
             text.contains("backend"),
             "the agent's label is drawn:\n{text}"
         );
-        assert!(text.contains("verifier"), "{text}");
+        assert!(
+            !text.contains("verifier"),
+            "only agents are on the network:\n{text}"
+        );
         assert!(text.contains("run "), "the detail line is drawn:\n{text}");
     }
 
