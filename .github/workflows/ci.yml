@@ -4,6 +4,18 @@ on:
     branches: [main]
   pull_request:
 jobs:
+  installer:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sh -n install.sh
+      - run: node --test scripts/install.test.mjs
   test:
     runs-on: ubuntu-latest
     steps:

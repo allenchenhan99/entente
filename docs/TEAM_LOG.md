@@ -1,5 +1,56 @@
 # Agent team log
 
+## 2026-09-05 - curl installer for project-local launches
+
+- Owner: main Codex agent. Scope: `install.sh`, its hermetic tests, LF attributes
+  for the shell script/test fixtures, installation documentation, CI, and this
+  log. The user requested installation followed by `cd my-project; entente`.
+  Product runtime, protocol, presentation drafts, and user workspace changes
+  are outside this change. No subagents or real coding agents were launched.
+- Inventory: the existing benchmark and report worktrees were preserved. Work
+  uses the temporary detached `D:/vscode_python/entente-install` worktree, first
+  at `4130ed4`, then advanced without overlapping edits to original
+  `origin/main` at `ec7a7246c07b4ad42fd281fe36625a2610929dd6`. No named local or
+  remote branch was created. Retirement condition: approved integration into
+  the original repository and successful validation, or explicit cancellation.
+- Behavior: macOS/Linux/WSL x64 and arm64 source installation builds TypeScript
+  plus `termd` and `relay-tui`; compatible Node/Rust are reused, missing tools
+  are installed privately. Node archives are checksum-verified. Git, curl, tar,
+  and a C compiler are prerequisites. The command is installed to an existing
+  PATH directory and preserves cwd/arguments. Immutable release directories
+  keep a failed build from replacing the working command. No shell profiles
+  are edited. `--no-native` explicitly selects the TypeScript/Ink-only build.
+- Narrow validation: `sh -n install.sh` passed; `node --test
+  scripts/install.test.mjs` passed all 13 tests on WSL Ubuntu, with fake
+  downloads/build tools and temporary directories. Coverage includes piped
+  stdin, default PATH selection, cwd/arguments, spaces/apostrophes in paths,
+  failed updates, unmanaged paths, concurrent install locks, incomplete native
+  builds, private Node relocation/checksum failure, and private Rust bootstrap.
+  LF attributes were checked with `git check-attr text eol`.
+- Real installation smoke: in an isolated WSL temporary directory, with neither
+  Node/npm nor Cargo initially on PATH, the local installer cloned original
+  commit `ec7a724`, installed private Node 22.23.2 and Rust 1.98.1, completed
+  `npm ci --include=dev`, `npm run build` (`tsc -b`), and
+  `cargo build --release --locked -p termd -p relay-tui`. Both native binaries
+  existed. The relocated `entente --help` succeeded from a separate empty
+  `my-project` directory, which remained empty. No mission/LLM was run.
+- Integration validation from that installed release: launcher tests 30/30;
+  full `vitest run` 64 files passed, 640 tests passed, 2 skipped. Local QA logs
+  are outside tracked source at `/tmp/entente-install-qa.I7UCJgUT/install.log`
+  and `vitest.log` inside WSL Ubuntu. macOS execution is configured in the new
+  CI matrix but has not been run locally; Windows native PowerShell is outside
+  this `.sh` installer.
+- Publication: the user approved committing and pushing this installer to
+  `allenchenhan99/entente` original `main`. A fresh fetch confirmed the reviewed
+  base is still `ec7a724`. This commit integrates only the six scoped files;
+  there are no source commits to transplant, merge conflicts, or presentation
+  changes. Public script hash and Linux/macOS CI are checked after the push.
+  The temporary detached worktree is retired after successful verification.
+  Branch audit for this task before publication: one active detached installer
+  worktree, zero new remote branches, zero uncertain branches introduced.
+  Existing benchmark/report worktrees remain owned by their original tasks.
+  The main worktree's preexisting modified/untracked files were preserved.
+
 ## 2026-09-05 — animated hackathon presentation and GitHub Pages
 
 - Owner: main Codex agent. User requested a redesign with Claude, automatic

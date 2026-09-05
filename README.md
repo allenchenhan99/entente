@@ -11,7 +11,8 @@
 </p>
 <p align="center">
   <a href="https://allenchenhan99.github.io/entente/">Interactive hackathon report</a> ·
-  <a href="#quick-start-no-agent-or-api-key">Quick start</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#quick-start-no-agent-or-api-key">Replay demo</a> ·
   <a href="#how-to-contribute">How to contribute</a> ·
   <a href="https://github.com/allenchenhan99/entente/issues">Design discussions</a>
 </p>
@@ -41,6 +42,65 @@ We propose **Provenance Engineering** as Entente's outermost scope: preserving w
 | **Provenance Engineering — our proposed scope** | **Where did this delivery come from, and what evidence supports it?** |
 
 **Today:** Task Contracts, linting, daemon-executed checks, bounded repair, event replay, and Relay Terminal are implemented. Versioned context checkpoints and a delivery Passport are next-step proposals. A traceable log alone does not prove semantic correctness, and running a check separately does not make its test author independent.
+
+## Install
+
+On **macOS, Linux, or WSL**, install once:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/allenchenhan99/entente/main/install.sh | sh
+```
+
+Then open Entente from your own Git project:
+
+```bash
+cd my-project
+entente
+```
+
+The installer downloads the original repository, builds the coordination daemon
+and native terminal UI, and installs an `entente` command on your existing `PATH`.
+The current directory is your project; installation files live separately under
+`~/.local/share/entente`. Run the same installer again to update. A failed build
+leaves the previous command working.
+
+**Prerequisites:** Git, curl, tar, and a C compiler. On macOS, use
+`xcode-select --install`; on Ubuntu/WSL, install `build-essential` and Git first.
+An existing Node.js 22+ and Rust toolchain are reused. Missing Node.js and Rust
+are installed privately for Entente. The first native build can take several
+minutes. If no user-writable command directory is already on `PATH`, the installer
+uses `sudo` only to place the launcher in `/usr/local/bin`, provided that directory
+is on `PATH`. Otherwise, follow the user-owned directory example below.
+
+Log in to Claude Code or Codex before starting a live agent. You can inspect the
+installation without running an agent:
+
+```bash
+entente --help
+entente status
+entente down
+```
+
+<details>
+<summary>Installation options</summary>
+
+- `ENTENTE_INSTALL_DIR` chooses a dedicated, absolute application directory.
+- `ENTENTE_BIN_DIR` chooses a writable command directory already on `PATH`.
+- `ENTENTE_REF` selects a branch or tag instead of `main`.
+- `sh install.sh --no-native` builds only the TypeScript daemon and Ink TUI.
+
+For example, use a user-owned directory without `sudo`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+curl -fsSL https://raw.githubusercontent.com/allenchenhan99/entente/main/install.sh \
+  | ENTENTE_BIN_DIR="$HOME/.local/bin" sh
+```
+
+Keep that directory on your shell's `PATH` in future terminals. Windows users run
+the `.sh` installer inside WSL.
+
+</details>
 
 ## Quick start: no agent or API key
 

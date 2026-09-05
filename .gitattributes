@@ -1,0 +1,2 @@
+install.sh text eol=lf
+scripts/install.test.mjs text eol=lf
