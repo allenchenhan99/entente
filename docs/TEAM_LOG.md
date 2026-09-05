@@ -1,5 +1,44 @@
 # Agent team log
 
+## 2026-09-06 - Archify README preview on the user's fork
+
+- Owner: main Codex agent. User explicitly requested a public POC on their
+  existing fork `danny0926/entente`. Read/write scope: README's handoff section,
+  diagram specification, generated GIF/SVG/HTML, short reproduction notes, and
+  this log. Product runtime, original repository writes, and report drafts are
+  outside scope. No agents, models, or paid services are invoked.
+- Inventory: reused the existing `fork` remote; it is a fork of
+  `allenchenhan99/entente`. Fork `main` has no unique commits relative to original
+  `main`. Work uses detached `D:/vscode_python/entente-readme-poc` at `a6ad6ca`,
+  with no new named branch. Publication fast-forwards only fork `main` to the
+  current original baseline plus this POC. Retirement condition: public README
+  and Pages verification, then archive scratch evidence and remove the temporary
+  worktree. The fork retains the reviewable POC until the user decides on adoption.
+- Source review: README's existing seven-node/eight-edge Mermaid handoff plus
+  `apps/relayd/src/orchestrator/orchestrator.ts` acceptance, clarification, repair,
+  verification and budget transitions. The diagram retains the existing scope;
+  text below it explains check types and evidence limits.
+- Renderer decision: Archify's workflow renderer uses a fixed narrow column
+  layout; the draft caused width/label collisions for this five-node main row.
+  The accepted architecture renderer preserves the same handoff topology with
+  explicit node positions and readable gaps. No renderer code was modified.
+- Validation: Archify 2.16 `validate` and `deliver` passed 9/9 showcase checks,
+  zero errors/warnings. Two diagnosed branch labels received a vertical offset.
+  Spec SHA-256 `8199be1104ec70cf7b15ab18955d6c0b8fb37716a68d5fc6893d65ad6881ce50`;
+  HTML SHA-256 `6a944e89f7e5071b9ec5e5fbfb2f987c5bc4d00cbc3d8e3e3a0da9d0a61a5c76`.
+  Desktop containment passed at all four prescribed viewports. Native SVG export
+  and native focus highlighting supply the README media; the GIF is an
+  illustrative protocol walkthrough, not a real mission recording.
+- Media/build check: GIF is 1346x596, 170 frames, 17 seconds and 584,637 bytes.
+  Whole-diagram captures keep all seven nodes visible; the dark/light viewer
+  screenshots at both extreme sizes were visually reviewed. Presentation
+  `npm ci` and `npm run build` passed, with zero npm audit findings. Generated
+  SVG whitespace was normalized; the validated HTML bytes were not modified.
+- Publication target: fork README and
+  `https://danny0926.github.io/entente/diagrams/handoff.html`, using the existing
+  presentation build workflow. No fork-specific change is made to the installer,
+  and no POC source is pushed to the original repository.
+
 ## 2026-09-05 - curl installer for project-local launches
 
 - Owner: main Codex agent. Scope: `install.sh`, its hermetic tests, LF attributes

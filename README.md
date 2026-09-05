@@ -136,17 +136,11 @@ The completed `live-4` fixture has an empty inbox; that is expected. In a live m
 
 ## How a handoff works
 
-```mermaid
-flowchart LR
-  A[Task Contract] --> B{Accept or clarify}
-  B -->|Questions| C[Human clarification]
-  C --> A
-  B -->|Accept| D[Agent executes]
-  D --> E[relayd runs checks]
-  E -->|Pass| F[Verified delivery]
-  E -->|Fail| G[Bounded delta repair]
-  G --> D
-```
+[![Animated Entente handoff: define a contract, clarify before execution, verify the work, and repair only failed criteria.](docs/assets/handoff.gif)](https://danny0926.github.io/entente/diagrams/handoff.html)
+
+**Clarify before work. Verify before delivery. Repair only what failed.**
+
+Archify preview · 17-second loop · [Open interactive diagram](https://danny0926.github.io/entente/diagrams/handoff.html) · [View static SVG](docs/assets/handoff.svg) · [Diagram source](docs/diagrams/handoff.architecture.json)
 
 A Task Contract defines the goal, inputs, constraints, non-goals, allowed paths, acceptance criteria, declared checks, and repair budget. Lint errors block spawning. Checks include `command`, `diff_scope`, `file_exists`, `human_review`, and `llm_judge`; their evidence should be interpreted according to how they were produced.
 

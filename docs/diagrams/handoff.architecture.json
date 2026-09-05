@@ -1,0 +1,240 @@
+{
+    "schema_version":  1,
+    "diagram_type":  "architecture",
+    "meta":  {
+                 "title":  "How a handoff works",
+                 "locale":  "en",
+                 "quality_profile":  "showcase",
+                 "animation":  "trace",
+                 "views":  [
+                               {
+                                   "id":  "contract-first",
+                                   "label":  "01 Define the contract",
+                                   "focus":  [
+                                                 "task-contract",
+                                                 "recipient-review"
+                                             ],
+                                   "note":  "Make scope, acceptance criteria, checks and repair budget explicit. Lint errors block spawning."
+                               },
+                               {
+                                   "id":  "clarify-first",
+                                   "label":  "02 Clarify before work",
+                                   "focus":  [
+                                                 "recipient-review",
+                                                 "human-answer",
+                                                 "task-contract"
+                                             ],
+                                   "note":  "Material ambiguity returns to clarification and a revised contract before execution."
+                               },
+                               {
+                                   "id":  "run-and-check",
+                                   "label":  "03 Execute and verify",
+                                   "focus":  [
+                                                 "recipient-review",
+                                                 "agent-work",
+                                                 "daemon-checks"
+                                             ],
+                                   "note":  "After acceptance, the agent works. relayd runs declared checks in the task worktree."
+                               },
+                               {
+                                   "id":  "repair-failure",
+                                   "label":  "04 Repair the failure",
+                                   "focus":  [
+                                                 "daemon-checks",
+                                                 "delta-repair",
+                                                 "agent-work"
+                                             ],
+                                   "note":  "A failed criterion requests scoped repair for the same task, within its repair budget."
+                               },
+                               {
+                                   "id":  "verified-result",
+                                   "label":  "05 Deliver with evidence",
+                                   "focus":  [
+                                                 "agent-work",
+                                                 "daemon-checks",
+                                                 "verified-result"
+                                             ],
+                                   "note":  "Verification requires check results. A self-reported done is not enough."
+                               }
+                           ],
+                 "viewBox":  [
+                                 1220,
+                                 540
+                             ]
+             },
+    "components":  [
+                       {
+                           "id":  "task-contract",
+                           "type":  "backend",
+                           "label":  "Task Contract",
+                           "sublabel":  "scope / checks / budget",
+                           "pos":  [
+                                       45,
+                                       100
+                                   ],
+                           "size":  [
+                                        170,
+                                        86
+                                    ]
+                       },
+                       {
+                           "id":  "recipient-review",
+                           "type":  "security",
+                           "label":  "Accept or clarify",
+                           "sublabel":  "align before starting",
+                           "pos":  [
+                                       285,
+                                       100
+                                   ],
+                           "size":  [
+                                        170,
+                                        86
+                                    ]
+                       },
+                       {
+                           "id":  "agent-work",
+                           "type":  "external",
+                           "label":  "Agent executes",
+                           "sublabel":  "isolated task worktree",
+                           "pos":  [
+                                       525,
+                                       100
+                                   ],
+                           "size":  [
+                                        170,
+                                        86
+                                    ]
+                       },
+                       {
+                           "id":  "daemon-checks",
+                           "type":  "security",
+                           "label":  "relayd runs checks",
+                           "sublabel":  "evidence from execution",
+                           "pos":  [
+                                       765,
+                                       100
+                                   ],
+                           "size":  [
+                                        170,
+                                        86
+                                    ]
+                       },
+                       {
+                           "id":  "verified-result",
+                           "type":  "backend",
+                           "label":  "Verified delivery",
+                           "sublabel":  "supported by evidence",
+                           "pos":  [
+                                       1005,
+                                       100
+                                   ],
+                           "size":  [
+                                        170,
+                                        86
+                                    ]
+                       },
+                       {
+                           "id":  "human-answer",
+                           "type":  "frontend",
+                           "label":  "Human clarification",
+                           "sublabel":  "resolve missing context",
+                           "pos":  [
+                                       285,
+                                       325
+                                   ],
+                           "size":  [
+                                        170,
+                                        86
+                                    ]
+                       },
+                       {
+                           "id":  "delta-repair",
+                           "type":  "messagebus",
+                           "label":  "Bounded delta repair",
+                           "sublabel":  "only the failed criteria",
+                           "pos":  [
+                                       765,
+                                       325
+                                   ],
+                           "size":  [
+                                        170,
+                                        86
+                                    ]
+                       }
+                   ],
+    "connections":  [
+                        {
+                            "id":  "propose-contract",
+                            "from":  "task-contract",
+                            "to":  "recipient-review",
+                            "variant":  "emphasis"
+                        },
+                        {
+                            "id":  "accept-contract",
+                            "from":  "recipient-review",
+                            "to":  "agent-work",
+                            "label":  "accept",
+                            "variant":  "emphasis"
+                        },
+                        {
+                            "id":  "submit-work",
+                            "from":  "agent-work",
+                            "to":  "daemon-checks",
+                            "variant":  "emphasis"
+                        },
+                        {
+                            "id":  "pass-checks",
+                            "from":  "daemon-checks",
+                            "to":  "verified-result",
+                            "label":  "pass",
+                            "variant":  "emphasis"
+                        },
+                        {
+                            "id":  "ask-question",
+                            "from":  "recipient-review",
+                            "to":  "human-answer",
+                            "label":  "questions",
+                            "labelDy":  60
+                        },
+                        {
+                            "id":  "revise-contract",
+                            "from":  "human-answer",
+                            "to":  "task-contract",
+                            "label":  "revise",
+                            "variant":  "dashed"
+                        },
+                        {
+                            "id":  "failed-check",
+                            "from":  "daemon-checks",
+                            "to":  "delta-repair",
+                            "label":  "fail",
+                            "variant":  "security",
+                            "labelDy":  60
+                        },
+                        {
+                            "id":  "retry-task",
+                            "from":  "delta-repair",
+                            "to":  "agent-work",
+                            "label":  "repair",
+                            "variant":  "dashed"
+                        }
+                    ],
+    "cards":  [
+                  {
+                      "dot":  "cyan",
+                      "title":  "Understand before execution",
+                      "items":  [
+                                    "Scope and acceptance criteria travel with the task.",
+                                    "A material question returns to the contract."
+                                ]
+                  },
+                  {
+                      "dot":  "rose",
+                      "title":  "Repair within a budget",
+                      "items":  [
+                                    "relayd verifies the declared checks in the task worktree.",
+                                    "Failed criteria receive targeted repair; the budget bounds retries."
+                                ]
+                  }
+              ]
+}
