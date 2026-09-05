@@ -722,10 +722,15 @@ impl App {
             .into_iter()
             .filter(|p| !self.dismissed_panes.contains(&p.pane_id))
             .collect();
+        // Forget the screens of panes the daemon no longer lists, as well as the ones you dismissed.
+        // Only the id list used to be pruned, so a pane deleted on the server kept its `PaneState`
+        // here forever — and since the network draws an agent for every pane state with a runtime,
+        // that left brains on the graph with no pane behind them and no way to reach one.
+        let keep = listed.clone();
         let dismissed = self.dismissed_panes.clone();
         self.ws_mut()
             .pane_states
-            .retain(|id, _| !dismissed.contains(id));
+            .retain(|id, _| keep.contains(id) && !dismissed.contains(id));
 
         self.ws_mut().panes = panes.iter().map(|p| p.pane_id.clone()).collect();
         for info in panes {
@@ -2090,9 +2095,15 @@ impl App {
 
     /// Agents relayd is hosting that no contract accounts for; they are on the network too.
     pub fn unattached_agents(&self) -> Vec<GraphNode> {
+        // Walked through the pane list rather than straight over `pane_states`, so a screen that has
+        // outlived its pane can never put an agent on the network on its own.
         crate::ui::graph::unattached_agents(
             &self.ws().graph,
-            self.ws().pane_states.values().map(|p| &p.info),
+            self.ws()
+                .panes
+                .iter()
+                .filter_map(|id| self.ws().pane_states.get(id))
+                .map(|p| &p.info),
         )
     }
 

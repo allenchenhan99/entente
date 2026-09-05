@@ -398,8 +398,10 @@ mod ordering {
             vec![
                 "relay:28 sub 1.1".to_string(),
                 "relay:29 sub 1.2".to_string(),
-                "relay:23 brain 2".to_string(),
-                "relay:33 brain 3".to_string(),
+                // Brains are numbered in the order the daemon lists its panes, which is the order
+                // they were opened — so `relay:33`, listed first here, is the first brain.
+                "relay:33 brain 2".to_string(),
+                "relay:23 brain 3".to_string(),
             ]
         );
     }
@@ -411,7 +413,7 @@ mod ordering {
             |id: &str| list_row(&app, &app.ws().pane_states[id], id == "relay:28").to_string();
 
         assert!(
-            row("relay:23").starts_with("  brain 2"),
+            row("relay:23").starts_with("  brain 3"),
             "{}",
             row("relay:23")
         );

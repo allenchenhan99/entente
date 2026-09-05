@@ -1649,3 +1649,27 @@ fn the_agent_list_shows_the_brains_too_so_j_and_k_can_reach_them() {
     }
     assert!(listed.contains(&"t-backend-auth".to_string()), "{listed:?}");
 }
+
+#[test]
+fn a_pane_the_daemon_no_longer_lists_stops_being_an_agent_on_the_network() {
+    let mut app = three_brains();
+    assert_eq!(app.unattached_agents().len(), 3);
+
+    // The daemon now reports one pane. The other two are gone — closed, or cleared off the board.
+    app.set_panes(
+        vec![loose_agent("relay:23", "brain", true)],
+        Some("relay:23".into()),
+    );
+
+    // Only the id list used to be pruned, so their `PaneState`s stayed here forever and the network
+    // kept drawing an agent for each: brains with no pane behind them and no way to reach one.
+    let left: Vec<String> = app.unattached_agents().into_iter().map(|n| n.id).collect();
+    assert_eq!(left, vec!["relay:23".to_string()]);
+    assert!(!app.ws().pane_states.contains_key("relay:32"));
+    assert!(!app.ws().pane_states.contains_key("relay:33"));
+
+    // And when every pane goes, the network has no loose agents at all.
+    app.set_panes(Vec::new(), None);
+    assert!(app.unattached_agents().is_empty());
+    assert!(app.ws().pane_states.is_empty());
+}
