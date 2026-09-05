@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { z } from 'zod';
-import { CreateMissionBody, LoadPlanBody, SpawnPlannerBody, ClarifyBody, ReviewBody, CancelBody, ReplyBody, ReviseBody, routes } from '@relay/protocol';
+import { CreateMissionBody, LoadPlanBody, SpawnPlannerBody, OpenSessionBody, ClarifyBody, ReviewBody, CancelBody, ReplyBody, ReviseBody, routes } from '@relay/protocol';
 import type { EventStore } from '../ports.js';
 import type { Orchestrator } from '../orchestrator/orchestrator.js';
 import { RelayError } from '../orchestrator/errors.js';
@@ -134,6 +134,14 @@ export function createApp(opts: AppOptions): Hono {
     const body = await parseBody(c, SpawnPlannerBody);
     if (!body.ok) return body.res;
     return c.json(await orchestrator.spawnPlanner(missionId, body.data.runtime));
+  });
+
+  // An agent the human started in a terminal asks to be adopted. The inverse of the planner route:
+  // there relayd spawns the process, here it meets one that already exists.
+  app.post(routes.sessions, async (c) => {
+    const body = await parseBody(c, OpenSessionBody);
+    if (!body.ok) return body.res;
+    return c.json(await orchestrator.adoptSession(body.data));
   });
 
   app.post('/missions/:id/clarify', async (c) => {

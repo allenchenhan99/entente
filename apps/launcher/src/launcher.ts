@@ -371,12 +371,17 @@ export function runTui(
   // works there without `--repo`, provided it is on PATH. It is not, since it lives in this workspace's
   // node_modules, so hand the TUI the directory to prepend for the shells it opens.
   const tools = path.join(options.workspaceRoot, 'node_modules', '.bin');
+  // Ahead of the tools dir, and so ahead of the real binaries: `claude` and `codex` here are wrappers
+  // that register the session with relayd before exec'ing the real thing. That is what makes opening
+  // an agent in a terminal enough to start a brain — no command, no flag. Outside a pane, or with
+  // relayd unreachable, they exec the real binary unchanged.
+  const shims = path.join(options.workspaceRoot, 'apps', 'shims', 'bin');
   const child = deps.spawn(command, args, {
     detached: false,
     stdio: 'inherit',
     // RELAY_TOOLS puts `relay` on a shell pane's PATH; RELAY_HOME is where the tool's own files are,
     // so `--plan examples/…` finds what ships with it rather than looking under the mission's repo.
-    env: { ...deps.env, RELAY_TOOLS: tools, RELAY_HOME: options.workspaceRoot },
+    env: { ...deps.env, RELAY_TOOLS: `${shims}${path.delimiter}${tools}`, RELAY_HOME: options.workspaceRoot },
   });
 
   return new Promise<number>((resolve, reject) => {

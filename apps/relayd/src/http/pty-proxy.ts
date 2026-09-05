@@ -12,6 +12,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { ptyRoutes } from '@relay/protocol';
 import { sessionGuard, upgradeToken, verifySessionToken, type SessionAuth } from '../auth/token.js';
 import { paneIdFromUrl, type PtyUpgradeHandler } from '../pty/ws.js';
+import type { PaneAnnotations } from '../pty/annotations.js';
 
 export interface PtyProxyOptions {
   /** termd's `http://127.0.0.1:<port>` (from `RelaytermHost.start()`). */
@@ -20,6 +21,8 @@ export interface PtyProxyOptions {
   token: string;
   /** relayd's session token; when set, required on every proxied route and on the upgrade. */
   auth?: SessionAuth;
+  /** What relayd knows about a pane that termd does not — see pty/annotations.ts. */
+  annotations?: PaneAnnotations;
 }
 
 /** Headers that must not be copied between the two hops. */
@@ -42,6 +45,11 @@ export function mountPtyProxy(app: Hono, options: PtyProxyOptions): { handleUpgr
     app.use(ptyRoutes.metrics, guard);
   }
 
+  const isPaneList = (body: unknown): body is { panes: Array<{ pane_id: string }> } =>
+    typeof body === 'object' && body !== null && Array.isArray((body as { panes?: unknown }).panes);
+  const isPane = (body: unknown): body is { pane_id: string } =>
+    typeof body === 'object' && body !== null && typeof (body as { pane_id?: unknown }).pane_id === 'string';
+
   const forward = async (c: Context): Promise<Response> => {
     const url = new URL(c.req.url);
     const headers = new Headers();
@@ -62,10 +70,27 @@ export function mountPtyProxy(app: Hono, options: PtyProxyOptions): { handleUpgr
     }
     const out = new Headers();
     for (const [name, value] of upstream.headers) if (!HOP_BY_HOP.has(name.toLowerCase()) && name.toLowerCase() !== 'content-encoding') out.set(name, value);
+    // termd reports a pane as the shell it was spawned as; what it became — an agent the human ran in
+    // it — is relayd's to know, so a listing is rewritten on the way back. Only listings: everything
+    // else streams through untouched.
+    const overlay = options.annotations;
+    if (overlay && method === 'GET' && upstream.ok && upstream.headers.get('content-type')?.includes('json')) {
+      const body = (await upstream.json()) as unknown;
+      const patched = Array.isArray(body)
+        ? overlay.applyAll(body as Array<{ pane_id: string }>)
+        : isPaneList(body)
+          ? { ...body, panes: overlay.applyAll(body.panes) }
+          : isPane(body)
+            ? overlay.apply(body)
+            : body;
+      out.delete('content-length');
+      return new Response(JSON.stringify(patched), { status: upstream.status, headers: out });
+    }
     return new Response(upstream.body, { status: upstream.status, headers: out });
   };
 
   app.all(ptyRoutes.panes, forward);
+
   app.all(`${ptyRoutes.panes}/*`, forward);
   app.get(ptyRoutes.metrics, forward);
 

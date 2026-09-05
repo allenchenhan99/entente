@@ -1,0 +1,4 @@
+#!/bin/sh
+# The codex you get inside an entente terminal: it registers the session with relayd, then execs the
+# real codex. See relay-agent-shim.mjs. Outside entente, or if anything fails, the real codex runs unchanged.
+RELAY_SHIM_TOOL=codex exec node "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/relay-agent-shim.mjs" "$@"

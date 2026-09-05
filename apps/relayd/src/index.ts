@@ -19,6 +19,7 @@ import { createApp } from './http/app.js';
 import { mountPty } from './http/pty.js';
 import { mountPtyProxy } from './http/pty-proxy.js';
 import { createSessionAuth } from './auth/token.js';
+import { createPaneAnnotations } from './pty/annotations.js';
 import type { RelayHost } from './pty/host.js';
 import type { RelaytermHost } from './launch/hosts/relayterm.js';
 import { usingFallbackLint } from './lint.js';
@@ -48,6 +49,8 @@ export interface Ports {
   repair: RepairPolicy;
   host: TerminalHost;
   runtimes: Record<RuntimeKind, AgentRuntime>;
+  /** What to tell an agent the human started; absent when the launch package is not loaded. */
+  brainInstructions?: (missionId: string) => string;
   /** Port names that fell back to in-memory fakes. */
   fakes: string[];
 }
@@ -126,9 +129,10 @@ export async function resolvePorts(
     const real = useLaunch ? await fromModule<AgentRuntime>(launchMod, FACTORIES.runtime, [kind, {}], log) : undefined;
     runtimes[kind] = real ?? fake(`runtime:${kind}`, () => fakeRuntime(kind));
   }
+  const brainInstructions = (launchMod as { brainInstructions?: (id: string) => string } | undefined)?.brainInstructions;
   if (fakes.length) log(`relayd: using in-memory fakes for ${fakes.join(', ')}`);
   if (usingFallbackLint) log('relayd: @relay/protocol has no lintContract yet; using fallback lint rules');
-  return { worktrees, checks, repair, host, runtimes, fakes };
+  return { worktrees, checks, repair, host, runtimes, brainInstructions, fakes };
 }
 
 export interface RunningRelayd {
@@ -167,14 +171,18 @@ export async function main(env: Record<string, string | undefined> = process.env
   const port = typeof addr === 'object' && addr ? addr.port : config.port;
   const url = `http://127.0.0.1:${port}`;
 
+  // What relayd knows about a pane that the terminal host does not: a shell the human ran an agent in
+  // is still a shell to the host, and the graph would never show that agent.
+  const annotations = createPaneAnnotations();
   const orchestrator = createOrchestrator({
     store, ...ports, repoRoot: config.repoRoot, relayDir: config.relayDir, mcpUrl: `${url}${routes.mcp}`,
     log: (m) => console.error(`relayd: ${m}`),
+    annotations,
   });
   const app = createApp({ orchestrator, store, auth });
   // RELAY_HOST=relay: relayd hosts the agent terminals itself (PRD §23): pane routes + WebSocket upgrade.
   if (config.host === 'relay' && (ports.host.kind as string) === 'relay') {
-    const { handleUpgrade } = mountPty(app, ports.host as unknown as RelayHost, { auth });
+    const { handleUpgrade } = mountPty(app, ports.host as unknown as RelayHost, { auth, annotations });
     server.on('upgrade', handleUpgrade);
   }
   // RELAY_HOST=relayterm: the Rust termd owns the terminals; relayd starts it now (so `--first-pane` from the
@@ -184,7 +192,7 @@ export async function main(env: Record<string, string | undefined> = process.env
     termd = ports.host as unknown as RelaytermHost;
     const { baseUrl } = await termd.start();
     log(`relayd: termd listening on ${baseUrl} (pid ${termd.pid})`);
-    const { handleUpgrade } = mountPtyProxy(app, { baseUrl, token: termd.token, auth });
+    const { handleUpgrade } = mountPtyProxy(app, { baseUrl, token: termd.token, auth, annotations });
     server.on('upgrade', handleUpgrade);
   }
   fetchImpl = (req) => app.fetch(req);

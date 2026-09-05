@@ -15,7 +15,7 @@ export { createRelayHost, RelayHost, type RelayHostDeps } from './hosts/relay.js
 export { createRelaytermHost, RelaytermHost, findTermdBinary, type RelaytermHostDeps } from './hosts/relayterm.js';
 export { ClaudeCodeRuntime, type ClaudeCodeRuntimeDeps, CLAUDE_ALLOWED_TOOLS } from './runtimes/claude-code.js';
 export { CodexRuntime, type CodexRuntimeDeps, codexConfigToml } from './runtimes/codex.js';
-export { bootstrapPrompt, PROMPT_MAX_BYTES } from './prompts.js';
+export { bootstrapPrompt, brainInstructions, PROMPT_MAX_BYTES } from './prompts.js';
 
 /** `relay` = the in-process PTY host; `relayterm` = relayd driving the Rust termd (PRD §22). */
 export type TerminalHostKind = TerminalHost['kind'];

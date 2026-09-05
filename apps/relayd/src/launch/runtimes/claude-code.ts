@@ -169,6 +169,24 @@ export class ClaudeCodeRuntime implements AgentRuntime {
    * `claude --resume <sessionId>` — the id we chose with `--session-id` at first launch. No positional
    * prompt: the host delivers the resume prompt once the composer is ready.
    */
+  /**
+   * The human ran `claude` themselves, so their session keeps its own permission model: no
+   * `--dangerously-skip-permissions` (which is theirs to accept, not relayd's to assume) and no
+   * `--allowedTools` (which would silently take Bash away from the agent they just opened). What is
+   * added is the relay MCP server and, on the system-prompt channel, how to use it.
+   */
+  async adopt(spec: LaunchSpec, configDir: string, instructions: string): Promise<{ argv: string[]; env: Record<string, string> }> {
+    const mcpPath = await this.writeConfig(spec, configDir);
+    return {
+      argv: [
+        ...(this.model ? ['--model', this.model] : []),
+        '--mcp-config', mcpPath,
+        '--append-system-prompt', instructions,
+      ],
+      env: {},
+    };
+  }
+
   async resume(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt: string }> {
     const mcpPath = await this.writeConfig(spec, configDir);
     const argv = [this.executable, '--resume', spec.sessionId, ...this.commonArgv(mcpPath)];

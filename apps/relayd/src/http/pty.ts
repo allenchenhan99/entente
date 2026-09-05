@@ -12,6 +12,7 @@ import { PaneNotFoundError } from '../pty/host.js';
 import { UnknownKeyError } from '../pty/keys.js';
 import { createPtyWebSocketServer, type PtyUpgradeHandler } from '../pty/ws.js';
 import { sessionGuard, type SessionAuth } from '../auth/token.js';
+import type { PaneAnnotations } from '../pty/annotations.js';
 
 const issues = (list: z.core.$ZodIssue[]): string[] =>
   list.map((i) => `${i.path.length ? i.path.map(String).join('.') : '(body)'}: ${i.message}`);
@@ -33,6 +34,8 @@ const notFound = (c: Context, paneId: string) => c.json({ error: `pane ${paneId}
 export interface MountPtyOptions {
   /** Session token required on every pane route and on the WebSocket upgrade (docs/security.md). */
   auth?: SessionAuth;
+  /** What relayd knows about a pane that the host does not — see pty/annotations.ts. */
+  annotations?: PaneAnnotations;
 }
 
 export function mountPty(app: Hono, host: RelayHost, options: MountPtyOptions = {}): { handleUpgrade: PtyUpgradeHandler } {
@@ -55,9 +58,12 @@ export function mountPty(app: Hono, host: RelayHost, options: MountPtyOptions = 
     }
   };
 
+  // A pane the human ran an agent in is reported by the host as the shell it started life as, so what
+  // relayd learned when that agent asked to be adopted is laid over it here.
+  const listPanes = () => (options.annotations ? options.annotations.applyAll(host.list()) : host.list());
   app.get(ptyRoutes.panes, (c) => {
     const focused = host.focusedPane;
-    return c.json(focused === undefined ? { panes: host.list() } : { panes: host.list(), focused_pane: focused });
+    return c.json(focused === undefined ? { panes: listPanes() } : { panes: listPanes(), focused_pane: focused });
   });
 
   // Parity with termd's `POST /panes`: the same body spawns a pane on the in-process host, so a client
@@ -77,7 +83,10 @@ export function mountPty(app: Hono, host: RelayHost, options: MountPtyOptions = 
     return c.json({ pane_id: paneId }, 201);
   });
 
-  app.get(ptyRoutes.pane(':id'), (c) => withPane(c, (paneId) => c.json(host.get(paneId)!.info())));
+  app.get(ptyRoutes.pane(':id'), (c) => withPane(c, (paneId) => {
+    const info = host.get(paneId)!.info();
+    return c.json(options.annotations ? options.annotations.apply(info) : info);
+  }));
 
   // Closing a pane: kill it if it lives, then forget it, so it stops coming back on the next poll.
   app.delete(ptyRoutes.pane(':id'), (c) => withPane(c, async (paneId) => {

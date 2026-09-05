@@ -1,0 +1,4 @@
+#!/bin/sh
+# The claude you get inside an entente terminal: it registers the session with relayd, then execs the
+# real claude. See relay-agent-shim.mjs. Outside entente, or if anything fails, the real claude runs unchanged.
+RELAY_SHIM_TOOL=claude exec node "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/relay-agent-shim.mjs" "$@"

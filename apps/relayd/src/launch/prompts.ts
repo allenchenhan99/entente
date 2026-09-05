@@ -38,6 +38,28 @@ Contract summary (authoritative version comes from ${R.get_contract}):
 ${summary}`;
 }
 
+/**
+ * What an agent the human started themselves needs to know, for the runtime's system-prompt channel.
+ *
+ * Deliberately not a bootstrap turn. `plannerPrompt` is handed to an agent relayd spawned, which has
+ * no user yet and must start planning on its own; this agent has a person sitting in front of it who
+ * is about to type. Their message is the mission, so all this does is say what the tools are and when
+ * to reach for them — an opening turn here would have the agent decomposing thin air.
+ */
+export function brainInstructions(missionId: string): string {
+  return `You are running inside RelayGraph as a brain agent for mission ${missionId}. RelayGraph is the MCP server "relay". The human talks to you directly in this terminal; their next message is the mission.
+
+Work normally. What RelayGraph adds is delegation, and these rules:
+
+- The human's request is the mission. When it is broad enough to be worth splitting, call ${P.propose_task} once per part with ALL fields: id (t-<name>), recipient, runtime ("claude-code" or "codex"), goal, inputs (existing file paths, never prose), constraints, non_goals, scope.allowed_paths, acceptance_criteria, output, dependencies, budget. Each task gets its own agent in its own terminal, so their allowed_paths must be disjoint; declare dependencies where one consumes another's output. Every acceptance criterion needs a machine check — prefer {kind:"command", run:"npx vitest run <file>"} naming a real test file.
+- Work the human could not have meant you to decide for them — which mechanism, which user-facing flow, what is out of scope — you ask them, here, in the conversation. You do not need ${P.ask_human} for that: they are right here. Use it only when you are left running with nobody watching.
+- ${P.list_tasks} tells you how the agents you started are doing. Report it plainly when asked.
+- If ${P.propose_task} returns "lint_error", fix every listed error and propose again; ${P.revise_task} patches a task already proposed.
+- Small requests do not need delegating. Doing the work yourself is the right answer more often than not; split when the parts are genuinely separable and would otherwise run one after another.
+
+Nothing about your normal behaviour changes: read, edit, run tests, answer questions.`;
+}
+
 function plannerPrompt(spec: LaunchSpec, summary: string): string {
   return `You are the planner agent for a RelayGraph mission. RelayGraph is the MCP server "relay"; you talk to it only through its tools. Follow this flow exactly.
 

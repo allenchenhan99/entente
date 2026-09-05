@@ -173,6 +173,30 @@ export class CodexRuntime implements AgentRuntime {
   }
 
   /**
+   * The human ran `codex` themselves, so their session keeps its own approval policy and sandbox: no
+   * `-a never` (which exists so an unattended agent is not stopped by a dialog it cannot answer) and
+   * no `writable_roots` clamp. What is added is the relay MCP server, and the instructions as a file
+   * Codex reads at startup — it has no `--append-system-prompt`, and `-c` is the only channel.
+   */
+  async adopt(spec: LaunchSpec, configDir: string, instructions: string): Promise<{ argv: string[]; env: Record<string, string> }> {
+    await fs.mkdir(configDir, { recursive: true });
+    // No sandbox roots: those belong to `prepare`, where nobody is watching.
+    await fs.writeFile(path.join(configDir, 'config.toml'), codexConfigToml(spec), { mode: 0o600 });
+    await this.copyAuth(configDir);
+    const instructionsPath = path.join(configDir, 'relay-instructions.md');
+    await fs.writeFile(instructionsPath, instructions, { mode: 0o600 });
+    return {
+      argv: [
+        ...(this.model ? ['--model', this.model] : []),
+        // An unrecognised key is ignored unless --strict-config, so an older Codex still gets the
+        // tools; it just does not get told how they fit together.
+        '-c', `experimental_instructions_file=${JSON.stringify(instructionsPath)}`,
+      ],
+      env: { CODEX_HOME: configDir, RELAY_TOKEN: spec.token },
+    };
+  }
+
+  /**
    * Daemon restart: same config (rewritten for the re-issued token) and `codex resume <id>` where `<id>` is
    * the newest rollout under the isolated CODEX_HOME; `codex resume --last` when none was recorded (the
    * isolated home only ever held this agent's sessions, so `--last` is still the right one).

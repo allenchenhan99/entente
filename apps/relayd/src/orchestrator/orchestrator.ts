@@ -24,6 +24,8 @@ import {
   agentRegistryMarkdown,
   type AgentEntry,
   RECIPIENT_TOOLS,
+  type OpenSessionBody,
+  type OpenSessionResult,
 } from '@relay/protocol';
 import type {
   Event, TaskContractInput, ContractResponse, Clarification, EvidenceSubmission, EvidenceRecord, RepairContract,
@@ -71,6 +73,17 @@ export interface OrchestratorDeps {
   log?: (message: string) => void;
   /** Daemon restart: is a recorded worktree still on disk? Defaults to `fs.existsSync(path)`; tests inject. */
   worktreeExists?: (worktree: WorktreeInfo) => boolean;
+  /**
+   * What to tell an agent the human started, for its system-prompt channel. Injected rather than
+   * imported because the launch package is loaded dynamically (relayd runs with fakes when it is not
+   * there), and a brain that gets no instructions is still a brain — it just cannot delegate.
+   */
+  brainInstructions?: (missionId: string) => string | Promise<string>;
+  /**
+   * Where to record what relayd knows about a pane that the host does not, so a shell the human ran
+   * an agent in stops being reported as a bare shell and reaches the graph as the agent it now is.
+   */
+  annotations?: { set(paneId: string, annotation: { role?: string; runtime?: RuntimeKind; task_id?: string }): void };
 }
 
 export interface TaskSummary {
@@ -102,6 +115,15 @@ export interface Orchestrator {
   createMission(body: CreateMissionBody): { mission_id: string; planner_token: string };
   /** Spawns an LLM planner agent (with the mission's planner token) in the repository root. */
   spawnPlanner(missionId: string, runtime: RuntimeKind): Promise<{ pane_id: string }>;
+  /**
+   * Adopt an agent the human started themselves in a terminal, as a brain.
+   *
+   * `spawnPlanner` starts the process; this one meets a process that already exists. The human ran
+   * `claude` in a pane, so relayd writes its MCP config, gives it a mission and a planner token, and
+   * returns the flags to re-exec with — nobody had to say "this one is the planner". That is the
+   * whole rule: a session the human opens is a brain, a session an agent opens is a sub.
+   */
+  adoptSession(body: OpenSessionBody): Promise<OpenSessionResult>;
   /** Planner → human: mission-level questions; replaces any still-open set. */
   askHuman(missionId: string, questions: Question[]): { status: 'waiting'; open_questions: number };
   /** Long-poll until every open mission question is answered. */
@@ -1221,6 +1243,41 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return { pane_id: paneId };
   };
 
+  const adoptSession: Orchestrator['adoptSession'] = async (body) => {
+    const rt = deps.runtimes[body.runtime];
+    if (!rt) throw new RelayError(400, `no runtime registered for ${body.runtime}`);
+    // A brain of its own mission. Reusing an existing one would put two brains on a mission that has
+    // a single planner token and a single planner pane, and the second would silently take the first
+    // one's place.
+    const { mission_id } = createMission({ repo: deps.repoRoot, title: body.title ?? `session in ${deps.repoRoot}` });
+    const m = missions.get(mission_id)!;
+    if (!rt.adopt) throw new RelayError(501, `the ${body.runtime} runtime cannot adopt a session started by hand`);
+    const sessionId = randomUUID();
+    const configDir = agentConfigDir(deps.relayDir, plannerTaskId(mission_id));
+    const instructions = (await deps.brainInstructions?.(mission_id))
+      ?? `You are running inside RelayGraph as a brain agent for mission ${mission_id}.`;
+    const launch = await rt.adopt(
+      { taskId: `planner-${mission_id}`, token: m.plannerToken, mcpUrl: deps.mcpUrl, sessionId, cwd: body.cwd, role: 'planner', contractSummary: plannerSummary(m) },
+      configDir,
+      instructions,
+    );
+    m.plannerPaneId = body.pane_id;
+    m.plannerAgent = { runtime: body.runtime, sessionId, cwd: body.cwd, paneId: body.pane_id };
+    // The pane stops being a shell in every listing from here on, which is what puts the brain on the
+    // network: the graph draws an agent for any pane that reports a runtime.
+    deps.annotations?.set(body.pane_id, { role: 'brain', runtime: body.runtime });
+    // `human`, not `relayd`: this session exists because a person started it, and that is exactly what
+    // makes it a brain rather than a sub.
+    emit({ mission_id, actor: 'human', type: 'agent_spawned', payload: { runtime: body.runtime, pane_id: body.pane_id, session_id: sessionId, cwd: body.cwd } });
+    return {
+      mission_id,
+      session_id: sessionId,
+      argv: launch.argv,
+      env: launch.env,
+      instructions,
+    };
+  };
+
   const plannerSummary = (m: MissionRecord): string => [
     m.mission.title,
     m.mission.success_definition ? `Success definition: ${m.mission.success_definition}` : '',
@@ -1424,6 +1481,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   return {
     createMission,
+    adoptSession,
     findAgents,
     cancelMission,
     deleteTask,

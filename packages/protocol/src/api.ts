@@ -7,6 +7,7 @@
  *   POST /missions               → CreateMissionBody → { mission_id }
  *   POST /missions/:id/plan      → LoadPlanBody      → { task_ids }   (planner fallback: hand-written contracts)
  *   POST /missions/:id/planner   → SpawnPlannerBody  → { pane_id }    (spawn an LLM planner agent for the mission)
+ *   POST /sessions               → OpenSessionBody   → OpenSessionResult (adopt an agent the human started)
  *   POST /missions/:id/clarify   → ClarifyBody       → { answered }    (human answers the planner's mission-level questions)
  *   POST /tasks/:id/clarify      → ClarifyBody       → { contract_version }
  *   POST /tasks/:id/review       → ReviewBody        → { ok: true }
@@ -32,6 +33,39 @@ export type LoadPlanBody = z.infer<typeof LoadPlanBody>;
 
 export const SpawnPlannerBody = z.object({ runtime: RuntimeKind });
 export type SpawnPlannerBody = z.infer<typeof SpawnPlannerBody>;
+
+/**
+ * `POST /sessions`: an agent the human started by hand asks to be adopted.
+ *
+ * The inverse of `POST /missions/:id/planner`. There, relayd spawns the process; here the process
+ * already exists — you opened a terminal and ran `claude` — and relayd only prepares its config and
+ * says what to re-exec with. That is the difference the role turns on: a session the human opened is
+ * a brain, and one an agent opened through `propose_subtask` is a sub. Nobody has to declare which.
+ */
+export const OpenSessionBody = z.object({
+  runtime: RuntimeKind,
+  /** The pane the agent is running in, so the graph can show it and the pane can be labelled. */
+  pane_id: z.string().min(1),
+  cwd: z.string().min(1),
+  /** What to call the mission this session gets. Defaults to the repo it is in. */
+  title: z.string().optional(),
+});
+export type OpenSessionBody = z.infer<typeof OpenSessionBody>;
+
+export const OpenSessionResult = z.object({
+  mission_id: z.string(),
+  session_id: z.string(),
+  /** Flags to add to the agent's own command line (its MCP config, its session id). */
+  argv: z.array(z.string()),
+  env: z.record(z.string(), z.string()),
+  /**
+   * What the agent needs to know to act as a brain, for the runtime's system-prompt channel. It is
+   * not delivered as a turn: the human's own first message is the brief, and a bootstrap turn would
+   * have the agent planning before they had said anything.
+   */
+  instructions: z.string(),
+});
+export type OpenSessionResult = z.infer<typeof OpenSessionResult>;
 export const ClarifyBody = z.object({
   answers: z.array(z.object({ question_id: z.string(), answer: z.string().min(1) })).min(1),
 });
@@ -61,6 +95,8 @@ export const routes = {
   missions: '/missions',
   plan: (missionId: string) => `/missions/${missionId}/plan`,
   planner: (missionId: string) => `/missions/${missionId}/planner`,
+  /** `POST` OpenSessionBody — adopt an agent the human started themselves; see OpenSessionBody. */
+  sessions: '/sessions',
   missionClarify: (missionId: string) => `/missions/${missionId}/clarify`,
   clarify: (taskId: string) => `/tasks/${taskId}/clarify`,
   review: (taskId: string) => `/tasks/${taskId}/review`,

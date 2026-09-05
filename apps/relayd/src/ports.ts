@@ -92,6 +92,16 @@ export interface AgentRuntime {
   /** Writes any per-agent config files under configDir and returns the argv/env to spawn plus the bootstrap prompt. */
   prepare(spec: LaunchSpec, configDir: string): Promise<{ argv: string[]; env: Record<string, string>; prompt?: string }>;
   /**
+   * Wire an agent the human started themselves: the flags and env to add to *their* command line.
+   *
+   * Deliberately not `prepare` minus the executable. `prepare` equips an agent nobody is watching, so
+   * it turns permission prompts off and pins the tool list — isolation there comes from the worktree
+   * and the contract. Here a person is sitting in front of the terminal: they answer their own
+   * dialogs, and restricting their tools would take away the agent they chose to open. All adoption
+   * adds is the MCP wiring and the instructions, and it leaves everything else to them.
+   */
+  adopt?(spec: LaunchSpec, configDir: string, instructions: string): Promise<{ argv: string[]; env: Record<string, string> }>;
+  /**
    * Resume an earlier session of this agent (daemon restart): same config, argv that reopens `spec.sessionId`
    * (`claude --resume <id>`, `codex resume <id>`), and a short prompt telling the agent to continue via relay_get_contract.
    */
