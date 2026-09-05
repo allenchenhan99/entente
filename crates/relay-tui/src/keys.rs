@@ -223,7 +223,9 @@ pub const KEY_HELP: &[(&str, &str)] = &[
     ("x", "cancel the task (asks y/N)"),
     ("↑/↓/←/→", "in the graph: pan the network"),
     ("+ / -", "in the graph: zoom · 0 refits"),
-    ("click / drag / wheel", "in the graph: select · pan · zoom"),
+    ("click", "select what you clicked: an agent, an inbox item, a node or edge, a pane"),
+    ("click a focused pane", "type into it (Esc leaves) — clicking it again is the same as i"),
+    ("drag / wheel", "in the graph: pan · zoom · in a list: walk the selection"),
     (
         "m",
         "release the mouse to the terminal (so you can select text) and take it back",

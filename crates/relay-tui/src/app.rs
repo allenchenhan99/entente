@@ -318,8 +318,16 @@ pub struct App {
     pub frames: FrameStats,
     /// (cols, rows) each pane widget was last drawn with; filled by `ui::panes`.
     pub pane_areas: BTreeMap<String, (u16, u16)>,
-    /// Where the graph canvas was last drawn; filled by `ui::graph`, read to turn a click into an object.
+    /// Where each panel was last drawn, and what its rows mean — filled during render, read to turn a
+    /// click into the object under it. `App` stays terminal-free: these are plain rectangles.
     pub graph_viewport: Viewport,
+    pub tree_viewport: Viewport,
+    /// The object on each row of the mission tree, top to bottom (`None` for headers and detail rows).
+    pub tree_rows: Vec<Option<GraphObjectRef>>,
+    pub inbox_viewport: Viewport,
+    pub inbox_rows: Vec<Option<GraphObjectRef>>,
+    /// Where each pane's widget was drawn, so a click can find the pane under it.
+    pub pane_rects: BTreeMap<String, Viewport>,
     pub graph_view: GraphView,
     /// True while the app holds the mouse; `m` hands it back so the terminal can select text.
     pub mouse_capture: bool,
@@ -362,6 +370,11 @@ impl App {
             frames: FrameStats::default(),
             pane_areas: BTreeMap::new(),
             graph_viewport: Viewport::EMPTY,
+            tree_viewport: Viewport::EMPTY,
+            tree_rows: Vec::new(),
+            inbox_viewport: Viewport::EMPTY,
+            inbox_rows: Vec::new(),
+            pane_rects: BTreeMap::new(),
             graph_view: GraphView::default(),
             mouse_capture: true,
             graph_drag: None,
@@ -1031,12 +1044,21 @@ impl App {
 
     // --- the graph's own input ---------------------------------------------------------------------
 
-    /// A click, drag or wheel over the network. Anything outside the graph's viewport is ignored, so the
-    /// other panels keep their own meaning and the terminal keeps everything the app does not use.
+    /// A click, drag or wheel anywhere in the app. The panel under the pointer decides what it means;
+    /// what no panel claims is left alone, so the terminal keeps everything the app does not use.
     pub fn handle_mouse(&mut self, mouse: Mouse) -> Vec<Effect> {
         if !self.mouse_capture || self.help_open || self.inspector_open || self.input_mode.is_some()
         {
             return Vec::new();
+        }
+        if self.tree_viewport.contains(mouse.col, mouse.row) {
+            return self.mouse_in_rows(mouse, Region::Tree);
+        }
+        if self.inbox_viewport.contains(mouse.col, mouse.row) {
+            return self.mouse_in_rows(mouse, Region::Inbox);
+        }
+        if let Some(pane_id) = self.pane_at(mouse.col, mouse.row) {
+            return self.mouse_in_pane(mouse, pane_id);
         }
         if !self.graph_viewport.contains(mouse.col, mouse.row) {
             // A press elsewhere ends a drag that started on the canvas; nothing else.
@@ -1087,6 +1109,80 @@ impl App {
                 Vec::new()
             }
         }
+    }
+
+    /// A list panel: a click selects the row's object, the wheel walks the selection.
+    fn mouse_in_rows(&mut self, mouse: Mouse, region: Region) -> Vec<Effect> {
+        let (viewport, rows) = match region {
+            Region::Inbox => (self.inbox_viewport, &self.inbox_rows),
+            _ => (self.tree_viewport, &self.tree_rows),
+        };
+        match mouse.kind {
+            MouseKind::Down => {
+                let index = (mouse.row - viewport.y) as usize;
+                // Rows that carry nothing (headers, an agent's detail line) still move focus to the
+                // panel: the click was deliberate even when it did not land on an object.
+                let target = rows.get(index).cloned().flatten();
+                self.region = region;
+                match target {
+                    Some(reference) => self.select(Some(reference)),
+                    None => Vec::new(),
+                }
+            }
+            MouseKind::ScrollUp => {
+                self.region = region;
+                self.move_selection(-1)
+            }
+            MouseKind::ScrollDown => {
+                self.region = region;
+                self.move_selection(1)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The pane grid: a click focuses a pane, and a click into the pane that already has focus starts
+    /// typing into it — the way clicking into a text field does.
+    fn mouse_in_pane(&mut self, mouse: Mouse, pane_id: String) -> Vec<Effect> {
+        if mouse.kind != MouseKind::Down {
+            return Vec::new();
+        }
+        self.region = Region::Panes;
+        if self.focused_pane.as_deref() == Some(pane_id.as_str()) {
+            if self
+                .focused_pane_state()
+                .map(|p| p.alive())
+                .unwrap_or(false)
+            {
+                self.terminal_input = true;
+            } else {
+                self.set_notice("that pane's process has exited");
+            }
+            return Vec::new();
+        }
+        self.focus_pane(pane_id, true)
+    }
+
+    /// Which pane was drawn under a cell.
+    fn pane_at(&self, col: u16, row: u16) -> Option<String> {
+        self.pane_rects
+            .iter()
+            .find(|(_, rect)| rect.contains(col, row))
+            .map(|(id, _)| id.clone())
+    }
+
+    /// Focus a pane and put the keyboard straight into it — what `t` wants: a terminal you can type in.
+    pub fn open_pane_for_typing(&mut self, pane_id: String) -> Vec<Effect> {
+        let effects = self.focus_pane(pane_id, true);
+        self.region = Region::Panes;
+        if self
+            .focused_pane_state()
+            .map(|p| p.alive())
+            .unwrap_or(false)
+        {
+            self.terminal_input = true;
+        }
+        effects
     }
 
     /// World units covered by one cell, horizontally and vertically, at the current view.

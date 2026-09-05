@@ -59,6 +59,17 @@ pub fn layout(area: Rect) -> Areas {
     }
 }
 
+/// A drawn rectangle in `App`'s own terms, so the state machine can answer "what is under this cell?"
+/// without depending on a terminal library.
+pub fn viewport_of(area: Rect) -> crate::app::Viewport {
+    crate::app::Viewport {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: area.height,
+    }
+}
+
 /// The Ink panel header: `▶ TITLE` in cyan when the region has focus, gray otherwise.
 pub fn panel_block(title: &str, active: bool, borders: Borders) -> Block<'static> {
     let style = if active {

@@ -4,7 +4,7 @@
 
 use crate::app::{pane_matches_selection, App, PaneState, Region};
 use crate::ui::tree::status_color;
-use crate::ui::{panel_block, region_active};
+use crate::ui::{panel_block, region_active, viewport_of};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::Line;
@@ -78,6 +78,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     app.pane_areas.clear();
+    app.pane_rects.clear();
     if app.panes.is_empty() {
         let hint = match app.mode {
             crate::app::Mode::Replay => "<no panes in this fixture>",
@@ -129,6 +130,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         frame.render_widget(block, big);
         app.pane_areas
             .insert(focused.clone(), (pane_area.width, pane_area.height));
+        // The whole slot, title row included: a click anywhere on a pane means that pane.
+        app.pane_rects.insert(focused.clone(), viewport_of(big));
         let screen = pane.parser.screen();
         let widget = PseudoTerminal::new(screen);
         frame.render_widget(widget, pane_area);
@@ -163,6 +166,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
             let slot = slots[index];
             let body = block.inner(slot);
             frame.render_widget(block, slot);
+            app.pane_rects.insert(pane_id.clone(), viewport_of(slot));
             let lines: Vec<Line> = tail_lines(pane, THUMB_LINES as usize)
                 .into_iter()
                 .map(|l| Line::styled(l, Style::new().fg(Color::Gray)))

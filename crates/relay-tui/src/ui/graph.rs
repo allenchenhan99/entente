@@ -12,7 +12,7 @@
 use crate::app::{App, GraphView, Region, Viewport};
 use crate::model::*;
 use crate::ui::tree::{enum_name, status_color};
-use crate::ui::{panel_block, region_active};
+use crate::ui::{panel_block, region_active, viewport_of};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::symbols::Marker;
@@ -244,12 +244,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let [canvas_area, detail] =
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
-    app.graph_viewport = Viewport {
-        x: canvas_area.x,
-        y: canvas_area.y,
-        width: canvas_area.width,
-        height: canvas_area.height,
-    };
+    app.graph_viewport = viewport_of(canvas_area);
 
     let graph = app.graph.clone();
     let discs = layout_net(&graph);

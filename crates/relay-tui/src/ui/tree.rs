@@ -3,7 +3,7 @@
 
 use crate::app::{App, Region};
 use crate::model::*;
-use crate::ui::{panel_block, region_active};
+use crate::ui::{panel_block, region_active, viewport_of};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -80,16 +80,26 @@ fn task_detail(node: &GraphNode, task: Option<&TaskView>) -> String {
 }
 
 /// The tree rows as plain text (two per agent), for tests and the renderer.
-pub fn tree_lines(app: &App, height: usize) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
+/// One drawn row and the object it stands for; `None` where a row is a header or a detail line.
+pub type TreeRow = (Line<'static>, Option<GraphObjectRef>);
+
+/// The rows as drawn, so a click on row N and the line on row N always agree about what is there.
+pub fn tree_rows(app: &App, height: usize) -> Vec<TreeRow> {
+    let mut lines: Vec<TreeRow> = Vec::new();
     let Some(mission) = app.state.mission() else {
         if app.graph.nodes.is_empty() {
-            lines.push(Line::styled("No mission", Style::new().fg(Color::DarkGray)));
+            lines.push((
+                Line::styled("No mission", Style::new().fg(Color::DarkGray)),
+                None,
+            ));
             return lines;
         }
-        lines.push(Line::styled(
-            "MISSION  (state not loaded)",
-            Style::new().fg(Color::DarkGray),
+        lines.push((
+            Line::styled(
+                "MISSION  (state not loaded)",
+                Style::new().fg(Color::DarkGray),
+            ),
+            None,
         ));
         lines.extend(agent_lines(app, height.saturating_sub(1)));
         return lines;
@@ -109,7 +119,7 @@ pub fn tree_lines(app: &App, height: usize) -> Vec<Line<'static>> {
             Style::new().fg(Color::Yellow),
         ));
     }
-    lines.push(Line::from(header));
+    lines.push((Line::from(header), None));
     let lint: Vec<&LintItem> = app
         .state
         .tasks
@@ -118,15 +128,26 @@ pub fn tree_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         .collect();
     let errors = lint.iter().filter(|l| l.severity == "error").count();
     let warnings = lint.iter().filter(|l| l.severity == "warning").count();
-    lines.push(Line::styled(
-        format!("lint: {errors} errors · {warnings} warnings"),
-        Style::new().fg(Color::DarkGray),
+    lines.push((
+        Line::styled(
+            format!("lint: {errors} errors · {warnings} warnings"),
+            Style::new().fg(Color::DarkGray),
+        ),
+        None,
     ));
     lines.extend(agent_lines(app, height.saturating_sub(2)));
     lines
 }
 
-fn agent_lines(app: &App, height: usize) -> Vec<Line<'static>> {
+/// Just the lines, for callers that only draw.
+pub fn tree_lines(app: &App, height: usize) -> Vec<Line<'static>> {
+    tree_rows(app, height)
+        .into_iter()
+        .map(|(line, _)| line)
+        .collect()
+}
+
+fn agent_lines(app: &App, height: usize) -> Vec<TreeRow> {
     let agents: Vec<&GraphNode> = app
         .graph
         .nodes
@@ -134,9 +155,9 @@ fn agent_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         .filter(|n| n.kind == GraphNodeKind::Agent)
         .collect();
     if agents.is_empty() {
-        return vec![Line::styled(
-            "<no agents>",
-            Style::new().fg(Color::DarkGray),
+        return vec![(
+            Line::styled("<no agents>", Style::new().fg(Color::DarkGray)),
+            None,
         )];
     }
     let max_agents = (height / 2).max(1);
@@ -173,16 +194,21 @@ fn agent_lines(app: &App, height: usize) -> Vec<Line<'static>> {
             enum_name(&node.handoff_state),
             version
         );
-        lines.push(Line::styled(first, style));
-        lines.push(Line::styled(
-            format!("    {} · {}", node.label, task_detail(node, task)),
-            Style::new().fg(color).dim(),
+        let reference = GraphObjectRef::node(&node.id);
+        lines.push((Line::styled(first, style), Some(reference.clone())));
+        // The detail row belongs to the same agent, so clicking either row selects it.
+        lines.push((
+            Line::styled(
+                format!("    {} · {}", node.label, task_detail(node, task)),
+                Style::new().fg(color).dim(),
+            ),
+            Some(reference),
         ));
     }
     lines
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = panel_block(
         Region::Tree.title(),
         region_active(app, Region::Tree),
@@ -190,7 +216,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     );
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let lines = tree_lines(app, inner.height as usize);
+    let rows = tree_rows(app, inner.height as usize);
+    app.tree_viewport = viewport_of(inner);
+    app.tree_rows = rows.iter().map(|(_, r)| r.clone()).collect();
+    let lines: Vec<Line<'static>> = rows.into_iter().map(|(line, _)| line).collect();
     frame.render_widget(Paragraph::new(lines), inner);
 }
 

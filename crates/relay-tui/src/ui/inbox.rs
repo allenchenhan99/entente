@@ -3,7 +3,7 @@
 
 use crate::app::{App, Region};
 use crate::model::*;
-use crate::ui::{panel_block, region_active};
+use crate::ui::{panel_block, region_active, viewport_of};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -41,12 +41,22 @@ pub fn action_keys(actions: &[ObjectAction]) -> String {
         .join(" · ")
 }
 
+/// One drawn row and the inbox item it stands for.
+pub type InboxRow = (Line<'static>, Option<GraphObjectRef>);
+
 pub fn inbox_lines(app: &App, height: usize) -> Vec<Line<'static>> {
+    inbox_rows(app, height)
+        .into_iter()
+        .map(|(line, _)| line)
+        .collect()
+}
+
+pub fn inbox_rows(app: &App, height: usize) -> Vec<InboxRow> {
     let items = &app.graph.inbox;
     if items.is_empty() {
-        return vec![Line::styled(
-            "<inbox empty>",
-            Style::new().fg(Color::DarkGray),
+        return vec![(
+            Line::styled("<inbox empty>", Style::new().fg(Color::DarkGray)),
+            None,
         )];
     }
     let max_items = height.max(1);
@@ -63,6 +73,7 @@ pub fn inbox_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         .skip(start)
         .take(max_items)
         .map(|item| {
+            let reference = GraphObjectRef::inbox(&item.id);
             let active = selected_index.is_some_and(|i| items[i].id == item.id);
             let mut title_style = Style::new().fg(Color::Yellow);
             if active {
@@ -91,12 +102,12 @@ pub fn inbox_lines(app: &App, height: usize) -> Vec<Line<'static>> {
                 ),
                 Style::new().fg(Color::DarkGray),
             ));
-            Line::from(spans)
+            (Line::from(spans), Some(reference))
         })
         .collect()
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let title = if app.graph.inbox.is_empty() {
         Region::Inbox.title().to_string()
     } else {
@@ -105,8 +116,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = panel_block(&title, region_active(app, Region::Inbox), Borders::TOP);
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    let rows = inbox_rows(app, inner.height as usize);
+    app.inbox_viewport = viewport_of(inner);
+    app.inbox_rows = rows.iter().map(|(_, r)| r.clone()).collect();
     frame.render_widget(
-        Paragraph::new(inbox_lines(app, inner.height as usize)),
+        Paragraph::new(rows.into_iter().map(|(line, _)| line).collect::<Vec<_>>()),
         inner,
     );
 }
