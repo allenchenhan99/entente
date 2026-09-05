@@ -289,7 +289,8 @@ export function spawnRelayd(
         RELAY_PORT: String(options.port),
         RELAY_HOST: options.host,
         ...(options.termd === undefined ? {} : { RELAY_TERMD: options.termd }),
-        RELAY_RESUME: 'latest',
+        // `auto`, not `latest`: the first run of a repo has nothing recorded, and that is not an error.
+        RELAY_RESUME: 'auto',
       },
     });
   } finally {

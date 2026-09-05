@@ -290,6 +290,11 @@ describe('resume run id', () => {
     expect(resolveResumeEnv({ RELAY_RESUME: 'latest', RELAY_RUN_ID: 'run-old', RELAY_DIR: relayDir }).RELAY_RUN_ID).toBe('run-old');
     expect(resolveResumeEnv({ RELAY_DIR: relayDir }).RELAY_RUN_ID).toBeUndefined();
     expect(() => resolveResumeEnv({ RELAY_RESUME: 'latest', RELAY_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'relay-')) })).toThrow(/no recorded run/);
+
+    // `auto` is what a launcher passes: resume when there is a run, start fresh when there is not.
+    expect(resolveResumeEnv({ RELAY_RESUME: 'auto', RELAY_DIR: relayDir })).toMatchObject({ RELAY_RUN_ID: 'run-new' });
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-'));
+    expect(resolveResumeEnv({ RELAY_RESUME: 'auto', RELAY_DIR: emptyDir }).RELAY_RUN_ID).toBeUndefined();
   });
 });
 
