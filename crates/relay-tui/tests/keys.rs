@@ -471,3 +471,38 @@ fn a_project_already_open_is_switched_to_rather_than_added_twice() {
     assert_eq!(app.workspaces.len(), 2, "the original plus one");
     assert_eq!(app.workspace(again).map(|w| w.name.as_str()), Some("other"));
 }
+
+#[test]
+fn digits_switch_between_open_projects() {
+    let mut app = app_with(demo_graph());
+    let second = app.add_workspace("http://127.0.0.1:7461".into(), Some("other".into()));
+    assert_eq!(second, 1);
+    assert_eq!(app.active, 0);
+
+    app.handle_key(Key::char('2'));
+    assert_eq!(app.active, 1, "2 switches to the second project");
+
+    app.handle_key(Key::char('1'));
+    assert_eq!(app.active, 0, "and 1 comes back");
+}
+
+#[test]
+fn a_second_project_starts_out_connecting_and_is_told_apart_from_the_first() {
+    use relay_tui::app::Connection;
+    let mut app = app_with(demo_graph());
+    app.add_workspace("http://127.0.0.1:7461".into(), Some("other".into()));
+
+    // News about one daemon belongs to that daemon. Writing it to whichever workspace was in front of
+    // you meant the second one's stream coming up marked the first as live, and the second stayed on
+    // "connecting" however well it was working.
+    app.set_connection_for(1, Connection::Live);
+    assert_eq!(
+        app.workspace(1).map(|w| w.connection.clone()),
+        Some(Connection::Live)
+    );
+    assert_ne!(
+        app.workspace(0).map(|w| w.connection.clone()),
+        Some(Connection::Live),
+        "the first was not touched"
+    );
+}

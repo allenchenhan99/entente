@@ -77,6 +77,9 @@ async fn main() -> Result<()> {
     if let Some(frames) = args.frames {
         let terminal = Terminal::new(TestBackend::new(args.width, args.height))?;
         let mut runtime = Runtime::new(terminal, source);
+        // Before `start`, as the interactive path does: this is the mode used to look at what the TUI
+        // draws, and it drew a single default workspace whatever it was pointed at.
+        runtime.set_workspace_urls(&args.url);
         runtime.start().await?;
         runtime.run(Some(frames.max(1))).await?;
         let buffer = runtime.terminal.backend().buffer().clone();

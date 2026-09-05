@@ -53,7 +53,9 @@ pub enum Msg {
     Actions(GraphObjectRef, Vec<ObjectAction>),
     PaneFrame(String, PtyServerMessage),
     PaneClosed(String, String),
-    Connection(Connection),
+    /// Which workspace's daemon, and how it is doing. A workspace is a daemon, so the state belongs
+    /// to the one it came from — not to whichever happens to be in front of you when it arrives.
+    Connection(usize, Connection),
     /// A pane was created on the daemon; focus it once the refreshed list arrives.
     PaneOpened(String),
     /// `entente daemon` answered: a project is being served here, and this is how to reach it.
@@ -229,13 +231,22 @@ impl<B: Backend> Runtime<B> {
         self.draw()
     }
 
+    /// One event stream per workspace. Every daemon needs its own: a workspace opened later used to
+    /// get none at all, so nothing ever told it the stream was up and it sat on "connecting" forever
+    /// while its data quietly arrived through the polling refresh.
     fn spawn_sse(&mut self) {
-        let Some(client) = self.active_client() else {
-            return;
-        };
-        let client = client.clone();
+        for (index, client) in self.all_clients() {
+            self.spawn_sse_for(index, client);
+        }
+    }
+
+    fn spawn_sse_for(&mut self, index: usize, client: Arc<Client>) {
         let tx = self.tx.clone();
-        let since = self.app.ws_mut().last_seq;
+        let since = self
+            .app
+            .workspace(index)
+            .map(|w| w.last_seq)
+            .unwrap_or_default();
         self.tasks.push(tokio::spawn(async move {
             let mut since = since;
             loop {
@@ -245,7 +256,7 @@ impl<B: Backend> Runtime<B> {
                     .events(
                         since,
                         || {
-                            let _ = opened.send(Msg::Connection(Connection::Live));
+                            let _ = opened.send(Msg::Connection(index, Connection::Live));
                         },
                         |event| {
                             since = since.max(event.seq);
@@ -260,19 +271,20 @@ impl<B: Backend> Runtime<B> {
                     Ok(()) => "stream closed".to_string(),
                     Err(e) => e.to_string(),
                 };
-                let _ = tx.send(Msg::Connection(Connection::Disconnected(why)));
+                let _ = tx.send(Msg::Connection(index, Connection::Disconnected(why)));
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }));
     }
 
     fn spawn_metrics(&mut self) {
-        // Host metrics are about the daemon in front of you; the status line shows one workspace's.
-        let index = self.app.active;
-        let Some(client) = self.active_client() else {
-            return;
-        };
-        let client = client.clone();
+        for (index, client) in self.all_clients() {
+            self.spawn_metrics_for(index, client);
+        }
+    }
+
+    /// Host metrics per workspace; the status line shows the active one's.
+    fn spawn_metrics_for(&mut self, index: usize, client: Arc<Client>) {
         let tx = self.tx.clone();
         self.tasks.push(tokio::spawn(async move {
             loop {
@@ -450,6 +462,15 @@ impl<B: Backend> Runtime<B> {
                         ""
                     }
                 ));
+                // Its own event stream and metrics: a workspace opened after startup got neither, so
+                // nothing ever told it its daemon was up and it sat on "connecting" forever while its
+                // data quietly arrived through the polling refresh.
+                if let Source::Live(clients) = &self.source {
+                    if let Some(client) = clients.get(index).cloned() {
+                        self.spawn_sse_for(index, client.clone());
+                        self.spawn_metrics_for(index, client);
+                    }
+                }
                 let effects = self.app.set_active(index);
                 self.run_effects(effects);
                 // Its graph, state and panes are fetched now rather than at the next tick, so the new
@@ -520,8 +541,8 @@ impl<B: Backend> Runtime<B> {
                 }
                 Vec::new()
             }
-            Msg::Connection(c) => {
-                self.app.set_connection(c);
+            Msg::Connection(index, c) => {
+                self.app.set_connection_for(index, c);
                 Vec::new()
             }
             Msg::Error(e) => {

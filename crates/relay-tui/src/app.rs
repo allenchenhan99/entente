@@ -860,6 +860,17 @@ impl App {
         self.ws_mut().connection = connection;
     }
 
+    /// The connection state of one workspace, whichever is in front of you.
+    ///
+    /// A workspace is a daemon, so this belongs to the one the news came from. Writing it to the
+    /// active workspace instead meant a second project's stream coming up marked the first as live,
+    /// and the second stayed on "connecting" however well it was working.
+    pub fn set_connection_for(&mut self, index: usize, connection: Connection) {
+        if let Some(ws) = self.workspaces.get_mut(index) {
+            ws.connection = connection;
+        }
+    }
+
     pub fn note_event(&mut self, seq: u64) {
         self.ws_mut().last_seq = self.ws().last_seq.max(seq);
     }
