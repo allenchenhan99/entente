@@ -1,177 +1,196 @@
-# entente · RelayGraph
+<p align="center">
+  <img src="LOGO.png" alt="Entente logo" width="144" />
+</p>
 
-**Turn fuzzy natural-language handoffs between coding agents into confirmable, trackable, verifiable, retryable work contracts.**
+<h1 align="center">Entente</h1>
+<p align="center"><strong>Provenance Engineering for Agent Teams</strong><br />Every handoff carries a contract. Every result carries evidence.</p>
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-9b6ce0?style=flat-square" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/Node.js-22%2B-438d62?style=flat-square" alt="Node.js 22 or later" />
+  <img src="https://img.shields.io/badge/runtimes-Claude_Code_%7C_Codex-635096?style=flat-square" alt="Claude Code and Codex runtimes" />
+</p>
+<p align="center">
+  <a href="https://entente-provenance.test831.chatgpt.site">Interactive hackathon report</a> ·
+  <a href="#quick-start-no-agent-or-api-key">Quick start</a> ·
+  <a href="#how-to-contribute">How to contribute</a> ·
+  <a href="https://github.com/allenchenhan99/entente/issues">Design discussions</a>
+</p>
 
-> Agent frameworks tell you whether an agent is running.
-> RelayGraph tells you whether agents actually understand each other.
+**Turn ambiguous handoffs between coding agents into scoped, verifiable work.** Entente's coordination core, **RelayGraph**, runs above agent runtimes such as Claude Code and Codex. It defines what must be delivered, checks the evidence, and requests targeted repair when a criterion fails.
 
-RelayGraph is a coordination control plane for coding agents (Claude Code, Codex) with its own terminal base:
-agents keep their runtimes, RelayGraph hosts their terminals and makes every handoff between them an explicit
-**Task Contract** with a lifecycle:
+- **Clarify before execution** — the recipient accepts a Task Contract or asks material questions before starting work.
+- **Check evidence, not just status** — relayd runs declared checks in the task worktree and records mismatches with the agent's self-report.
+- **Repair the failed task** — a delta repair identifies the failed criteria and requested corrections, with an explicit repair budget.
+- **Keep the delivery history** — contracts, checks, human decisions, and repairs become JSONL events that drive state, graph, and replay.
 
-```
-proposed ──▶ needs_clarification ──▶ revised ──▶ accepted ──▶ evidence_submitted ──▶ verified
-                (agent asks)        (human answers)          (relayd runs the checks)   │
-                                                                   └── retry_requested ◀─┘  (delta repair, same session)
-```
+Built at the FUTUREMODE BUILDMODE Gen-AI Hackathon 2026.
 
-- **Clarify before execution** — a recipient must `accept` (restating its interpretation and a verification
-  plan for every criterion) or ask numbered questions. It cannot start writing code before that.
-- **Evidence over self-reporting** — every acceptance criterion binds a `check` (`command`, `diff_scope`,
-  `file_exists`, `human_review`, `llm_judge`). relayd runs the checks in the agent's git worktree; the agent's
-  own claims are only compared against the result (`self_report_mismatch`).
-- **Local repair over global retry** — a failed criterion produces a delta *repair contract* delivered to the
-  same agent session. Nothing else is re-run.
-- **Everything is an event** — an append-only JSONL log is the only state; the TUI, the metrics and replay are
-  all derived from it with one reducer.
+## Our scope: from prompts to provenance
 
-Built at the FUTUREMODE BUILDMODE Gen-AI Hackathon 2026. The full product design is in [`PRD.md`](PRD.md).
+![Entente's scope model: Prompt inside Context, Harness, Loop, Graph, and Provenance Engineering](docs/assets/entente-scope.svg)
 
-## What is in the box
+We propose **Provenance Engineering** as Entente's outermost scope: preserving where decisions and results came from, which version they concern, what verified them, and whether that evidence still applies. This is our product framing; the layers accumulate rather than replace one another.
 
-| Package | What it does |
-|---|---|
-| `packages/protocol` | zod schemas for contracts, events, state; the state reducer; the communication-debt linter |
-| `apps/relayd` | the daemon: JSONL event store, HTTP + SSE API, **MCP server the agents talk to**, git worktree manager, check runner, repair policy, agent launcher (`relay` / `relayterm` hosts, Claude Code / Codex runtimes) |
-| `apps/tui` | Ink terminal UI: mission tree, animated handoff graph, event timeline, contract overlay, live (SSE) and replay modes |
-| `apps/cli` | `relay up / status / clarify / revise / review / reply / cancel / inbox / explain / story / pane / replay` |
-| `demo-repo` | a small Hono app with a user model and session store and **no authentication** — the target of the demo mission |
-| `fixtures` | replayable event logs, including a recorded real run (`events-live-1.jsonl`) |
-| `examples` | hand-written contracts for the demo mission |
-
-## Quick start
-
-Requirements: Node ≥ 22 and git. Agents need `claude` (Claude Code) and/or `codex` on your PATH and logged in.
-RelayGraph hosts the agent terminals itself; no external multiplexer is needed. With a Rust toolchain, `cargo build`
-produces the native terminal base (`termd` + `relay-tui`) and `entente` uses it automatically; without it the
-TypeScript host and the Ink TUI run instead.
-
-```bash
-npm install && npx tsc -b
-cargo build -p termd -p relay-tui   # optional: the Rust terminal base (Relay Terminal)
-
-# Materialise the demo app as its own git repository.
-bash demo-repo/scripts/init-demo.sh ~/entente-demo/app && (cd ~/entente-demo/app && npm install)
-
-# Start or reuse relayd, wait for health, then hand this terminal to the TUI.
-entente --repo ~/entente-demo/app
-
-# Inspect or stop that daemon from another terminal.
-entente status --repo ~/entente-demo/app
-entente down --repo ~/entente-demo/app
-```
-
-`entente` defaults to `entente up` on port 7420. `--host` defaults to `relayterm` when a `termd` binary is
-found (`RELAY_TERMD`, `target/release`, `target/debug`) and to the TypeScript `relay` host otherwise; `--tui`
-defaults to `rust` when `relay-tui` is built (`RELAY_TUI` overrides) and to `ink` otherwise. Use `--port N` for
-another port and `--dir <relayDir>` to move
-`relayd.log`, `relayd.pid`, and `session.token`. Pass `--no-spawn` to require an already-running daemon.
-`--replay` takes an event log (Ink) or a relay-tui fixture directory (Rust).
-
-Terminal hosts (`RELAY_HOST` for a hand-started `relayd`):
-
-| host | what runs the agent terminals |
+| Scope, small → large | The question it addresses |
 | --- | --- |
-| `relay` (default) | relayd itself (node-pty); `/panes*`, `/pty/:id`, `/metrics` served in-process |
-| `relayterm` | the Rust `termd` (`cargo build -p termd`, or `RELAY_TERMD=<binary>`); relayd spawns it and proxies the same routes to it |
+| Prompt Engineering | How do we express this instruction? |
+| Context Engineering | What information does the agent need? |
+| Harness Engineering | Which tools, permissions, and environment support one agent? |
+| Loop Engineering | How does a task execute, receive feedback, repair, and stop? |
+| Graph Engineering | How do agents, tasks, and dependencies coordinate? |
+| **Provenance Engineering — our proposed scope** | **Where did this delivery come from, and what evidence supports it?** |
 
-Agent models: unset, each runtime uses whatever the user configured. `RELAY_CLAUDE_MODEL` and
-`RELAY_CODEX_MODEL` pin one for every agent relayd spawns (an alias such as `haiku` or a full model id);
-they are passed as `--model` and survive a daemon restart. Codex agents run under an isolated
-`CODEX_HOME`, so `~/.codex/config.toml` does not reach them — this is how to choose their model.
+**Today:** Task Contracts, linting, daemon-executed checks, bounded repair, event replay, and Relay Terminal are implemented. Versioned context checkpoints and a delivery Passport are next-step proposals. A traceable log alone does not prove semantic correctness, and running a check separately does not make its test author independent.
 
-```bash
-RELAY_CLAUDE_MODEL=haiku RELAY_CODEX_MODEL=<codex-model> entente --repo ~/entente-demo/app
-```
+## Quick start: no agent or API key
 
-No agents, daemon, or API keys? Replay a recorded run directly:
-
-```bash
-entente --replay fixtures/events-live-1.jsonl
-```
-
-## How an agent takes part
-
-relayd is an MCP server (streamable HTTP at `/mcp`). Each spawned agent gets a bearer token that identifies its
-task and a bootstrap prompt describing the lifecycle. The tools:
-
-| Recipient tools | Planner tools |
-|---|---|
-| `relay_get_contract` · `relay_respond_to_contract` · `relay_await_contract` | `relay_get_mission` · `relay_propose_task` · `relay_list_tasks` |
-| `relay_report_progress` · `relay_report_blocker` · `relay_await_reply` | `relay_revise_task` · `relay_answer_clarification` · `relay_ask_human` · `relay_await_answers` |
-| `relay_submit_evidence` · `relay_await_verdict` | |
-
-The same server serves Claude Code and Codex; adding a runtime means implementing `AgentRuntime`
-(`apps/relayd/src/ports.ts`) — write the agent's config files, return argv/env/prompt. Adding a terminal host
-means implementing `TerminalHost` (spawn / focus / isAlive / kill).
-
-## A contract, briefly
-
-```yaml
-id: t-backend-auth
-recipient: backend
-runtime: claude-code
-goal: Implement secure login endpoints, reusing the existing user model and session store
-inputs: [README.md, src/models/user.ts, src/session/store.ts]
-constraints: [Reuse the existing SessionStore; no new paid infrastructure]
-non_goals: [OAuth, account recovery, frontend]
-scope: { allowed_paths: ["src/auth/**", "src/app.ts", "tests/auth/**"] }
-acceptance_criteria:
-  - { id: AC-1, condition: A valid credential creates a session, check: { kind: command, run: "npx vitest run tests/auth/valid-login.test.ts" } }
-  - { id: AC-3, condition: A credential cannot be reused,         check: { kind: human_review } }
-  - { id: AC-4, condition: Changes stay within scope,              check: { kind: diff_scope } }
-budget: { max_repairs: 2, stagnation_limit: 2 }
-```
-
-A contract without a `check` on every criterion, without `allowed_paths`, or without a budget is a lint
-**error** and the agent is never spawned. See PRD §11 for all rules.
-
-## Explain what happened
-
-Every agent, contract and human decision is an object with a story:
+**Requirements:** Node.js 22+ and Git. The following replay path needs no agent login, daemon, or live model calls after dependencies are installed.
 
 ```bash
-npx tsx apps/cli/src/index.ts inbox   --replay fixtures/events-live-4.jsonl   # what needs a human right now
+git clone https://github.com/allenchenhan99/entente.git
+cd entente
+npm ci
+npx tsc -b
+
+# Open a recorded run in the terminal UI. Press Ctrl+C to quit.
+npx tsx apps/tui/src/index.tsx --replay fixtures/events-live-1.jsonl
+```
+
+Prefer a single command that prints and exits?
+
+```bash
 npx tsx apps/cli/src/index.ts explain planner --replay fixtures/events-live-4.jsonl
-npx tsx apps/cli/src/index.ts explain contract:t-auth-routes --replay fixtures/events-live-4.jsonl
-npx tsx apps/cli/src/index.ts story   --replay fixtures/events-live-4.jsonl --task t-login-page
 ```
 
-The same object model (`packages/protocol/src/graph/`) drives the TUI's inspector and inbox.
-
-## Roadmap · Phase 2: Relay Terminal
-
-The next step is our own agent-based terminal: relayd hosts the PTYs, and a browser app arranges panes by the
-graph, draws contracts between them, and puts answer / review / reply next to the pane that needs it.
-Interfaces are frozen in `packages/protocol/src/pty.ts`; the two work packages (PTY host, web app) are
-specified as Task Contracts in [`docs/relay-terminal-plan.md`](docs/relay-terminal-plan.md) — pick one up there.
-
-### Relay Terminal (Rust)
-
-`crates/relay-tui` is the native client (Ratatui): mission tree, explainable graph, live agent panes over
-`/pty/:id`, inbox and inspector — HTTP/SSE/WS only, it never runs the reducer.
+This prints a recorded mission, its six clarification answers, three planned tasks, and integration outcome. Explore the same history through the inbox, a contract, or a task:
 
 ```bash
-cargo run -p relay-tui -- --url http://127.0.0.1:7420          # token: --token / RELAY_TOKEN / .relay/session.token
-cargo run -p relay-tui -- --replay crates/relay-tui/tests/fixtures/live-7   # no relayd needed (q quits)
-cargo run -p relay-tui -- --replay crates/relay-tui/tests/fixtures/live-1 --frames 1 --metrics-json  # headless frame + draw p50/p95
-node scripts/dump-graph-fixture.mjs fixtures/events-live-1.jsonl live-1   # regenerate a replay fixture from a run log
+npx tsx apps/cli/src/index.ts inbox --replay fixtures/events-live-4.jsonl
+npx tsx apps/cli/src/index.ts explain contract:t-auth-routes --replay fixtures/events-live-4.jsonl
+npx tsx apps/cli/src/index.ts story --replay fixtures/events-live-4.jsonl --task t-login-page
 ```
 
-## Repository layout and contributing
+The completed `live-4` fixture has an empty inbox; that is expected. In a live mission, the inbox lists handoffs that need human attention.
 
-- `packages/protocol/src/{contract,events,state,api,mcp}.ts` are the integration contract; changes there need a
-  reducer/fixture update in the same PR.
-- New lint rule: one file under `packages/protocol/src/lint/rules/`, with a positive and a negative test.
-- New runtime or host: one file under `apps/relayd/src/launch/{runtimes,hosts}/`, tests use the injected
-  fake executor — no real processes in tests.
-- `npx vitest run` and `npx tsc -b` must pass. Tests are hermetic (temp git repos, no network, no LLM calls).
+**[Open the six-page report →](https://entente-provenance.test831.chatgpt.site)** It includes our scope model, rejected approaches, implementation, and evidence. One demo slot is reserved for a video of up to two minutes; the video is not yet included.
 
-This project was built by running its own protocol: six work packages, each a Task Contract with
-`allowed_paths` and machine-checked acceptance criteria, executed in parallel by Claude Code and Codex agents
-in git worktrees, then merged. The integration bugs found while doing that (prompt
-delivery, folder trust, MCP approval, sandbox roots) are documented in the commit history.
+## How a handoff works
+
+```mermaid
+flowchart LR
+  A[Task Contract] --> B{Accept or clarify}
+  B -->|Questions| C[Human clarification]
+  C --> A
+  B -->|Accept| D[Agent executes]
+  D --> E[relayd runs checks]
+  E -->|Pass| F[Verified delivery]
+  E -->|Fail| G[Bounded delta repair]
+  G --> D
+```
+
+A Task Contract defines the goal, inputs, constraints, non-goals, allowed paths, acceptance criteria, declared checks, and repair budget. Lint errors block spawning. Checks include `command`, `diff_scope`, `file_exists`, `human_review`, and `llm_judge`; their evidence should be interpreted according to how they were produced.
+
+See [example contracts](examples), the [protocol reference](docs/protocol.md), and the [original product design](PRD.md). The [live-7 event log](fixtures/events-live-7.jsonl) records a scope-check failure, a self-report mismatch, a repair request, and eventual mission verification.
+
+## Run a live mission
+
+In addition to the quick-start dependencies, configure and log in to a supported runtime (`claude` and/or `codex`). Use a disposable demo repository. The commands below use a Bash-compatible shell; the demo initialization script and command checks depend on shell tools. On Windows, use a suitable Bash environment such as WSL for this path.
+
+```bash
+# Create the demo app as its own Git repository and install its dependencies.
+bash demo-repo/scripts/init-demo.sh ../entente-demo
+cd ../entente-demo
+npm ci
+cd ../entente
+
+# Launch using the checked-out CLI; no global npm link is required.
+node bin/entente.mjs --repo ../entente-demo
+```
+
+From another terminal in this checkout:
+
+```bash
+node bin/entente.mjs status --repo ../entente-demo
+node bin/entente.mjs down --repo ../entente-demo
+```
+
+The launcher starts or reuses relayd, then opens the TUI. Entente hosts the agent terminals itself.
+
+<details>
+<summary><strong>Native Relay Terminal, host selection, and runtime configuration</strong></summary>
+
+With a Rust toolchain, build the native terminal daemon and Ratatui client:
+
+```bash
+cargo build -p termd -p relay-tui
+cargo run -p relay-tui -- --replay crates/relay-tui/tests/fixtures/live-7
+```
+
+The launcher selects `relayterm` when it finds `termd` and `rust` when it finds `relay-tui`; otherwise it uses the TypeScript `relay` host and Ink TUI. Override with `--host`, `--tui`, `RELAY_TERMD`, or `RELAY_TUI` as appropriate. The default daemon port is `7420`; use `--port N` to change it, `--dir <relayDir>` to change local run storage, or `--no-spawn` to require an existing daemon.
+
+| Terminal host | Implementation |
+| --- | --- |
+| `relay` | relayd hosts PTYs with node-pty and serves pane, PTY, and metrics routes in-process |
+| `relayterm` | Rust `termd` hosts PTYs; relayd proxies the same routes |
+
+`RELAY_CLAUDE_MODEL` and `RELAY_CODEX_MODEL` choose the model passed to spawned runtimes. Without an override, each runtime uses its configured default. Codex agents use an isolated `CODEX_HOME`, so the user's ordinary Codex configuration is not automatically inherited.
+
+The MCP server is available at `/mcp`. Task-scoped bootstrap configuration provides the agent's credentials and lifecycle instructions. Recipient tools include `relay_get_contract`, `relay_respond_to_contract`, `relay_report_progress`, `relay_submit_evidence`, and `relay_await_verdict`; planner tools include `relay_propose_task`, `relay_revise_task`, and `relay_ask_human`.
+
+</details>
+
+## What we considered — and did not adopt
+
+| Approach | Why we did not select it as the current design |
+| --- | --- |
+| Re-read and summarize all history at every delegation | Repeated work adds cost and handoff latency |
+| One mutable rolling summary shared by all children | Unrelated context accumulates, and concurrent updates can overwrite one another |
+| Entropy as the primary context selector | Information quantity does not establish task relevance; a short requirement can be decisive |
+
+These are **design tradeoffs**, not claims of measured benchmark wins. The current context proposal prioritizes fixed versions, task-relevant handoffs, and end-to-end task validation before cost comparisons. Read [#4](https://github.com/allenchenhan99/entente/issues/4), the [consolidated earlier proposal #6](https://github.com/allenchenhan99/entente/issues/6), and [research discussion #7](https://github.com/allenchenhan99/entente/issues/7). Closing #6 consolidated the discussion; it did not mark the feature implemented.
+
+## How to contribute
+
+**You can make a useful first contribution without running a live agent.** Pick a small, reviewable change:
+
+| Contribution | Start here | What a useful submission includes |
+| --- | --- | --- |
+| Improve onboarding | This README and [CONTRIBUTING.md](CONTRIBUTING.md) | The confusing step, environment, and corrected instructions |
+| Report a reproducible bug | [Bug form](https://github.com/allenchenhan99/entente/issues/new?template=bug.md) | Command, expected/actual result, and a sanitized replay when possible |
+| Add a lint rule | [Rule proposal](https://github.com/allenchenhan99/entente/issues/new?template=lint_rule_proposal.md), [`packages/protocol/src/lint/rules`](packages/protocol/src/lint/rules) | One passing contract and one failing contract |
+| Add a demo scenario | [Scenario form](https://github.com/allenchenhan99/entente/issues/new?template=demo_scenario.md), [`examples`](examples) | A clear failure, expected clarification or repair, and replay evidence |
+| Extend a runtime or terminal host | [Adapter request](https://github.com/allenchenhan99/entente/issues/new?template=adapter_request.md), [`ports.ts`](apps/relayd/src/ports.ts) | An adapter behind the existing port, with injected-fake tests |
+
+1. Fork the repository and create a focused branch.
+2. Describe the problem and expected behavior; discuss changes to protocol or product semantics before implementation.
+3. Run the narrow relevant check, then the integration checks when behavior changes.
+4. Open a PR with what changed, how you verified it, and any remaining limits.
+
+```bash
+# Example: work on contract linting without launching agents.
+npx vitest run packages/protocol/src/lint/lint.test.ts
+
+# TypeScript integration checks (also run by CI).
+npx tsc -b
+npx vitest run
+```
+
+**[Read the contribution guide →](CONTRIBUTING.md)** It maps changes to tests, explains fixtures and generated docs, and includes a first-PR checklist.
+
+## Repository map
+
+| Area | Responsibility |
+| --- | --- |
+| [`packages/protocol`](packages/protocol) | Zod contracts, events, reducer, graph model, lint rules, public schemas |
+| [`apps/relayd`](apps/relayd) | Orchestration, MCP, HTTP/SSE, checks, repairs, worktrees, runtime and host adapters |
+| [`apps/launcher`](apps/launcher), [`apps/cli`](apps/cli) | Launch Entente; inspect and operate missions |
+| [`apps/tui`](apps/tui) | Ink terminal interface and live/replay clients |
+| [`crates/termd`](crates/termd), [`crates/relay-tui`](crates/relay-tui) | Native PTY host and Ratatui terminal client |
+| [`demo-repo`](demo-repo), [`examples`](examples), [`fixtures`](fixtures) | Demo application, task plans, replayable event logs |
+| [`docs`](docs) | Protocol reference, implementation plans, and research |
+
+The [Relay Terminal plan](docs/relay-terminal-plan.md) records the Phase 2 web-terminal work package; it is design context, not a claim that every planned UI is shipped.
 
 ## License
 
-MIT
+[MIT](LICENSE) — contributions and reproducible coordination failures are welcome.
