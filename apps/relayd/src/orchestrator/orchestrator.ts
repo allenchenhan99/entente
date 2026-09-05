@@ -444,12 +444,28 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const propose = async (missionId: string, input: TaskContractInput, sender: Sender, parentTask?: string): Promise<ProposeTaskOutput> => {
     const m = mustMission(missionId);
     const existing = tasks.get(input.id);
-    if (existing && existing.missionId !== missionId) throw conflict(`task ${input.id} belongs to mission ${existing.missionId}`);
+    if (existing && existing.missionId !== missionId) {
+      // Task ids are global, so a finished task of an old mission holds its id against a new one.
+      // Running the same plan file twice lands here, and the way out is not obvious unless it is said.
+      const over = TERMINAL_TASK_STATES.has(existing.taskState);
+      throw conflict(
+        `task ${input.id} belongs to mission ${existing.missionId}`
+        + (over
+          ? ` and is ${existing.taskState}; delete it (\`relay delete ${input.id}\`), or clear that whole `
+            + `mission with \`relay cancel ${existing.missionId}\` then \`relay delete ${existing.missionId}\``
+          : '; cancel it first if you meant to reuse the id'),
+      );
+    }
     // "Fix and re-propose" exists for one situation only: the contract never got past lint, so no agent has seen
     // it. Anything else already has a reader (or a history) and must go through reviseTask, which keeps the
     // version chain, clarifications and the recipient's re-response intact.
     if (existing && !(!existing.spawned && !existing.spawning && hasLintErrors(existing.lint))) {
-      throw conflict(`task ${input.id} is ${existing.taskState}; use relay_revise_task`);
+      throw conflict(
+        `task ${input.id} is ${existing.taskState}; `
+        + (TERMINAL_TASK_STATES.has(existing.taskState)
+          ? `delete it first (\`relay delete ${input.id}\`) to reuse the id`
+          : 'use relay_revise_task'),
+      );
     }
     const version = existing ? current(existing).version + 1 : 1;
     const contract = TaskContract.parse({
@@ -974,9 +990,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const deleteTask: Orchestrator['deleteTask'] = async (taskId, reason) => {
     const rec = mustTask(taskId);
     requireOver(`task ${taskId}`, rec.taskState);
-    // A survivor waiting on this one would wait forever, so say so instead of stranding it.
+    // A survivor waiting on this one would wait forever, so say so instead of stranding it. A
+    // dependent that is itself over is not waiting for anything, and must not block the tidy-up —
+    // cancelling a whole plan and then clearing it is the ordinary case.
     const dependents = [...tasks.values()].filter(
-      (t) => t.id !== taskId && current(t).dependencies.includes(taskId),
+      (t) =>
+        t.id !== taskId
+        && current(t).dependencies.includes(taskId)
+        && !TERMINAL_TASK_STATES.has(t.taskState),
     );
     if (dependents.length > 0) {
       throw conflict(

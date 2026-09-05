@@ -492,6 +492,19 @@ describe('cancel and delete', () => {
     expect(replay(r.store.all()).tasks['t-a']).toBeDefined();
   });
 
+  it('a dependent that is itself over does not block the tidy-up', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    await r.orchestrator.proposeTask(mission_id, { ...sampleContract('t-b'), dependencies: ['t-a'] }, 'human');
+    await r.orchestrator.cancel('t-b');
+    await r.orchestrator.cancel('t-a');
+
+    // Cancelling a whole plan and then clearing it is the ordinary case; nothing is left waiting.
+    await r.orchestrator.deleteTask('t-a');
+
+    expect(replay(r.store.all()).tasks['t-a']).toBeUndefined();
+  });
+
   it('deleting a mission takes its tasks with it', async () => {
     const r = createTestRelay();
     const mission_id = await spawnedTask(r);
@@ -786,7 +799,8 @@ describe('re-propose guard', () => {
     await r.orchestrator.settled();
     expect(r.orchestrator.taskView('t-a')!.task_state).toBe('completed');
     await expect(r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'human'))
-      .rejects.toMatchObject({ status: 409, message: expect.stringMatching(/task t-a is completed; use relay_revise_task/) });
+      // A finished task holds its id; the refusal names the way to free it rather than pointing at revise.
+      .rejects.toMatchObject({ status: 409, message: expect.stringMatching(/task t-a is completed; delete it first/) });
     // Nothing was appended for the refused proposals: still exactly one task_proposed, still version 1.
     expect(r.ofType('task_proposed')).toHaveLength(1);
     expect(r.orchestrator.taskView('t-a')!.contract.version).toBe(1);
@@ -812,5 +826,34 @@ describe('re-propose guard', () => {
     expect(await r.orchestrator.proposeSubtask('t-a', child)).toMatchObject({ status: 'proposed', version: 2 });
     await expect(r.orchestrator.proposeSubtask('t-a', child)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/relay_revise_task/) });
     agrees(r, 't-a-schema');
+  });
+});
+
+describe('reusing a task id after a mission is over', () => {
+  it('a finished task of another mission holds its id, and the refusal says how to free it', async () => {
+    const r = createTestRelay();
+    const first = await spawnedTask(r);
+    await r.orchestrator.cancel('t-a');
+    const second = r.orchestrator.createMission(mission).mission_id;
+
+    // Running the same plan file against a new mission lands exactly here.
+    await expect(r.orchestrator.proposeTask(second, sampleContract('t-a'), 'human'))
+      .rejects.toMatchObject({
+        status: 409,
+        message: expect.stringMatching(new RegExp(`relay cancel ${first}`)),
+      });
+  });
+
+  it('clearing the old mission frees the id for the new one', async () => {
+    const r = createTestRelay();
+    const first = await spawnedTask(r);
+    await r.orchestrator.cancelMission(first);
+    await r.orchestrator.deleteMission(first);
+
+    const second = r.orchestrator.createMission(mission).mission_id;
+    const out = await r.orchestrator.proposeTask(second, sampleContract('t-a'), 'human');
+
+    expect(out.status).toBe('proposed');
+    expect(replay(r.store.all()).tasks['t-a']!.mission_id).toBe(second);
   });
 });
