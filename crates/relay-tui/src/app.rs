@@ -1305,6 +1305,21 @@ impl App {
         }
     }
 
+    /// The stored position, readable without touching the pane map.
+    pub fn pane_scroll_of(&self, pane_id: &str) -> usize {
+        self.pane_scroll.get(pane_id).copied().unwrap_or(0)
+    }
+
+    /// Correct the stored position to what the screen actually honoured, so the UI never reports a
+    /// scroll the pane did not make.
+    pub fn set_pane_scroll(&mut self, pane_id: &str, rows: usize) {
+        if rows == 0 {
+            self.pane_scroll.remove(pane_id);
+        } else {
+            self.pane_scroll.insert(pane_id.to_string(), rows);
+        }
+    }
+
     /// Back to the live edge — what typing into a pane should do, the way a terminal does.
     pub fn scroll_pane_to_bottom(&mut self, pane_id: &str) {
         self.pane_scroll.remove(pane_id);

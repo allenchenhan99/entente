@@ -793,3 +793,43 @@ fn completed_work_is_not_deletable_it_is_the_record_of_what_was_done() {
     let app = app_with_task_state(TaskState::Completed);
     assert_eq!(app.deletable_task(), None);
 }
+
+#[test]
+fn a_pane_with_no_history_reports_no_scroll_however_hard_you_try() {
+    // The bug this pins: the counter used to climb while the screen stayed put, so the title claimed
+    // `↑12` on a pane that had not moved a row.
+    let mut app = app_with_panes();
+    let rect = *app.pane_rects.get("relay:1").unwrap();
+
+    for _ in 0..10 {
+        app.handle_mouse(Mouse::new(MouseKind::ScrollUp, rect.x + 2, rect.y + 2));
+    }
+    let text = String::from_iter(draw_rows(&mut app, 120, 32));
+
+    assert_eq!(
+        app.pane_scroll("relay:1"),
+        0,
+        "an empty pane has nothing to scroll back through"
+    );
+    assert!(
+        !text.contains("PgDn for live"),
+        "and says nothing about it:\n{text}"
+    );
+}
+
+#[test]
+fn a_pane_with_history_scrolls_and_says_how_far() {
+    let mut app = app_with_panes();
+    // Fill the pane past its own height so there is something above the viewport.
+    let pane = app.pane_states.get_mut("relay:1").unwrap();
+    for i in 0..80 {
+        pane.parser.process(format!("line {i}\r\n").as_bytes());
+    }
+    let rect = *app.pane_rects.get("relay:1").unwrap();
+
+    app.handle_mouse(Mouse::new(MouseKind::ScrollUp, rect.x + 2, rect.y + 2));
+    let text = String::from_iter(draw_rows(&mut app, 120, 32));
+
+    assert!(app.pane_scroll("relay:1") > 0, "it really moved");
+    assert!(text.contains("PgDn for live"), "{text}");
+}

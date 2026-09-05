@@ -110,12 +110,24 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let [big, strip] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(thumbs_height)]).areas(inner);
 
-    // The focused pane.
+    // The focused pane. Scroll it before anything is drawn: `set_scrollback` clamps to the rows the
+    // screen actually kept — a full-screen agent owns its own display and has none — so the honoured
+    // value is the only one worth reporting, and the title is built from it.
+    let wanted = app.pane_scroll_of(&focused);
+    let honoured = if let Some(pane) = app.pane_states.get_mut(&focused) {
+        pane.parser.screen_mut().set_scrollback(wanted);
+        let honoured = pane.parser.screen().scrollback();
+        app.set_pane_scroll(&focused, honoured);
+        honoured
+    } else {
+        0
+    };
+
     if let Some(pane) = app.pane_states.get(&focused) {
         let mut title = pane_title(app, pane);
         // Scrolled back is not the live edge, and output arriving below must not be mistaken for what
         // you are reading, so the title says so.
-        let scrolled = app.pane_scroll(&focused);
+        let scrolled = honoured;
         if scrolled > 0 {
             title.push_str(&format!("  [↑{scrolled} · PgDn for live]"));
         } else if app.terminal_input {
@@ -137,11 +149,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
             .insert(focused.clone(), (pane_area.width, pane_area.height));
         // The whole slot, title row included: a click anywhere on a pane means that pane.
         app.pane_rects.insert(focused.clone(), viewport_of(big));
-        // Scrollback is the screen's own: set where the viewport sits, draw, then put it back so the
-        // model is never left holding a view state that belongs to the UI.
-        let back = app.pane_scroll(&focused);
-        let pane = app.pane_states.get_mut(&focused).expect("focused pane");
-        pane.parser.screen_mut().set_scrollback(back);
         let screen = pane.parser.screen();
         let widget = PseudoTerminal::new(screen);
         frame.render_widget(widget, pane_area);
