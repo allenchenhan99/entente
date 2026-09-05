@@ -16,7 +16,7 @@ import type { SpawnOptions } from '../ports.js';
 import { Pane, runtimeOf, KILL_GRACE_MS } from './pane.js';
 import type { ScreenQuery } from './screen.js';
 import { keysToBytes } from './keys.js';
-import { QUIET_MS, lastMeaningfulLine } from './readiness.js';
+import { QUIET_MS, busyLine, lastMeaningfulLine } from './readiness.js';
 
 export interface PromptTimings {
   /** No output for this long = quiet (also the readiness window). */
@@ -245,7 +245,6 @@ export class RelayHost {
       await sleep(POLL_MS);
     }
     pane.marks.readyAt = performance.now();
-    const before = pane.lastLine();
     pane.paste(prompt);
     pane.write('\r');
     pane.marks.promptWrittenAt = performance.now();
@@ -265,12 +264,12 @@ export class RelayHost {
       const t = bottom.trim();
       return (/^[❯›>] /.test(t) || t === '›') && bottom.includes(prefix);
     };
-    // Accepted = the agent is visibly busy, or the screen moved on and the composer is clear.
-    const accepted = () => {
-      const r = pane.readiness();
-      if (!r.ready && r.detail?.startsWith('busy')) return true;
-      return !stillInComposer() && pane.lastLine() !== before;
-    };
+    // Accepted = the agent is visibly busy, or the screen repainted since the write and the composer is clear.
+    // (Not "the last line changed": agent TUIs keep their footer as the last line and render the submitted
+    // message above the composer, so the footer never moves.)
+    const chunksAtWrite = pane.timings().output_chunks ?? 0;
+    const busy = () => busyLine(pane.visibleLines()) !== undefined;
+    const accepted = () => busy() || (!stillInComposer() && (pane.timings().output_chunks ?? 0) > chunksAtWrite);
     // Evaluate acceptance only once the screen has settled: a TUI repaints in several chunks, and between two of
     // them the footer may already have moved while the `[Pasted Content …]` placeholder is not painted yet (seen
     // live with Codex: "accepted" after 1.7 ms, Enter never retried, prompt left in the composer).
@@ -279,7 +278,10 @@ export class RelayHost {
     for (;;) {
       // Two guards: a minimum wait after the write (the agent's first repaint lands within a few ms) and a quiet
       // screen; the verdict is only trusted if no output landed while it was computed.
-      if (Date.now() - writtenAt >= settleMs && pane.quietFor() >= settleMs) {
+      const sinceWrite = Date.now() - writtenAt;
+      // A visibly working agent (spinner, "esc to interrupt") is accepted at once: its repaints never go quiet.
+      if (sinceWrite >= settleMs && busy()) break;
+      if (sinceWrite >= settleMs && pane.quietFor() >= settleMs) {
         const chunksBefore = pane.timings().output_chunks;
         const verdict = accepted();
         if (verdict && pane.timings().output_chunks === chunksBefore) break;

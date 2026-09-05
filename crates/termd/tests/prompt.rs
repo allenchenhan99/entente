@@ -170,6 +170,26 @@ async fn an_echoing_shell_keeps_the_submitted_line_above_its_reply_and_that_is_a
 }
 
 #[tokio::test]
+async fn a_spinner_that_repaints_continuously_after_submit_is_accepted() {
+    let srv = common::start().await;
+    // After Enter the agent repaints a spinner every 50 ms: the screen is never quiet, but it is visibly working.
+    let script = "stty -echo; printf '› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'; read a; \
+                  i=0; while [ $i -lt 100 ]; do i=$((i+1)); printf '\\r• Working (%ss • esc to interrupt)   \\r\\n› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n' \"$i\"; sleep 0.05; done";
+    let t0 = Instant::now();
+    let res = srv.spawn(spawn_body(&srv, script, "hello")).await;
+    assert_eq!(res.status, 201, "{}", res.text);
+    assert!(
+        t0.elapsed() < Duration::from_millis(1300),
+        "{:?}",
+        t0.elapsed()
+    );
+    let id = res.body["pane_id"].as_str().unwrap().to_string();
+    let info = srv.pane(&id).await;
+    assert_eq!(info["timings"]["prompt_retries"], 0, "{}", info["timings"]);
+    srv.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_shell_that_never_prompts_fails_with_502_after_timeout_and_the_pane_stays_open() {
     let srv = common::start().await;
     let t0 = Instant::now();

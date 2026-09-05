@@ -4,7 +4,7 @@
 use crate::keys::{keys_to_bytes, UnknownKey};
 use crate::metrics::{ms_between, HostMetrics, HostMetricsPane, HOST_KIND};
 use crate::pane::{now_iso, Pane, PaneInfo, PaneOptions, PaneSpawnError, KILL_GRACE_MS};
-use crate::readiness::{last_meaningful_line, QUIET_MS};
+use crate::readiness::{busy_line, last_meaningful_line, QUIET_MS};
 use crate::screen::{ScreenQuery, ScreenSource};
 use regex::Regex;
 use serde::Serialize;
@@ -375,7 +375,6 @@ impl Host {
             }
             tokio::time::sleep(poll).await;
         }
-        let before = pane.last_line();
         pane.paste(prompt);
         pane.write(b"\r");
         pane.with_marks(|m| {
@@ -403,14 +402,13 @@ impl Host {
                 }
             }
         };
-        // Accepted = the agent is visibly busy, or the screen moved on and the composer is clear.
-        let accepted = || {
-            let r = pane.readiness();
-            if !r.ready && r.detail.as_deref().is_some_and(|d| d.starts_with("busy")) {
-                return true;
-            }
-            !still_in_composer() && pane.last_line() != before
-        };
+        // Accepted = the agent is visibly busy, or the screen repainted since the write and the composer is
+        // clear. (Not "the last line changed": agent TUIs keep their footer as the last line and render the
+        // submitted message above the composer, so the footer never moves.)
+        let chunks_at_write = pane.output_chunks();
+        let busy = || busy_line(&pane.visible_lines()).is_some();
+        let accepted =
+            || busy() || (!still_in_composer() && pane.output_chunks() > chunks_at_write);
         // Evaluate acceptance only once the screen has settled: a TUI repaints in several chunks, and between
         // two of them the footer may already have moved while the `[Pasted Content …]` placeholder is not
         // painted yet (seen live with Codex: "accepted" after 1.7 ms, Enter never retried).
@@ -420,6 +418,10 @@ impl Host {
             // Two guards: a minimum wait after the write (the agent's first repaint lands within a few ms), and
             // a quiet screen; then the verdict is only trusted if no output landed while it was computed.
             let since_write = written_at.elapsed().as_secs_f64() * 1000.0;
+            // A visibly working agent (spinner, "esc to interrupt") is accepted at once: its repaints never go quiet.
+            if since_write >= settle_ms && busy() {
+                break;
+            }
             if since_write >= settle_ms && pane.quiet_for() >= settle_ms {
                 let chunks_before = pane.output_chunks();
                 let verdict = accepted();

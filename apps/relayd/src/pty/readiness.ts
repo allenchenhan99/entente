@@ -37,6 +37,15 @@ export interface ReadinessInput {
   observedAt?: string;
 }
 
+/**
+ * The "visibly working" line in the tail, if any — independent of whether output is still flowing (a spinner
+ * repaints every few hundred ms, so a quiet-gated readiness never reports it).
+ */
+export const busyLine = (lines: string[]): string | undefined => {
+  const tail = lines.filter((l) => l.trim().length > 0).slice(-TAIL_LINES).filter((l) => !CHROME.test(l));
+  return tail.find((l) => BUSY.test(l));
+};
+
 /** The last non-empty line that is not footer chrome: where an agent TUI's composer sits. */
 export const lastMeaningfulLine = (lines: string[]): string | undefined => {
   for (let i = lines.length - 1; i >= 0; i--) {

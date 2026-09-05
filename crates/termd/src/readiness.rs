@@ -60,6 +60,17 @@ pub struct ReadinessInput<'a> {
     pub observed_at: Option<String>,
 }
 
+/// The "visibly working" line in the tail, if any — independent of whether output is still flowing (a
+/// spinner repaints every few hundred ms, so a quiet-gated readiness never reports it).
+pub fn busy_line(lines: &[String]) -> Option<&str> {
+    let non_empty: Vec<&String> = lines.iter().filter(|l| !l.trim().is_empty()).collect();
+    let tail = &non_empty[non_empty.len().saturating_sub(TAIL_LINES)..];
+    tail.iter()
+        .filter(|l| !CHROME.is_match(l))
+        .find(|l| BUSY.is_match(l))
+        .map(|l| l.as_str())
+}
+
 /// The last non-empty line that is not footer chrome: where an agent TUI's composer sits.
 pub fn last_meaningful_line(lines: &[String]) -> Option<&str> {
     lines

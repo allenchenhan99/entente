@@ -200,6 +200,23 @@ describe('relay host prompt timings', () => {
     expect(host.get(paneId)!.lastLine()).toBe('got:hello there');
   });
 
+  it('a spinner that repaints continuously after submit is accepted (busy beats the quiet gate)', async () => {
+    const { host, dir } = makeHost();
+    const file = path.join(dir, 'agent.js');
+    fs.writeFileSync(file, `
+      let enters = 0; let ticks = 0;
+      process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (d) => { for (const ch of d) if (ch === '\\r') enters++;
+        if (enters === 1) setInterval(() => { ticks++; process.stdout.write('\\r• Working (' + ticks + 's • esc to interrupt)   \\r\\n› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'); }, 50); });
+      setTimeout(() => process.stdout.write('› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'), 100);
+      setTimeout(() => process.exit(0), 20000);
+    `);
+    const t0 = Date.now();
+    const { paneId } = await host.spawn({ name: 'backend', cwd: dir, argv: [process.execPath, file], env: {}, prompt: 'hello' });
+    expect(Date.now() - t0).toBeLessThan(fastTimings.retryMs + 1000);
+    expect(host.get(paneId)!.timings().prompt_retries).toBe(0);
+  });
+
   it('counts the extra Enter presses as prompt_retries and includes them in prompt_accept_ms', async () => {
     const { host, dir } = makeHost();
     const file = path.join(dir, 'agent.js');
