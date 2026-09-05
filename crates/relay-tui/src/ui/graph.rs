@@ -46,6 +46,8 @@ pub struct Disc {
     pub badge: Option<String>,
     /// False when no process is running for this node: drawn as a broken rim, not a solid one.
     pub live: bool,
+    /// True when the work is over and nothing needs you: drawn grey so live work stands out.
+    pub finished: bool,
     /// World units this node owns horizontally.
     pub slot: f64,
     /// Draw this node's label a row lower. Neighbours in a tier are only ~8 columns apart, so
@@ -70,6 +72,23 @@ pub fn is_visible(node: &GraphNode, planner_present: bool) -> bool {
         return false;
     }
     !(node.kind == GraphNodeKind::Verifier && node.status == VisualStatus::Pending)
+}
+
+/// Is this agent's work over, with nothing left for anyone to do?
+///
+/// Finished work recedes so live work draws the eye. `failed` is not finished — it is an outcome you
+/// have to see — and neither is anything waiting on you, whatever its task state says.
+pub fn is_finished(node: &GraphNode) -> bool {
+    if matches!(
+        node.status,
+        VisualStatus::Attention | VisualStatus::Blocked | VisualStatus::Failed
+    ) {
+        return false;
+    }
+    matches!(
+        node.task_state,
+        Some(TaskState::Completed) | Some(TaskState::Canceled)
+    )
 }
 
 /// Is a coding shell actually running for this agent?
@@ -193,6 +212,7 @@ pub fn layout_net(graph: &Graph, unattached: &[GraphNode], planner_present: bool
                 badge: node.badge.clone(),
                 // From the events; `render` refines it with the pane, which is the better witness.
                 live: runtime_is_live(node, None),
+                finished: is_finished(node),
                 slot: slot_width(count),
                 stagger: index % 2 == 1,
             });
@@ -434,7 +454,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                 let Some((a, b)) = edge_ends(&discs, edge) else {
                     continue;
                 };
-                let color = status_color(edge.status);
+                // An edge between finished nodes is finished business as well.
+                let quiet = [&edge.from, &edge.to]
+                    .iter()
+                    .all(|id| discs.iter().any(|d| d.id == **id && d.finished));
+                let color = if quiet {
+                    Color::DarkGray
+                } else {
+                    status_color(edge.status)
+                };
                 match edge.kind {
                     // Evidence and replies are dotted, so an edge's kind survives losing its colour.
                     GraphEdgeKind::Evidence | GraphEdgeKind::Reply => {
@@ -463,7 +491,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
             ctx.layer();
 
             for d in &discs {
-                let color = status_color(d.status);
+                let color = if d.finished {
+                    Color::DarkGray
+                } else {
+                    status_color(d.status)
+                };
                 if d.live {
                     ctx.draw(&Circle {
                         x: d.x,
@@ -517,7 +549,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                 }
             }
             for d in &discs {
-                let color = status_color(d.status);
+                let color = if d.finished {
+                    Color::DarkGray
+                } else {
+                    status_color(d.status)
+                };
                 ctx.print(
                     d.x - per_char / 2.0,
                     d.y,
@@ -798,6 +834,133 @@ mod tests {
         for edge in graph.edges.iter().filter(|e| e.to == "verifier") {
             assert!(edge_ends(&discs, edge).is_none());
         }
+    }
+
+    fn node_in(state: TaskState, status: VisualStatus) -> GraphNode {
+        let mut node = fixture("live-1")
+            .graph
+            .nodes
+            .into_iter()
+            .find(|n| n.kind == GraphNodeKind::Agent)
+            .unwrap();
+        node.task_state = Some(state);
+        node.status = status;
+        node
+    }
+
+    #[test]
+    fn finished_work_recedes_and_unfinished_work_does_not() {
+        assert!(is_finished(&node_in(
+            TaskState::Completed,
+            VisualStatus::Verified
+        )));
+        assert!(is_finished(&node_in(
+            TaskState::Canceled,
+            VisualStatus::Done
+        )));
+
+        assert!(
+            !is_finished(&node_in(TaskState::Executing, VisualStatus::Working)),
+            "still working"
+        );
+        assert!(
+            !is_finished(&node_in(TaskState::Completed, VisualStatus::Attention)),
+            "completed, but something still needs you"
+        );
+        assert!(
+            !is_finished(&node_in(TaskState::Repairing, VisualStatus::Blocked)),
+            "blocked on you"
+        );
+    }
+
+    #[test]
+    fn a_failed_task_is_never_dimmed_away() {
+        assert!(
+            !is_finished(&node_in(TaskState::Failed, VisualStatus::Failed)),
+            "failing is an outcome you have to see, not finished business"
+        );
+    }
+
+    /// The style of the cells a label is drawn in, found by its text in the rendered buffer.
+    fn label_style(app: &mut App, label: &str) -> Option<ratatui::style::Style> {
+        let mut term = terminal(100, 30);
+        term.draw(|frame| crate::ui::draw(frame, app)).unwrap();
+        let buffer = term.backend().buffer().clone();
+        for y in 0..buffer.area.height {
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).map(|c| c.symbol()).unwrap_or(" "))
+                .collect();
+            if let Some(at) = row.find(label) {
+                return buffer.cell((at as u16, y)).map(|c| c.style());
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn a_finished_agent_is_drawn_grey_and_a_working_one_is_not() {
+        let mut app = replay_app("live-1");
+        let mut graph = graph_with_a_sub("live-1");
+        for node in graph.nodes.iter_mut() {
+            if node.id == "t-backend-auth" {
+                node.task_state = Some(TaskState::Completed);
+                node.status = VisualStatus::Verified;
+            }
+            if node.id == "t-frontend-login" {
+                node.task_state = Some(TaskState::Executing);
+                node.status = VisualStatus::Working;
+            }
+        }
+        app.set_graph(graph);
+        // Selection is drawn in the accent colour and beats dimming, as it should; check a node that
+        // is not the selected one.
+        app.select(Some(GraphObjectRef::node("t-frontend-login")));
+
+        let finished = label_style(&mut app, "brain 1").expect("the finished agent is drawn");
+        let working = label_style(&mut app, "sub 1.1").expect("the working agent is drawn");
+
+        assert_eq!(finished.fg, Some(Color::DarkGray), "finished work recedes");
+        assert_ne!(working.fg, Some(Color::DarkGray), "live work does not");
+    }
+
+    #[test]
+    fn selecting_a_finished_agent_still_shows_it_clearly() {
+        let mut app = replay_app("live-1");
+        let mut graph = graph_with_a_sub("live-1");
+        for node in graph.nodes.iter_mut() {
+            if node.id == "t-backend-auth" {
+                node.task_state = Some(TaskState::Completed);
+                node.status = VisualStatus::Verified;
+            }
+        }
+        app.set_graph(graph);
+        app.select(Some(GraphObjectRef::node("t-backend-auth")));
+
+        let style = label_style(&mut app, "brain 1").expect("drawn");
+
+        assert_eq!(
+            style.fg,
+            Some(Color::Cyan),
+            "what you picked is never greyed out from under you"
+        );
+    }
+
+    #[test]
+    fn a_finished_node_keeps_its_label_so_it_can_still_be_identified() {
+        let mut graph = graph_with_a_sub("live-1");
+        for node in graph.nodes.iter_mut() {
+            if node.kind == GraphNodeKind::Agent {
+                node.task_state = Some(TaskState::Completed);
+                node.status = VisualStatus::Verified;
+            }
+        }
+        let discs = layout_net(&graph, &[], true);
+
+        assert!(discs.iter().filter(|d| d.is_agent).all(|d| d.finished));
+        assert!(
+            discs.iter().any(|d| d.label.starts_with("brain")),
+            "grey, but still nameable: a disc you can select must say what it is"
+        );
     }
 
     #[test]
