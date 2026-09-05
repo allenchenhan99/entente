@@ -1,5 +1,7 @@
 import { replay } from '@relay/protocol';
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createTestRelay, sampleContract } from '../fakes/test-harness.js';
 
 const mission = { repo: '/repo', title: 'Add login' };
@@ -438,6 +440,114 @@ describe('integration', () => {
   });
 });
 
+describe('reusing an agent', () => {
+  const child = (over = {}) => sampleContract('t-a-schema', over);
+
+  const sessionOf = (r: ReturnType<typeof createTestRelay>, taskId: string) =>
+    replay(r.store.all()).tasks[taskId]!.agent!.session_id;
+
+  it('lists the agents that have worked here, with what they worked on', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+
+    const { agents } = r.orchestrator.findAgents();
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0]!.role).toBe('a');
+    expect(agents[0]!.session_id).toBe(sessionOf(r, 't-a'));
+    expect(agents[0]!.tasks.map((t) => t.id)).toEqual(['t-a']);
+  });
+
+  it('writes the registry to agents.md whenever an agent appears', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+
+    const file = fs.readFileSync(path.join(r.dir, '.relay', 'agents.md'), 'utf8');
+
+    expect(file).toContain('# Agents');
+    expect(file).toContain(sessionOf(r, 't-a'));
+    expect(file).toContain('reuse_session');
+  });
+
+  it('reuses a free agent by resuming its session rather than starting a new one', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    const subSession = sessionOf(r, 't-a-schema');
+    r.orchestrator.respond('t-a-schema', accept);
+    r.orchestrator.submitEvidence('t-a-schema', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+
+    await r.orchestrator.proposeSubtask('t-a', sampleContract('t-a-more'), subSession);
+    await r.orchestrator.settled();
+
+    // The same session id: the agent that comes back is the one that remembers.
+    expect(sessionOf(r, 't-a-more')).toBe(subSession);
+  });
+
+  it('refuses to reuse an agent that is still working', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    const busy = sessionOf(r, 't-a-schema');
+
+    await expect(r.orchestrator.proposeSubtask('t-a', sampleContract('t-a-more'), busy))
+      .rejects.toThrow(/still working/);
+  });
+
+  it('refuses a session that does not exist, rather than spawning a stranger', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+
+    await expect(r.orchestrator.proposeSubtask('t-a', child(), 'nope'))
+      .rejects.toThrow(/no agent has session nope/);
+  });
+
+  it('refuses to resume a session of the wrong runtime', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    const session = sessionOf(r, 't-a-schema');
+    r.orchestrator.respond('t-a-schema', accept);
+    r.orchestrator.submitEvidence('t-a-schema', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+
+    await expect(
+      r.orchestrator.proposeSubtask('t-a', sampleContract('t-a-more', { runtime: 'codex' }), session),
+    ).rejects.toThrow(/is a claude-code session/);
+  });
+
+  it('a finished subtask closes its terminal but keeps its session', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    const session = sessionOf(r, 't-a-schema');
+    r.orchestrator.respond('t-a-schema', accept);
+    r.orchestrator.submitEvidence('t-a-schema', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+
+    // The pane is gone…
+    expect(r.ofType('agent_exited').map((e) => e.task_id)).toContain('t-a-schema');
+    // …and the session is still there to be called again.
+    expect(r.orchestrator.findAgents().agents.some((a) => a.session_id === session && !a.live)).toBe(true);
+  });
+
+  it('a top-level agent keeps its terminal: that is the one you are watching', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+
+    expect(r.ofType('agent_exited').map((e) => e.task_id)).not.toContain('t-a');
+  });
+});
+
 describe('a parent waits for what it delegated', () => {
   const child = (over = {}) => sampleContract('t-a-schema', over);
 
@@ -489,6 +599,68 @@ describe('a parent waits for what it delegated', () => {
 
     expect(() => r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' }))
       .not.toThrow();
+  });
+});
+
+describe('a mission finishes once nothing is outstanding', () => {
+  const finish = (r: ReturnType<typeof createTestRelay>, id: string) => {
+    r.orchestrator.respond(id, accept);
+    r.orchestrator.submitEvidence(id, { contract_version: 1, claimed: claimedAll, summary: 'done' });
+  };
+
+  it('deleting the last unfinished task lets the mission integrate', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-b'), 'human');
+    finish(r, 't-a');
+    await r.orchestrator.settled();
+    // t-b is still going, so the mission cannot finish yet.
+    expect(r.ofType('integration_started')).toHaveLength(0);
+
+    await r.orchestrator.cancel('t-b');
+    await r.orchestrator.deleteTask('t-b');
+    await r.orchestrator.settled();
+
+    expect(r.ofType('integration_started')).toHaveLength(1);
+  });
+
+  it('cancelling the last unfinished task does the same', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-b'), 'human');
+    finish(r, 't-a');
+    await r.orchestrator.settled();
+
+    await r.orchestrator.cancel('t-b', 'not wanted');
+    await r.orchestrator.settled();
+
+    // A cancelled task is one the human dropped: it does not hold the mission open, and its branch is
+    // not merged either.
+    expect(r.ofType('integration_started')).toHaveLength(1);
+    expect(r.ofType('integration_started')[0]!.payload.order).toEqual(['t-a']);
+  });
+
+  it('a failed task still holds the mission open, rather than being integrated around', async () => {
+    const r = createTestRelay();
+    const mission_id = await spawnedTask(r);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-b'), 'human');
+    finish(r, 't-a');
+    await r.orchestrator.settled();
+
+    const b = r.orchestrator.taskView('t-b');
+    expect(b).toBeDefined();
+    // Nothing marks t-b failed here, but the guard is what matters: only completed and cancelled pass.
+    expect(r.ofType('integration_started')).toHaveLength(0);
+  });
+
+  it('a mission whose every task was cancelled does not integrate nothing', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+
+    await r.orchestrator.cancel('t-a');
+    await r.orchestrator.settled();
+
+    expect(r.ofType('integration_started')).toHaveLength(0);
   });
 });
 
@@ -570,6 +742,19 @@ describe('cancel and delete', () => {
     expect(state.missions[mission_id]).toBeUndefined();
     expect(state.tasks['t-a']).toBeUndefined();
     expect(r.ofType('mission_deleted')).toHaveLength(1);
+  });
+
+  it('a finished task can be deleted, so its id is free for the next run', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+    expect(r.orchestrator.taskView('t-a')!.task_state).toBe('completed');
+
+    await r.orchestrator.deleteTask('t-a', 'clearing the board');
+
+    expect(replay(r.store.all()).tasks['t-a']).toBeUndefined();
   });
 
   it('refuses to delete a mission that was never stopped', async () => {

@@ -53,11 +53,29 @@ pub fn inspector_lines(app: &App, height: usize) -> Vec<Line<'static>> {
     } else {
         app.current_actions().to_vec()
     };
-    let keys = action_keys(&actions);
-    let action_line = if keys.is_empty() {
-        "actions: Esc close".to_string()
-    } else {
-        format!("actions: {keys} · Esc close")
+    // While the editor is open those keys do not run their actions — they type into your answer, so
+    // listing them says `[x] kill task` about a key that puts an `x` in the field. The line has to
+    // say what Enter and Esc do instead, which is also the only place Esc's meaning is ever stated.
+    let action_line = match app.input_mode {
+        Some(crate::app::InputMode::Answer) => {
+            let left = app.pending_questions().len().saturating_sub(1);
+            match left {
+                0 => "Enter sends it · Esc discards what you typed".to_string(),
+                1 => "Enter sends it and moves on · Esc leaves 1 question unanswered".to_string(),
+                n => format!("Enter sends it and moves on · Esc leaves {n} questions unanswered"),
+            }
+        }
+        Some(crate::app::InputMode::Reply | crate::app::InputMode::ReviewFailure) => {
+            "Enter sends it · Esc discards what you typed".to_string()
+        }
+        _ => {
+            let keys = action_keys(&actions);
+            if keys.is_empty() {
+                "actions: Esc close".to_string()
+            } else {
+                format!("actions: {keys} · Esc close")
+            }
+        }
     };
     let prompt = app.prompt_line();
     let reserved = 1 + usize::from(prompt.is_some()) + usize::from(app.error.is_some());
@@ -100,13 +118,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::bordered()
         .border_style(Style::new().fg(Color::Cyan))
         .title(Line::styled(
-            format!(" {id}  describe · story · actions "),
+            // Say where you are when you are not at the left, so a half-read line is never mistaken
+            // for the whole of one.
+            if app.h_scroll > 0 {
+                format!(" {id}  describe · story · actions  →{} ", app.h_scroll)
+            } else {
+                format!(" {id}  describe · story · actions ")
+            },
             Style::new().fg(Color::Cyan).bold(),
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let lines = inspector_lines(app, inner.height as usize);
-    frame.render_widget(Paragraph::new(lines), inner);
+    // A question is longer than this popup is wide; ←/→ move along it rather than cutting it short.
+    frame.render_widget(Paragraph::new(lines).scroll((0, app.h_scroll)), inner);
     if let Some(p) = app.prompt_line() {
         if app.input_mode != Some(crate::app::InputMode::CancelConfirm) {
             let row =
@@ -215,7 +240,10 @@ mod snapshots {
         // The action list is the fixture's actions.json entry for the node.
         let expected = &f.actions["node:t-backend-auth"];
         assert_eq!(app.inspector.actions, *expected);
-        assert!(text.contains("actions: Enter focus · Esc close"), "{text}");
+        assert!(
+            text.contains("actions: [Enter] focus · Esc close"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -239,9 +267,13 @@ mod snapshots {
         }
         let rows = draw_rows(&mut app, 120, 40);
         let text = screen_text(&rows);
-        assert!(text.contains("answer> magic"), "{text}");
+        // The editor names the question its answer goes to, in its own words, and says where it is in
+        // the sequence — this fixture's task asks two, and `a` walks both.
+        assert!(text.contains("1/2 Which auth method?> magic"), "{text}");
         assert!(
-            text.contains("actions: a answer · x cancel · Esc close"),
+            // While the editor is open those keys type into the field rather than running, so the
+            // line says what Enter and Esc do instead of naming keys that would not work.
+            text.contains("Enter sends it and moves on · Esc leaves 1 question unanswered"),
             "{text}"
         );
         app.set_error("POST /tasks/t-backend-auth/clarify failed: 400");

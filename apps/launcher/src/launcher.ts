@@ -350,7 +350,7 @@ function signalExitCode(signal: NodeJS.Signals | null): number {
 
 export function runTui(
   options: RunTuiOptions,
-  deps: Pick<LauncherDependencies, 'spawn' | 'fs' | 'signals'>,
+  deps: Pick<LauncherDependencies, 'spawn' | 'fs' | 'signals' | 'env'>,
 ): Promise<number> {
   let command = process.execPath;
   let args: string[];
@@ -367,7 +367,17 @@ export function runTui(
     args.push('--url', options.url, '--token', options.token);
     if (options.tui === 'rust' && options.repo !== undefined) args.push('--repo', options.repo);
   }
-  const child = deps.spawn(command, args, { detached: false, stdio: 'inherit' });
+  // `t` opens a shell in the mission's repo, which is where `.relay/session.token` lives — so `relay`
+  // works there without `--repo`, provided it is on PATH. It is not, since it lives in this workspace's
+  // node_modules, so hand the TUI the directory to prepend for the shells it opens.
+  const tools = path.join(options.workspaceRoot, 'node_modules', '.bin');
+  const child = deps.spawn(command, args, {
+    detached: false,
+    stdio: 'inherit',
+    // RELAY_TOOLS puts `relay` on a shell pane's PATH; RELAY_HOME is where the tool's own files are,
+    // so `--plan examples/…` finds what ships with it rather than looking under the mission's repo.
+    env: { ...deps.env, RELAY_TOOLS: tools, RELAY_HOME: options.workspaceRoot },
+  });
 
   return new Promise<number>((resolve, reject) => {
     const forwardInt = () => { child.kill('SIGINT'); };

@@ -609,3 +609,40 @@ pub struct EventEnvelope {
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
+
+/// The question id a detail row is about, if it is about one. Rows read `Q2: Link expiry?`, and the
+/// separator has varied, so this accepts the id followed by a colon or a space and nothing else —
+/// a row of prose that happens to start with a word is not a question.
+pub fn question_of(detail: &str) -> Option<&str> {
+    let end = detail
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .unwrap_or(detail.len());
+    let (id, rest) = detail.split_at(end);
+    let looks_like_an_id =
+        id.len() >= 2 && id.starts_with('Q') && id[1..].chars().all(|c| c.is_ascii_digit());
+    if looks_like_an_id && (rest.is_empty() || rest.starts_with(':') || rest.starts_with(' ')) {
+        Some(id)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod question_of_tests {
+    use super::question_of;
+
+    #[test]
+    fn it_reads_the_id_off_a_question_row_however_it_is_punctuated() {
+        assert_eq!(question_of("Q1: Which auth method?"), Some("Q1"));
+        assert_eq!(question_of("Q12 Link expiry?"), Some("Q12"));
+        assert_eq!(question_of("Q3"), Some("Q3"));
+    }
+
+    #[test]
+    fn prose_is_not_a_question_row() {
+        assert_eq!(question_of("AC-3: the login page is readable"), None);
+        assert_eq!(question_of("Queue is full"), None);
+        assert_eq!(question_of("waiting on t-backend-auth"), None);
+        assert_eq!(question_of(""), None);
+    }
+}

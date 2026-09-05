@@ -108,6 +108,9 @@
               "additionalProperties": false
             }
           },
+          "questions_asked_at": {
+            "type": "string"
+          },
           "clarifications": {
             "type": "array",
             "items": {
@@ -1315,6 +1318,12 @@
             "type": "string"
           },
           "completed_at": {
+            "type": "string"
+          },
+          "evidence_submitted_at": {
+            "type": "string"
+          },
+          "escalated_at": {
             "type": "string"
           }
         },

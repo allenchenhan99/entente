@@ -53,6 +53,14 @@ export const TaskView = z.object({
   started_at: z.string().optional(),
   last_seen_at: z.string().optional(),
   completed_at: z.string().optional(),
+  /**
+   * When the criteria now awaiting a human entered that state. Distinct from `last_seen_at`, which is
+   * a liveness heartbeat every progress report resets — a task still working on AC-4 would otherwise
+   * make its pending review of AC-3 look brand new on every ping, however long it had been waiting.
+   */
+  evidence_submitted_at: z.string().optional(),
+  /** When the task escalated or exhausted its budget, so the inbox can say how long ago that was. */
+  escalated_at: z.string().optional(),
 });
 export type TaskView = z.infer<typeof TaskView>;
 
@@ -62,6 +70,8 @@ export const MissionView = z.object({
   task_ids: z.array(z.string()),
   /** Mission-level questions the planner asked the human and that are still unanswered. */
   open_questions: z.array(Question).optional(),
+  /** When the planner last asked, so the inbox can say how long the mission has been stopped here. */
+  questions_asked_at: z.string().optional(),
   /** Mission-level answers given by the human, in order. */
   clarifications: z.array(Clarification).optional(),
   integration: z.object({ branch: z.string(), order: z.array(z.string()), conflict: z.object({ task_id: z.string(), files: z.array(z.string()) }).optional() }).optional(),

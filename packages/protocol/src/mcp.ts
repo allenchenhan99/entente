@@ -18,6 +18,12 @@ export const RECIPIENT_TOOLS = {
   propose_subtask: 'relay_propose_subtask',
   /** Wait until another task (typically a subtask) reaches a terminal state. */
   await_task: 'relay_await_task',
+  /**
+   * Agents that have worked in this repository and can be resumed, with what they worked on. Reusing
+   * one keeps what it learned; spawning fresh throws that away. Also written to
+   * `<relayDir>/agents.md`, so a human can read the same thing.
+   */
+  find_agents: 'relay_find_agents',
 } as const;
 
 export const PLANNER_TOOLS = {
@@ -78,7 +84,15 @@ export const AwaitReplyOutput = z.discriminatedUnion('status', [
   z.object({ status: z.literal('none') }),
 ]);
 
-export const ProposeSubtaskInput = z.object({ contract: TaskContractInput });
+export const ProposeSubtaskInput = z.object({
+  contract: TaskContractInput,
+  /**
+   * Resume this agent instead of starting one that knows nothing. Take it from `relay_find_agents`:
+   * an agent that has already worked where your subtask is going still remembers that code. It must
+   * be free and of the contract's runtime; relayd refuses otherwise rather than quietly spawning fresh.
+   */
+  reuse_session: z.string().optional(),
+});
 export const AwaitTaskInput = z.object({ task_id: z.string(), timeout_s: z.number().int().min(1).max(AWAIT_TIMEOUT_MAX_S).default(30) });
 export const AwaitTaskOutput = z.discriminatedUnion('status', [
   z.object({ status: z.literal('completed'), task_id: z.string(), branch: z.string().optional() }),

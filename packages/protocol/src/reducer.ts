@@ -39,6 +39,8 @@ function newTaskView(contract: TaskContract, ts: string): TaskView {
     escalated: false,
     proposed_at: ts,
     accepted_at: undefined,
+    evidence_submitted_at: undefined,
+    escalated_at: undefined,
     started_at: undefined,
     last_seen_at: undefined,
     completed_at: undefined,
@@ -124,6 +126,7 @@ function taskTransition(task: TaskView, event: Event): TaskPatch | undefined {
         handoff_state: 'evidence_submitted',
         attempt: Math.max(task.attempt, event.payload.submission.attempt),
         last_seen_at: ts,
+        evidence_submitted_at: ts,
       };
     case 'evidence_recorded':
       return { attempts: [...task.attempts, event.payload.record] };
@@ -136,9 +139,9 @@ function taskTransition(task: TaskView, event: Event): TaskPatch | undefined {
     case 'task_completed':
       return { task_state: 'completed', completed_at: ts };
     case 'task_failed_budget':
-      return { task_state: 'failed' };
+      return { task_state: 'failed', escalated_at: task.escalated_at ?? ts };
     case 'task_escalated':
-      return { escalated: true };
+      return { escalated: true, escalated_at: task.escalated_at ?? ts };
     case 'task_canceled':
       return { task_state: 'canceled' };
 
@@ -177,7 +180,7 @@ function missionTransition(mission: MissionView, event: Event): Partial<MissionV
     case 'mission_canceled':
       return { status: 'canceled' };
     case 'mission_clarification_requested':
-      return { open_questions: event.payload.questions };
+      return { open_questions: event.payload.questions, questions_asked_at: event.ts };
     case 'mission_clarification_answered': {
       const answered = new Set(event.payload.answers.map((a) => a.question_id));
       return {

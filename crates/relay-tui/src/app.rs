@@ -30,6 +30,9 @@ const REGIONS: [Region; 4] = [Region::Tree, Region::Graph, Region::Panes, Region
 /// Rows a wheel notch or a page key moves a pane's scrollback.
 const SCROLL_ROWS: i32 = 3;
 const PAGE_ROWS: i32 = 10;
+/// Columns an arrow moves the text panels, and how far right they will go at all.
+const H_SCROLL_COLUMNS: i32 = 8;
+const MAX_H_SCROLL: u16 = 400;
 
 impl Region {
     pub fn title(self) -> &'static str {
@@ -255,8 +258,16 @@ impl Command {
 
     pub fn label(&self) -> String {
         match self {
-            Command::Clarify { task_id, .. } => format!("answer sent to {task_id}"),
-            Command::MissionClarify { mission_id, .. } => format!("answer sent for {mission_id}"),
+            Command::Clarify {
+                task_id,
+                question_id,
+                ..
+            } => format!("{question_id} answered on {task_id}"),
+            Command::MissionClarify {
+                mission_id,
+                question_id,
+                ..
+            } => format!("{question_id} answered on {mission_id}"),
             Command::Review {
                 task_id,
                 criterion_id,
@@ -265,6 +276,27 @@ impl Command {
             } => format!("{criterion_id} marked {status} on {task_id}"),
             Command::Reply { task_id, .. } => format!("reply sent to {task_id}"),
             Command::Cancel { task_id } => format!("cancel requested for {task_id}"),
+        }
+    }
+
+    /// What the command was about, in a form that reads correctly after "did not send". `label` is
+    /// written as a thing that happened, which is exactly wrong for a request that never arrived.
+    ///
+    /// Kept short, and free of the task id: the error it is prefixed to already carries the route,
+    /// and the status line is one row. What the route cannot say is *which question* — and answering
+    /// walks several in a row, so that is the part worth the columns.
+    pub fn subject(&self) -> String {
+        match self {
+            Command::Clarify { question_id, .. } | Command::MissionClarify { question_id, .. } => {
+                format!("your answer to {question_id}")
+            }
+            Command::Review {
+                criterion_id,
+                status,
+                ..
+            } => format!("marking {criterion_id} {status}"),
+            Command::Reply { .. } => "your reply".to_string(),
+            Command::Cancel { .. } => "the cancel".to_string(),
         }
     }
 }
@@ -386,6 +418,23 @@ pub struct App {
     pub input_mode: Option<InputMode>,
     pub input_value: String,
     pending_action: Option<ObjectAction>,
+    /// The questions `a` has still to put to you, the current one first. An item can ask several at
+    /// once but the clarify command carries a single id, so answering is a walk: Enter posts this
+    /// question's answer and moves to the next, Esc leaves the rest open. Answering one and dropping
+    /// the others silently would write your words against a question you were not looking at, into a
+    /// log that is the only state and does not take them back.
+    pending_questions: Vec<String>,
+    /// The questions this walk has already sent. Kept here, not derived from the inbox: the server
+    /// deletes a question the instant it is answered, so a row that has been dealt with would simply
+    /// vanish from under the cursor mid-walk with nothing to show for it.
+    answered_questions: Vec<String>,
+    /// The inbox item the walk is on. Question ids are per-task and every agent starts at `Q1`, so
+    /// two agents asking at once means two items both carrying a `Q1`; without this the prompt shows
+    /// one agent's question while the answer is routed to the other's.
+    answering_item: Option<String>,
+    /// Test seam: what this client believes the time is, in seconds since the epoch. `None` asks the
+    /// system clock. Ages are drawn from it, and a drawn age has to be reproducible in a snapshot.
+    pub now_override: Option<i64>,
     pub help_open: bool,
     pub error: Option<String>,
     pub notice: Option<String>,
@@ -411,6 +460,12 @@ pub struct App {
     pending_pane_close: Option<String>,
     /// Task the user is being asked about before it is deleted.
     pending_task_delete: Option<String>,
+    /// Rows the inbox is scrolled down. Two questions are two rows, so a couple of items outgrow the
+    /// strip, and what does not fit has to be reachable rather than simply gone.
+    pub inbox_scroll: usize,
+    /// Columns the text panels are scrolled right. A question or a blocker is longer than any panel
+    /// is wide, and cutting it off is not the same as having read it.
+    pub h_scroll: u16,
     /// How far each pane is scrolled back, in rows. A pane at 0 is at the live edge; anything else is
     /// history, and stays put while output arrives so it can actually be read.
     pane_scroll: BTreeMap<String, usize>,
@@ -421,11 +476,25 @@ pub struct App {
     pub tick: u64,
 }
 
+/// Cut a string to `width` printed characters, marking that it was cut.
+fn truncate_to(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(width.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
 fn same_task(graph: &Graph, r: &GraphObjectRef, task_id: &str) -> bool {
     graph.task_of(r) == Some(task_id)
 }
 
 impl App {
+    /// How much of a question the prompt will show before the field it shares a line with. Agent
+    /// prose runs to any length; the field has to survive it.
+    const QUESTION_PROMPT_WIDTH: usize = 48;
+
     pub fn new(mode: Mode) -> Self {
         Self::with_urls(mode, &["http://127.0.0.1:7420".to_string()])
     }
@@ -452,6 +521,10 @@ impl App {
             input_mode: None,
             input_value: String::new(),
             pending_action: None,
+            pending_questions: Vec::new(),
+            answered_questions: Vec::new(),
+            answering_item: None,
+            now_override: None,
             help_open: false,
             error: None,
             notice: None,
@@ -468,6 +541,8 @@ impl App {
             graph_drag: None,
             pending_pane_close: None,
             pending_task_delete: None,
+            inbox_scroll: 0,
+            h_scroll: 0,
             pane_scroll: BTreeMap::new(),
             dismissed_panes: std::collections::BTreeSet::new(),
             tick: 0,
@@ -508,11 +583,12 @@ impl App {
                         .map(|e| GraphObjectRef::edge(e.id.clone())),
                 )
                 .collect(),
-            Region::Inbox => self
-                .ws()
-                .graph
-                .inbox
-                .iter()
+            // In the order the strip draws them, not the order the server sent them. The panel sorts
+            // by what is stuck behind each item; j/k walking the raw list would step through the rows
+            // out of order, and Tab into the panel would land on whichever row happened to be first
+            // on the wire rather than the one at the top.
+            Region::Inbox => crate::ui::inbox::ordered_items(self)
+                .into_iter()
                 .map(|i| GraphObjectRef::inbox(i.id.clone()))
                 .collect(),
             Region::Panes => self
@@ -542,6 +618,7 @@ impl App {
         if let Some(seq) = self.ws().graph.seq {
             self.ws_mut().last_seq = self.ws().last_seq.max(seq);
         }
+        self.reconcile_input();
         let mut effects = Vec::new();
         let keep = self
             .selected
@@ -562,6 +639,52 @@ impl App {
             }
         }
         effects
+    }
+
+    /// Bring an open editor back in line with what the server now says, on every refresh.
+    ///
+    /// An editor is a claim about work that still needs doing, and the server can settle that work
+    /// while you are typing — the task gets cancelled, or someone answers the same question from the
+    /// CLI. Two things went wrong when nothing checked. The item could vanish while `input_mode`
+    /// stayed `Some`, and since the editor only draws inside the inspector, the popup went with it:
+    /// no prompt, no cursor, and every key still swallowed into a field you could not see. The app
+    /// looked frozen. And a question answered elsewhere stayed in the queue, so the prompt named a
+    /// question that was no longer being asked and Enter sent a duplicate answer for it.
+    fn reconcile_input(&mut self) {
+        let Some(item_id) = self.answering_item.clone() else {
+            return;
+        };
+        let open: Vec<String> = match self.ws().graph.inbox_item(&item_id) {
+            Some(item) => item
+                .actions
+                .iter()
+                .filter_map(|a| a.target.question_ids.as_ref())
+                .flatten()
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        let before = self.pending_questions.len();
+        self.pending_questions.retain(|q| open.contains(q));
+        if self.pending_questions.is_empty() {
+            let answered = self.answered_questions.len();
+            self.reset_input();
+            self.set_notice(match answered {
+                0 => format!("{item_id} is no longer waiting on you · nothing was sent"),
+                1 => format!("{item_id} is settled · your 1 answer was sent"),
+                n => format!("{item_id} is settled · your {n} answers were sent"),
+            });
+        } else if self.pending_questions.len() < before {
+            self.set_notice(format!(
+                "{} of these questions {} answered elsewhere",
+                before - self.pending_questions.len(),
+                if before - self.pending_questions.len() == 1 {
+                    "was"
+                } else {
+                    "were"
+                }
+            ));
+        }
     }
 
     pub fn set_state(&mut self, state: State) {
@@ -756,31 +879,145 @@ impl App {
     }
 
     /// The Ink footer: `a answer · r reply · p pass · f fail · x cancel` for the current actions.
+    /// The keys of the selection's actions, in the same words and the same shape the inbox uses. One
+    /// vocabulary: a key that reads `[x] kill task` in the strip must not read `x cancel` here.
     pub fn action_hints(&self) -> String {
-        let mut parts = Vec::new();
-        for action in self.current_actions() {
-            let label = match action.kind {
-                ActionKind::Clarify | ActionKind::MissionClarify => "answer",
-                ActionKind::Reply => "reply",
-                ActionKind::Review if action.key == "p" => "pass",
-                ActionKind::Review => "fail",
-                ActionKind::Cancel => "cancel",
-                ActionKind::Focus => "focus",
-                ActionKind::Inspect => continue,
-            };
-            let key = if action.kind == ActionKind::Focus {
-                "f".to_string()
-            } else {
-                action.key.clone()
-            };
-            parts.push(format!("{key} {label}"));
+        crate::ui::inbox::action_keys(self.current_actions())
+    }
+
+    /// The wording of a question, taken from the one item that asked it. A detail row reads
+    /// `Q2: Link expiry?` — the id, then the question — so the id is a prefix to strip.
+    ///
+    /// Scoped to the item on purpose. Question ids are authored per task and everyone starts at
+    /// `Q1`, so searching the whole inbox would show you one agent's question while sending your
+    /// answer to another agent's — a wrong answer that looks entirely right.
+    fn question_text(&self, id: &str) -> Option<String> {
+        let item_id = self.answering_item.as_deref()?;
+        self.ws()
+            .graph
+            .inbox_item(item_id)?
+            .detail
+            .iter()
+            .find(|d| crate::model::question_of(d) == Some(id))
+            .map(|d| d[id.len()..].trim_start_matches([':', ' ']).to_string())
+    }
+
+    /// The questions still to be put, if `a` is walking some. The inbox marks its detail rows from
+    /// this, so you can see what you have already answered without leaving the strip.
+    pub fn pending_questions(&self) -> &[String] {
+        if self.input_mode == Some(InputMode::Answer) {
+            &self.pending_questions
+        } else {
+            &[]
         }
-        parts.join(" · ")
+    }
+
+    /// The questions this walk has already sent.
+    pub fn answered_questions(&self) -> &[String] {
+        if self.input_mode == Some(InputMode::Answer) {
+            &self.answered_questions
+        } else {
+            &[]
+        }
+    }
+
+    /// The inbox item `a` is walking, if any.
+    pub fn answering_item(&self) -> Option<&str> {
+        if self.input_mode == Some(InputMode::Answer) {
+            self.answering_item.as_deref()
+        } else {
+            None
+        }
+    }
+
+    /// What the selection points at in the network.
+    ///
+    /// An inbox item is a pointer, not a place: it carries the graph object it is about. Panels that
+    /// only know how to highlight a node or an edge went blank while you walked the inbox — the one
+    /// panel that resolved through the item was the pane grid — so walking the list told you what
+    /// needed you and nothing about where it lived.
+    pub fn highlighted(&self) -> Option<GraphObjectRef> {
+        let r = self.selected.as_ref()?;
+        match r.kind {
+            RefKind::Inbox => self
+                .ws()
+                .graph
+                .inbox_item(&r.id)
+                .map(|i| i.reference.clone()),
+            _ => Some(r.clone()),
+        }
+    }
+
+    /// Does the selection point at this node — directly, or through the task it is about?
+    pub fn highlights_node(&self, node: &GraphNode) -> bool {
+        let Some(r) = self.selected.as_ref() else {
+            return false;
+        };
+        if r.kind == RefKind::Node && r.id == node.id {
+            return true;
+        }
+        match node.task_id.as_deref() {
+            Some(task) => same_task(&self.ws().graph, r, task),
+            None => false,
+        }
+    }
+
+    /// Does the selection point at this edge?
+    pub fn highlights_edge(&self, edge_id: &str) -> bool {
+        matches!(self.highlighted(), Some(r) if r.kind == RefKind::Edge && r.id == edge_id)
+    }
+
+    /// This client's idea of now, in seconds since the epoch.
+    pub fn now_seconds(&self) -> i64 {
+        self.now_override.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0)
+        })
+    }
+
+    /// How long an inbox item has been waiting on a human, in seconds. `None` when the server sent no
+    /// `since` — an item with no age is not an item with age zero, and must not sort as one.
+    pub fn inbox_age(&self, item: &InboxItem) -> Option<i64> {
+        let since = item.since.as_deref().filter(|s| !s.is_empty())?;
+        Some(self.now_seconds() - crate::clock::parse_rfc3339(since)?)
     }
 
     pub fn prompt_line(&self) -> Option<String> {
         match self.input_mode? {
-            InputMode::Answer => Some(format!("answer> {}", self.input_value)),
+            // Which question, and how many are left. `a` answers one at a time — the command carries a
+            // single question_id — so an editor that just said `answer>` sent your words to the first
+            // of them and told you nothing about it.
+            InputMode::Answer => {
+                let label = match self.pending_questions.first() {
+                    // The question itself, not its id: `Q2` names a row you would have to go and read
+                    // when the whole point of the prompt is that you do not have to.
+                    Some(id) => {
+                        let done = self.answered_questions.len() + 1;
+                        // Counted from what is left, not from what `a` started with, so a question
+                        // answered elsewhere shrinks the total instead of shifting the numbering.
+                        let total = self.answered_questions.len() + self.pending_questions.len();
+                        // Agent prose of any length, and the editor shares one line with it: an
+                        // unbounded question pushed the field past the right edge and you typed blind.
+                        let text = match self.question_text(id) {
+                            Some(text) => truncate_to(&text, Self::QUESTION_PROMPT_WIDTH),
+                            // The id alone when nothing spelled the question out, and a warning when
+                            // the item that did has stopped listing it — those are different, and
+                            // only one of them means your answer is about to go somewhere stale.
+                            None if self.answering_item.is_none() => id.clone(),
+                            None => format!("{id} (no longer listed)"),
+                        };
+                        if total > 1 {
+                            format!("{done}/{total} {text}")
+                        } else {
+                            text
+                        }
+                    }
+                    None => "answer".to_string(),
+                };
+                Some(format!("{label}> {}", self.input_value))
+            }
             InputMode::Reply => Some(format!("reply> {}", self.input_value)),
             InputMode::ReviewFailure => Some(format!("observed failure> {}", self.input_value)),
             InputMode::CancelConfirm => Some("cancel task? y/N".to_string()),
@@ -818,6 +1055,7 @@ impl App {
         }
         self.selected = reference.clone();
         self.actions.clear();
+        self.h_scroll = 0;
         let mut effects = match &reference {
             Some(r) if r.kind != RefKind::Inbox => vec![Effect::FetchActions(r.clone())],
             _ => Vec::new(),
@@ -935,6 +1173,9 @@ impl App {
         self.input_mode = None;
         self.input_value.clear();
         self.pending_action = None;
+        self.pending_questions.clear();
+        self.answered_questions.clear();
+        self.answering_item = None;
         self.pending_pane_close = None;
         self.pending_task_delete = None;
     }
@@ -942,6 +1183,29 @@ impl App {
     fn begin_input(&mut self, action: ObjectAction, mode: InputMode) -> Vec<Effect> {
         self.input_value.clear();
         self.input_mode = Some(mode);
+        self.pending_questions = if mode == InputMode::Answer {
+            action.target.question_ids.clone().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        self.answered_questions.clear();
+        // The inbox item the walk is on, however you reached it: `a` works from a graph node too, and
+        // the item is what carries the question wording and what a refresh has to be checked against.
+        self.answering_item = if mode == InputMode::Answer {
+            match &self.selected {
+                Some(r) if r.kind == RefKind::Inbox => Some(r.id.clone()),
+                _ => action.target.task_id.as_deref().and_then(|task| {
+                    self.ws()
+                        .graph
+                        .inbox
+                        .iter()
+                        .find(|i| i.task_id.as_deref() == Some(task) && !i.detail.is_empty())
+                        .map(|i| i.id.clone())
+                }),
+            }
+        } else {
+            None
+        };
         self.pending_action = Some(action);
         self.error = None;
         // The inline editor lives in the inspector, like the Ink overlay tabs.
@@ -1078,9 +1342,28 @@ impl App {
                     if value.is_empty() {
                         return Vec::new();
                     }
-                    let command = submit_command(&action, mode, value);
+                    let question = self.pending_questions.first().cloned();
+                    let Some(command) = submit_command(&action, mode, question.clone(), value)
+                    else {
+                        // Nothing could be built from this action, so nothing was sent. Saying so
+                        // beats closing the editor and dropping what you typed in silence.
+                        self.set_error("nothing to send: this action has no question to answer");
+                        return Vec::new();
+                    };
+                    // More questions on this item means the editor stays open on the next one: the
+                    // work is "answer what backend asked", not "answer one of the things it asked".
+                    if mode == InputMode::Answer && self.pending_questions.len() > 1 {
+                        if let Some(id) = question {
+                            self.answered_questions.push(id);
+                        }
+                        self.pending_questions.remove(0);
+                        self.input_value.clear();
+                        // The error is not cleared here: a POST that failed on the previous question
+                        // is the one thing you need to still be able to read on this one.
+                        return vec![Effect::Post(command)];
+                    }
                     self.reset_input();
-                    return command.map(|c| vec![Effect::Post(c)]).unwrap_or_default();
+                    return vec![Effect::Post(command)];
                 }
                 KeyCode::Backspace | KeyCode::Delete => {
                     self.input_value.pop();
@@ -1117,6 +1400,15 @@ impl App {
                             action.target.criterion_id.clone(),
                         ) {
                             self.error = None;
+                            // `p` fires straight away while `f` stops for the observed failure, so
+                            // the direction that puts an unverified pass into the evidence log was
+                            // the unguarded one. It says what it just did instead of asking first:
+                            // there is no undo to offer, because reversing it means posting a
+                            // failure, and a failure nobody observed is exactly the self-report this
+                            // whole project refuses. `f` is the correction, and it is a real one.
+                            self.set_notice(format!(
+                                "{criterion_id} marked passed on {task_id} · f records a failure if that was wrong"
+                            ));
                             return vec![Effect::Post(Command::Review {
                                 task_id,
                                 criterion_id,
@@ -1214,6 +1506,15 @@ impl App {
                 Vec::new()
             }
             (KeyCode::Tab, _) | (KeyCode::BackTab, _) => self.cycle_region(),
+            // While you are reading, the arrows move the text; the graph gets them the rest of the time.
+            (KeyCode::Left, _) if self.inspector_open => {
+                self.scroll_horizontally(-H_SCROLL_COLUMNS);
+                Vec::new()
+            }
+            (KeyCode::Right, _) if self.inspector_open => {
+                self.scroll_horizontally(H_SCROLL_COLUMNS);
+                Vec::new()
+            }
             // In the graph the arrows pan the network; j/k still walk the objects.
             (KeyCode::Left, _) if self.region == Region::Graph => {
                 self.graph_view.pan_by(-8.0, 0.0);
@@ -1383,6 +1684,16 @@ impl App {
                     None => Vec::new(),
                 }
             }
+            MouseKind::ScrollUp if region == Region::Inbox => {
+                self.region = region;
+                self.scroll_inbox(-1);
+                Vec::new()
+            }
+            MouseKind::ScrollDown if region == Region::Inbox => {
+                self.region = region;
+                self.scroll_inbox(1);
+                Vec::new()
+            }
             MouseKind::ScrollUp => {
                 self.region = region;
                 self.move_selection(-1)
@@ -1492,6 +1803,35 @@ impl App {
     /// The stored position, readable without touching the pane map.
     pub fn pane_scroll_of(&self, pane_id: &str) -> usize {
         self.pane_scroll.get(pane_id).copied().unwrap_or(0)
+    }
+
+    /// Scroll the inbox. The end stop is the last row, so the panel can always show something.
+    pub fn scroll_inbox(&mut self, rows: i32) {
+        let last = crate::ui::inbox::all_inbox_rows(self, self.inbox_viewport.width.max(80))
+            .len()
+            .saturating_sub(1);
+        let next = (self.inbox_scroll as i32 + rows).clamp(0, last as i32);
+        self.inbox_scroll = next as usize;
+    }
+
+    /// Bring the selected item into view, so moving the selection is never a jump into nothing.
+    pub fn reveal_selected_inbox(&mut self, height: usize, width: u16) {
+        let Some(row) = crate::ui::inbox::selected_row(self, width) else {
+            return;
+        };
+        let budget = height.max(1);
+        if row < self.inbox_scroll {
+            self.inbox_scroll = row;
+        } else if row >= self.inbox_scroll + budget {
+            self.inbox_scroll = row + 1 - budget;
+        }
+    }
+
+    /// Scroll the text panels sideways. Nothing knows how long the longest line is until it is drawn,
+    /// so the limit is generous and the panels simply show nothing past their end.
+    pub fn scroll_horizontally(&mut self, columns: i32) {
+        let next = (self.h_scroll as i32 + columns).clamp(0, MAX_H_SCROLL as i32);
+        self.h_scroll = next as u16;
     }
 
     /// Correct the stored position to what the screen actually honoured, so the UI never reports a
@@ -1659,12 +1999,14 @@ impl App {
     }
 }
 
-fn submit_command(action: &ObjectAction, mode: InputMode, value: String) -> Option<Command> {
-    let question_id = action
-        .target
-        .question_ids
-        .as_ref()
-        .and_then(|q| q.first().cloned());
+/// The POST one Enter makes. `question_id` is the question the editor was on, passed in rather than
+/// re-derived, so the answer lands against what the prompt said it would.
+fn submit_command(
+    action: &ObjectAction,
+    mode: InputMode,
+    question_id: Option<String>,
+    value: String,
+) -> Option<Command> {
     match (action.kind, mode) {
         (ActionKind::Clarify, InputMode::Answer) => Some(Command::Clarify {
             task_id: action.target.task_id.clone()?,

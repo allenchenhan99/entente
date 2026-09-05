@@ -213,15 +213,22 @@ pub const KEY_HELP: &[(&str, &str)] = &[
         "i",
         "inspect · in the pane grid: type into the focused terminal (Esc leaves)",
     ),
-    ("a / c", "answer the selected question (clarify)"),
+    (
+        "a / c",
+        "answer the selected question · Enter sends it and moves to the next, Esc leaves the rest open",
+    ),
     ("r", "reply to a blocked agent"),
     ("p / y", "mark the pending human_review criterion passed"),
     (
         "f / n",
         "mark it failed (asks for the observed failure); f otherwise focuses the pane",
     ),
-    ("x", "cancel the task (asks y/N)"),
-    ("↑/↓/←/→", "in the graph: pan the network"),
+    ("x", "kill the selected task (asks y/N) — the row is not dismissed, the task is ended"),
+    (
+        "←/→",
+        "in the inspector: scroll along a long line · in the graph: pan",
+    ),
+    ("↑/↓", "in the graph: pan the network"),
     ("+ / -", "in the graph: zoom · 0 refits"),
     (
         "click",

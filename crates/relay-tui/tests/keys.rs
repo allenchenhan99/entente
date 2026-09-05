@@ -147,7 +147,12 @@ fn keys_a_or_c_answers_a_question_with_the_ink_clarify_body() {
     keys(&mut app, "magic link");
     app.handle_key(Key::BACKSPACE);
     keys(&mut app, "ks");
-    assert_eq!(app.prompt_line().as_deref(), Some("answer> magic links"));
+    // The editor names the question the answer goes to, in the question's own words, and where it is
+    // in the sequence; this task asks two.
+    assert_eq!(
+        app.prompt_line().as_deref(),
+        Some("1/2 Which auth method?> magic links")
+    );
     let effects = app.handle_key(Key::ENTER);
     let expected = Command::Clarify {
         task_id: "t-backend-auth".into(),
@@ -160,6 +165,17 @@ fn keys_a_or_c_answers_a_question_with_the_ink_clarify_body() {
         expected.body(),
         serde_json::json!({ "answers": [{ "question_id": "Q1", "answer": "magic links" }] })
     );
+    // Enter did not close the editor: the item asked two questions and one is still open. Answering
+    // Q1 and silently dropping Q2 was the old behaviour, and it left the human believing they had
+    // answered what was asked.
+    assert_eq!(app.input_mode, Some(InputMode::Answer));
+    assert_eq!(
+        app.prompt_line().as_deref(),
+        Some("2/2 Link expiry?> "),
+        "the editor moved on to the next question, empty"
+    );
+    let effects = app.handle_key(Key::ESC);
+    assert!(effects.is_empty(), "Esc leaves Q2 open rather than sending");
     assert_eq!(app.input_mode, None);
 
     // `c` is the contract's alias for the same action.
