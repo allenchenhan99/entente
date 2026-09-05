@@ -217,6 +217,25 @@ describe('relay host prompt timings', () => {
     expect(host.get(paneId)!.timings().prompt_retries).toBe(0);
   });
 
+  it('the pasted text is shown raw first and collapses into the placeholder later: still needs the Enter retry', async () => {
+    const { host, dir } = makeHost();
+    const capture = path.join(dir, 'capture.json');
+    const file = path.join(dir, 'agent.js');
+    fs.writeFileSync(file, `
+      const fs = require('fs'); let enters = 0;
+      process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (d) => { for (const ch of d) if (ch === '\\r') enters++; fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ enters }));
+        if (enters === 1) { process.stdout.write('\\r\\n› line one of the prompt\\r\\n  line two of the prompt\\r\\n  gpt-5.6-sol default · ~/x\\r\\n');
+          setTimeout(() => process.stdout.write('\\r\\n› [Pasted Content 40 chars]\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'), 150); }
+        if (enters >= 2) process.stdout.write('\\r\\n• Working (1s • esc to interrupt)\\r\\n'); });
+      setTimeout(() => process.stdout.write('› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'), 100);
+      setTimeout(() => process.exit(0), 20000);
+    `);
+    const { paneId } = await host.spawn({ name: 'backend', cwd: dir, argv: [process.execPath, file], env: {}, prompt: 'line one of the prompt\nline two of the prompt' });
+    expect(JSON.parse(fs.readFileSync(capture, 'utf8')).enters).toBe(2);
+    expect(host.get(paneId)!.timings().prompt_retries).toBe(1);
+  });
+
   it('counts the extra Enter presses as prompt_retries and includes them in prompt_accept_ms', async () => {
     const { host, dir } = makeHost();
     const file = path.join(dir, 'agent.js');

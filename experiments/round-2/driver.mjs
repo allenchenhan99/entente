@@ -27,7 +27,9 @@ if (!caseId || !['native', 'entente'].includes(arm ?? '')) {
 }
 const opt = (name, def) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : def; };
 const runNo = Number(opt('run', '1'));
-const model = opt('model', 'gpt-6-astra');
+const runtime = opt('runtime', 'codex'); // codex | claude-code
+if (!['codex', 'claude-code'].includes(runtime)) { console.error('--runtime must be codex or claude-code'); process.exit(2); }
+const model = opt('model', runtime === 'codex' ? 'gpt-6-astra' : 'default'); // claude: 'default' = the user's configured model
 const timeoutS = Number(opt('timeout-s', '600'));
 const outRoot = opt('out', '/tmp/entente-r2');
 const caseDir = path.join(ROOT, 'experiments', 'round-2', 'cases', caseId);
@@ -36,25 +38,30 @@ const answers = JSON.parse(fs.readFileSync(path.join(caseDir, 'answers.json'), '
 const decision = opt('decision', answers.decision_values ? answers.decision_values[Math.floor(Math.random() * answers.decision_values.length)] : undefined);
 const stamp = new Date().toISOString().slice(0, 10);
 const out = path.join(outRoot, stamp, `${caseId}-${arm}-${runNo}`);
-fs.rmSync(out, { recursive: true, force: true });
-fs.mkdirSync(out, { recursive: true });
+const verifyOnly = args.includes('--verify-only');
+if (!verifyOnly) {
+  fs.rmSync(out, { recursive: true, force: true });
+  fs.mkdirSync(out, { recursive: true });
+}
 const repo = path.join(out, 'repo');
 const log = (line) => { const s = `${new Date().toISOString().slice(11, 19)} ${line}`; console.log(s); fs.appendFileSync(path.join(out, 'driver.log'), `${s}\n`); };
-const record = { case: caseId, arm, run: runNo, model, decision, timeout_s: timeoutS, out, started_at: new Date().toISOString() };
+const record = verifyOnly
+  ? JSON.parse(fs.readFileSync(path.join(out, 'run.json'), 'utf8'))
+  : { case: caseId, arm, run: runNo, runtime, model, decision, timeout_s: timeoutS, out, started_at: new Date().toISOString() };
 const save = () => fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(record, null, 2));
 
 // ---------- repo ----------
-execFileSync('bash', [path.join(ROOT, 'demo-repo', 'scripts', 'init-demo.sh'), '--force', repo], { stdio: 'ignore' });
-execFileSync('cp', ['-R', path.join(ROOT, 'demo-repo', 'node_modules'), path.join(repo, 'node_modules')]);
-for (const [rel, src] of Object.entries(spec.repo_docs ?? {})) {
+if (!verifyOnly) execFileSync('bash', [path.join(ROOT, 'demo-repo', 'scripts', 'init-demo.sh'), '--force', repo], { stdio: 'ignore' });
+if (!verifyOnly) execFileSync('cp', ['-R', path.join(ROOT, 'demo-repo', 'node_modules'), path.join(repo, 'node_modules')]);
+for (const [rel, src] of Object.entries(verifyOnly ? {} : (spec.repo_docs ?? {}))) {
   fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
   fs.copyFileSync(path.join(caseDir, src), path.join(repo, rel));
 }
-if (spec.repo_docs) {
+if (spec.repo_docs && !verifyOnly) {
   execFileSync('git', ['add', '-A'], { cwd: repo });
   execFileSync('git', ['-c', 'user.email=pilot@example.com', '-c', 'user.name=pilot', 'commit', '-q', '-m', 'pilot: task and history'], { cwd: repo });
 }
-record.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+if (!verifyOnly) record.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
 save();
 log(`repo ${repo} @ ${record.base.slice(0, 7)} decision=${decision ?? '-'}`);
 
@@ -77,6 +84,7 @@ function answerFor(text) {
 async function runNative() {
   const prompt = `${task}\n\n## Conversation history so far\n\n${history}\n\nYou are working alone in a non-interactive session: nobody can answer questions. If a requirement is undecided in the history, choose the most reasonable option, state the assumption in your final message, and implement it.\n`;
   fs.writeFileSync(path.join(out, 'prompt.md'), prompt);
+  if (runtime === 'claude-code') return runNativeClaude(prompt);
   const events = path.join(out, 'codex-events.jsonl');
   const child = spawn('gtimeout', ['--foreground', '--signal=TERM', '--kill-after=5s', `${timeoutS}s`, 'codex', 'exec', '-C', repo, '-s', 'workspace-write', '--skip-git-repo-check', '-m', model, '-c', 'model_reasoning_effort="high"', '-c', 'features.apps=false', '-c', 'features.browser_use=false', '-c', 'features.computer_use=false', '--json', '-o', path.join(out, 'last-message.md'), '-'], { cwd: repo, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdin.end(prompt);
@@ -95,6 +103,36 @@ async function runNative() {
   log(`native exit=${code} commands=${record.commands} usage=${JSON.stringify(record.usage)}`);
 }
 
+async function runNativeClaude(prompt) {
+  // Same trust pre-step relayd's runtime performs, so a fresh directory does not stop on the trust dialog.
+  try {
+    const cfgPath = path.join(os.homedir(), '.claude.json');
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    cfg.projects = cfg.projects ?? {};
+    cfg.projects[repo] = { allowedTools: [], ...(cfg.projects[repo] ?? {}), hasTrustDialogAccepted: true };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+  } catch {}
+  const outFile = path.join(out, 'claude-result.json');
+  const child = spawn('gtimeout', ['--foreground', '--signal=TERM', '--kill-after=5s', `${timeoutS}s`, 'claude', '-p', '--dangerously-skip-permissions', '--output-format', 'json', ...(model === 'default' ? [] : ['--model', model])], { cwd: repo, stdio: ['pipe', 'pipe', 'pipe'] });
+  child.stdin.end(prompt);
+  const chunks = [];
+  child.stdout.on('data', (d) => chunks.push(d));
+  child.stderr.pipe(fs.createWriteStream(path.join(out, 'claude-stderr.log')));
+  const code = await new Promise((resolve) => child.on('exit', (c, s) => resolve(c ?? (s === 'SIGKILL' ? 137 : 124))));
+  record.exit_code = code;
+  record.timed_out = code === 124 || code === 137;
+  const raw = Buffer.concat(chunks).toString('utf8');
+  fs.writeFileSync(outFile, raw);
+  try {
+    const res = JSON.parse(raw);
+    const u = res.usage ?? {};
+    record.usage = { input_tokens: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), cached_input_tokens: u.cache_read_input_tokens ?? 0, output_tokens: u.output_tokens ?? 0, cost_usd: res.total_cost_usd ?? null, turns: res.num_turns ?? null };
+    fs.writeFileSync(path.join(out, 'last-message.md'), String(res.result ?? ''));
+  } catch { record.usage = null; }
+  record.candidate = repo;
+  log(`native(claude) exit=${code} usage=${JSON.stringify(record.usage)}`);
+}
+
 // ---------- entente ----------
 async function freePort() { return new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); }); }
 
@@ -102,7 +140,7 @@ async function runEntente() {
   const port = await freePort();
   const state = path.join(out, 'state');
   fs.mkdirSync(state, { recursive: true });
-  const env = { ...process.env, RELAY_HOST: 'relayterm', RELAY_REPO: repo, RELAY_PORT: String(port), RELAY_DIR: state, RELAY_CODEX_MODEL: model, RELAY_TERMD: path.join(ROOT, 'target', 'debug', 'termd'), RELAY_RUN_ID: `run-${caseId}-${runNo}` };
+  const env = { ...process.env, RELAY_HOST: 'relayterm', RELAY_REPO: repo, RELAY_PORT: String(port), RELAY_DIR: state, RELAY_TERMD: path.join(ROOT, 'target', 'debug', 'termd'), RELAY_RUN_ID: `run-${caseId}-${runNo}`, RELAY_ACCEPT_CLAUDE_BYPASS: '1', ...(runtime === 'codex' ? { RELAY_CODEX_MODEL: model } : model === 'default' ? {} : { RELAY_CLAUDE_MODEL: model }) };
   const relayd = spawn(process.execPath, [path.join(ROOT, 'apps', 'relayd', 'dist', 'index.js')], { env, stdio: ['ignore', fs.openSync(path.join(out, 'relayd.log'), 'a'), fs.openSync(path.join(out, 'relayd.log'), 'a')] });
   const url = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 100; i++) { try { const r = await fetch(`${url}/health`); if (r.ok) break; } catch {} await sleep(200); }
@@ -116,13 +154,15 @@ async function runEntente() {
     const successDefinition = spec.history_via === 'mission' ? `${task}\n\n## Conversation history so far\n\n${history}` : task;
     const created = await (await fetch(`${url}/missions`, { method: 'POST', headers, body: JSON.stringify({ repo, title: spec.mission_title ?? `${caseId} round-2 pilot`, success_definition: successDefinition }) })).json();
     record.mission_id = created.mission_id;
-    const spawned = await (await fetch(`${url}/missions/${record.mission_id}/planner`, { method: 'POST', headers, body: JSON.stringify({ runtime: spec.planner }) })).json();
+    const spawned = await (await fetch(`${url}/missions/${record.mission_id}/planner`, { method: 'POST', headers, body: JSON.stringify({ runtime }) })).json();
     record.planner_pane = spawned.pane_id;
     record.task_ids = [];
-    record.planner = spec.planner;
+    record.planner = runtime;
     planned = record.mission_id;
   } else {
-    const plan = path.join(caseDir, 'plan.yaml');
+    // the case's plan names codex; the runtime under test is substituted so both arms use the same agent
+    const plan = path.join(out, 'plan.yaml');
+    fs.writeFileSync(plan, fs.readFileSync(path.join(caseDir, 'plan.yaml'), 'utf8').replace(/runtime: codex/g, `runtime: ${runtime}`));
     planned = cli('up', `${caseId} round-2 pilot`, '--plan', plan, '--repo', repo);
     record.mission_id = planned.trim().split('\n')[0];
     record.task_ids = parseYaml(fs.readFileSync(plan, 'utf8')).tasks.map((t) => t.id);
@@ -217,14 +257,14 @@ function verify() {
 
 const t0 = Date.now();
 try {
-  if (args.includes('--skip-agent')) { record.candidate = repo; record.skipped_agent = true; log('agent skipped (oracle RED check)'); }
+  if (verifyOnly) { log('verify-only: re-running hidden verification on the recorded candidate'); }
+  else if (args.includes('--skip-agent')) { record.candidate = repo; record.skipped_agent = true; log('agent skipped (oracle RED check)'); }
   else if (arm === 'native') await runNative(); else await runEntente();
 } catch (err) {
   record.error = String(err?.stack ?? err);
   log(`ERROR ${record.error.slice(0, 300)}`);
 }
-record.elapsed_ms = Date.now() - t0;
-record.ended_at = new Date().toISOString();
+if (!verifyOnly) { record.elapsed_ms = Date.now() - t0; record.ended_at = new Date().toISOString(); }
 save();
 try { verify(); } catch (err) { record.verification = { error: String(err?.stack ?? err) }; record.artifact_success = false; }
 save();

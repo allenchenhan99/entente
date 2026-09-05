@@ -275,6 +275,10 @@ export class RelayHost {
     // live with Codex: "accepted" after 1.7 ms, Enter never retried, prompt left in the composer).
     const settleMs = Math.min(quietMs, 300);
     const writtenAt = Date.now();
+    // The non-busy verdict must hold twice, `settleMs` apart: Codex first shows the pasted text itself in the
+    // composer (no composer marker on the bottom line, so it looks accepted) and only then collapses it into the
+    // `[Pasted Content …]` placeholder, which needs the Enter retry.
+    let firstOkAt: number | undefined;
     for (;;) {
       // Two guards: a minimum wait after the write (the agent's first repaint lands within a few ms) and a quiet
       // screen; the verdict is only trusted if no output landed while it was computed.
@@ -284,7 +288,12 @@ export class RelayHost {
       if (sinceWrite >= settleMs && pane.quietFor() >= settleMs) {
         const chunksBefore = pane.timings().output_chunks;
         const verdict = accepted();
-        if (verdict && pane.timings().output_chunks === chunksBefore) break;
+        if (verdict && pane.timings().output_chunks === chunksBefore) {
+          if (firstOkAt === undefined) firstOkAt = Date.now();
+          else if (Date.now() - firstOkAt >= settleMs) break;
+        } else {
+          firstOkAt = undefined;
+        }
       }
       if (!pane.alive) throw fail(exitedWhy());
       if (Date.now() > deadline) throw fail(`prompt not accepted within ${timeoutMs} ms (last line: ${JSON.stringify(pane.lastLine() ?? '')})`);

@@ -190,6 +190,32 @@ async fn a_spinner_that_repaints_continuously_after_submit_is_accepted() {
 }
 
 #[tokio::test]
+async fn raw_paste_text_shown_first_then_collapsed_into_the_placeholder_still_needs_the_retry() {
+    let srv = common::start().await;
+    let cap = srv.file("cap.txt");
+    let script = format!(
+        "stty -echo; printf '› Ask Codex to do anything\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'; read a; \
+         printf '\\r\\n› hello raw paste\\r\\n  (continued in the composer)\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'; sleep 0.15; \
+         printf '\\r\\n› [Pasted Content 40 chars]\\r\\n  gpt-5.6-sol default · ~/x\\r\\n'; read b; \
+         printf 'ok' > {}; printf '\\r\\n• Working (1s • esc to interrupt)\\r\\n'; sleep 3",
+        cap.display()
+    );
+    let res = srv
+        .spawn(spawn_body(&srv, &script, "hello raw paste"))
+        .await;
+    assert_eq!(res.status, 201, "{}", res.text);
+    let id = res.body["pane_id"].as_str().unwrap().to_string();
+    srv.until(
+        || async { !common::read_file(&cap).is_empty() },
+        Duration::from_secs(5),
+    )
+    .await;
+    let info = srv.pane(&id).await;
+    assert_eq!(info["timings"]["prompt_retries"], 1, "{}", info["timings"]);
+    srv.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_shell_that_never_prompts_fails_with_502_after_timeout_and_the_pane_stays_open() {
     let srv = common::start().await;
     let t0 = Instant::now();

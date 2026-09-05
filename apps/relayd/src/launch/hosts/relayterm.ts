@@ -296,6 +296,13 @@ export class RelaytermHost implements TerminalHost {
     return (r.json as { alive?: boolean }).alive === true;
   }
 
+  async input(paneId: string, body: { text?: string; keys?: string[] }): Promise<void> {
+    const route = `/panes/${paneId}/input`;
+    const r = await this.request('POST', route, body);
+    if (r.status === 404) throw new Error(`pane ${paneId} not found`);
+    if (r.status !== 200) throw this.unexpected('POST', route, r);
+  }
+
   async kill(paneId: string): Promise<void> {
     const route = `/panes/${paneId}/kill`;
     const r = await this.request('POST', route);

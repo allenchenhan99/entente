@@ -99,6 +99,52 @@ describe('orchestrator missions', () => {
   });
 });
 
+describe('prompt delivery confirmation (declared tier)', () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it('presses Enter in the pane when the agent never calls relay, then blocks the task on the human', async () => {
+    const r = createTestRelay({ contactTimeoutMs: 30, contactNudges: 2 });
+    const { mission_id } = r.orchestrator.createMission(mission);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner');
+    const paneId = r.ofType('agent_spawned')[0].payload.pane_id;
+    await sleep(140);
+    await r.orchestrator.settled();
+    expect(r.host.calls.input).toEqual([{ paneId, body: { keys: ['enter'] } }, { paneId, body: { keys: ['enter'] } }]);
+    const nudges = r.ofType('progress_reported').filter((e) => e.actor === 'relayd');
+    expect(nudges).toHaveLength(2);
+    expect(nudges[0].payload.message).toMatch(/pressed Enter .*\(1\/2\)/);
+    const blocked = r.ofType('task_blocked');
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0].payload).toMatchObject({ waiting_on: 'human' });
+    expect(blocked[0].payload.reason).toMatch(/never called relay .*2 Enter nudges/);
+    expect(r.orchestrator.taskView('t-a')!.runtime).toBe('blocked');
+  });
+
+  it('a relay call from the agent proves the prompt arrived: no nudge, no block', async () => {
+    const r = createTestRelay({ contactTimeoutMs: 30, contactNudges: 2 });
+    const { mission_id } = r.orchestrator.createMission(mission);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner');
+    r.orchestrator.getContract('t-a');
+    await sleep(100);
+    await r.orchestrator.settled();
+    expect(r.host.calls.input).toEqual([]);
+    expect(r.ofType('task_blocked')).toHaveLength(0);
+  });
+
+  it('a first nudge that gets the agent talking ends the watch', async () => {
+    const r = createTestRelay({ contactTimeoutMs: 30, contactNudges: 3 });
+    const { mission_id } = r.orchestrator.createMission(mission);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-a'), 'planner');
+    await sleep(45);
+    expect(r.host.calls.input).toHaveLength(1);
+    r.orchestrator.getContract('t-a');
+    await sleep(100);
+    await r.orchestrator.settled();
+    expect(r.host.calls.input).toHaveLength(1);
+    expect(r.ofType('task_blocked')).toHaveLength(0);
+  });
+});
+
 describe('spawn gating', () => {
   it('a lint-clean proposal is linted, spawned and versioned 1', async () => {
     const r = createTestRelay();

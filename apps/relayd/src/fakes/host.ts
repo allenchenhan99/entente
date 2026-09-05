@@ -2,7 +2,7 @@
 import type { TerminalHost, SpawnOptions } from '../ports.js';
 
 export interface FakeHost extends TerminalHost {
-  calls: { spawn: SpawnOptions[]; kill: string[]; focus: string[] };
+  calls: { spawn: SpawnOptions[]; kill: string[]; focus: string[]; input: Array<{ paneId: string; body: { text?: string; keys?: string[] } }> };
   alive: Set<string>;
 }
 
@@ -10,7 +10,7 @@ export function fakeHost(): FakeHost {
   let n = 0;
   const host: FakeHost = {
     kind: 'relay',
-    calls: { spawn: [], kill: [], focus: [] },
+    calls: { spawn: [], kill: [], focus: [], input: [] },
     alive: new Set(),
     async spawn(opts) {
       host.calls.spawn.push({ ...opts, argv: [...opts.argv], env: { ...opts.env } });
@@ -27,6 +27,9 @@ export function fakeHost(): FakeHost {
     async kill(paneId) {
       host.calls.kill.push(paneId);
       host.alive.delete(paneId);
+    },
+    async input(paneId, body) {
+      host.calls.input.push({ paneId, body });
     },
   };
   return host;

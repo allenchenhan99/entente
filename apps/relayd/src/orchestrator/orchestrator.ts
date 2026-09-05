@@ -71,6 +71,14 @@ export interface OrchestratorDeps {
   mcpUrl: string;
   clock?: () => string;
   log?: (message: string) => void;
+  /**
+   * Declared-tier prompt delivery: an agent that has not called any relay tool this long after its spawn gets
+   * an Enter pressed in its pane (the prompt is probably still sitting in its composer), up to `contactNudges`
+   * times, then the task is blocked on the human. Screen heuristics decide *when* to type; this decides
+   * whether the prompt actually arrived.
+   */
+  contactTimeoutMs?: number;
+  contactNudges?: number;
   /** Daemon restart: is a recorded worktree still on disk? Defaults to `fs.existsSync(path)`; tests inject. */
   worktreeExists?: (worktree: WorktreeInfo) => boolean;
   /**
@@ -254,6 +262,10 @@ interface TaskRecord {
   worktree?: WorktreeInfo;
   paneId?: string;
   sessionId?: string;
+  /** First relay tool call from this task's agent: proof the prompt arrived. */
+  contactedAt?: string;
+  nudges: number;
+  contactTimer?: ReturnType<typeof setTimeout>;
   blocker?: { reason: string; waiting_on?: string; since: string };
   replies: Array<{ message: string; replied_by: string; at: string }>;
   repliesRead: number;
@@ -501,6 +513,9 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       rec.spawned = true;
       rec.runtimeState = 'idle';
       emitTask(rec, 'relayd', 'agent_spawned', { runtime: contract.runtime, pane_id: paneId, session_id: sessionId, cwd: worktree.path });
+      rec.contactedAt = undefined;
+      rec.nudges = 0;
+      armContactWatch(rec);
       // A new agent belongs in the registry the moment it exists, which is what "updated whenever a
       // new subagent is created" asks for.
       writeAgentsFile();
@@ -558,7 +573,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         id: contract.id, missionId, versions: [], lint: [], openQuestions: [],
         taskState: 'proposed', handoffState: 'proposed', runtimeState: 'unspawned',
         spawned: false, spawning: false, attempt: 0, attempts: [], submissions: [], checksStarted: new Set(), verdicts: new Map(),
-        repairs: [], repairAckPending: false, escalated: false, proposedAt: clock(), replies: [], repliesRead: 0,
+        repairs: [], repairAckPending: false, escalated: false, proposedAt: clock(), replies: [], repliesRead: 0, nudges: 0,
         ...(reuseSession === undefined ? {} : { reuseSession }),
       };
       tasks.set(rec.id, rec);
@@ -681,8 +696,42 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   };
 
   // ---------- recipient side ----------
+  const CONTACT_TIMEOUT_MS = deps.contactTimeoutMs ?? 45_000;
+  const CONTACT_NUDGES = deps.contactNudges ?? 3;
+  const clearContactWatch = (rec: TaskRecord): void => {
+    if (rec.contactTimer) clearTimeout(rec.contactTimer);
+    rec.contactTimer = undefined;
+  };
+  /** After a spawn: if the agent stays silent, press Enter for it; give up on the human after a few tries. */
+  const armContactWatch = (rec: TaskRecord): void => {
+    clearContactWatch(rec);
+    rec.contactTimer = setTimeout(() => {
+      rec.contactTimer = undefined;
+      void track((async () => {
+        if (rec.contactedAt || !rec.paneId || rec.taskState === 'canceled' || rec.taskState === 'completed') return;
+        if (!(await deps.host.isAlive(rec.paneId))) return;
+        if (rec.nudges < CONTACT_NUDGES && deps.host.input) {
+          rec.nudges += 1;
+          await deps.host.input(rec.paneId, { keys: ['enter'] });
+          emitTask(rec, 'relayd', 'progress_reported', { message: `no relay call from the agent ${Math.round(CONTACT_TIMEOUT_MS / 1000)} s after its prompt; pressed Enter in ${rec.paneId} (${rec.nudges}/${CONTACT_NUDGES})` });
+          armContactWatch(rec);
+          return;
+        }
+        const reason = `agent never called relay after its prompt was delivered (${rec.nudges} Enter nudge${rec.nudges === 1 ? '' : 's'}); check pane ${rec.paneId}`;
+        rec.blocker = { reason, waiting_on: 'human', since: clock() };
+        rec.runtimeState = 'blocked';
+        emitTask(rec, 'relayd', 'task_blocked', { reason, waiting_on: 'human' });
+      })());
+    }, CONTACT_TIMEOUT_MS);
+    rec.contactTimer.unref?.();
+  };
+
   const touch = (rec: TaskRecord): void => {
     rec.lastSeenAt = clock();
+    if (!rec.contactedAt) {
+      rec.contactedAt = rec.lastSeenAt;
+      clearContactWatch(rec);
+    }
     if (rec.taskState === 'canceled' || rec.taskState === 'completed') return;
     if (rec.blocker) {
       rec.blocker = undefined;
@@ -1085,6 +1134,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     rec.pendingRecord = undefined;
     emitTask(rec, 'human', 'task_canceled', { reason });
     if (rec.paneId) {
+      clearContactWatch(rec);
       await deps.host.kill(rec.paneId);
       rec.runtimeState = 'exited';
     }
@@ -1353,7 +1403,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         replies,
         // Replies sent while the current blocker is open were possibly never read (the agent may have been
         // mid-await_reply); re-delivering one is cheaper than losing it. Everything older counts as read.
-        repliesRead: v.blocker ? replies.filter((r) => r.at < v.blocker!.since).length : replies.length,
+        repliesRead: v.blocker ? replies.filter((r) => r.at < v.blocker!.since).length : replies.length, nudges: 0,
         attempt: v.attempt, attempts: v.attempts.map((a) => ({ ...a, checks: { ...a.checks }, self_report_mismatch: [...a.self_report_mismatch] })),
         submissions: [], checksStarted: new Set(), verdicts: new Map(), repairs: [...v.repairs], activeRepair: v.active_repair, repairAckPending: false, escalated: v.escalated,
         proposedAt: v.proposed_at, acceptedAt: v.accepted_at, startedAt: v.started_at, lastSeenAt: v.last_seen_at, completedAt: v.completed_at,

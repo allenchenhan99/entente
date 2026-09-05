@@ -414,6 +414,10 @@ impl Host {
         // painted yet (seen live with Codex: "accepted" after 1.7 ms, Enter never retried).
         let settle_ms = quiet_ms.min(300.0);
         let written_at = Instant::now();
+        // The non-busy verdict must hold twice, `settle_ms` apart: Codex first shows the pasted text itself in
+        // the composer (no composer marker on the bottom line, so it looks accepted) and only then collapses it
+        // into the `[Pasted Content …]` placeholder, which needs the Enter retry.
+        let mut first_ok_at: Option<Instant> = None;
         loop {
             // Two guards: a minimum wait after the write (the agent's first repaint lands within a few ms), and
             // a quiet screen; then the verdict is only trusted if no output landed while it was computed.
@@ -425,8 +429,24 @@ impl Host {
             if since_write >= settle_ms && pane.quiet_for() >= settle_ms {
                 let chunks_before = pane.output_chunks();
                 let verdict = accepted();
+                if std::env::var_os("TERMD_PROMPT_DEBUG").is_some() {
+                    eprintln!(
+                        "termd prompt: since_write={since_write:.0}ms quiet={:.0}ms verdict={verdict} busy={} in_composer={} chunks={} bottom={:?}",
+                        pane.quiet_for(),
+                        busy(),
+                        still_in_composer(),
+                        pane.output_chunks(),
+                        last_meaningful_line(&pane.visible_lines())
+                    );
+                }
                 if verdict && pane.output_chunks() == chunks_before {
-                    break;
+                    match first_ok_at {
+                        None => first_ok_at = Some(Instant::now()),
+                        Some(t) if t.elapsed().as_secs_f64() * 1000.0 >= settle_ms => break,
+                        Some(_) => {}
+                    }
+                } else {
+                    first_ok_at = None;
                 }
             }
             if !pane.alive() {

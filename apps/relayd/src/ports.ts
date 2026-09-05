@@ -76,6 +76,8 @@ export interface TerminalHost {
   focus(paneId: string): Promise<void>;
   isAlive(paneId: string): Promise<boolean>;
   kill(paneId: string): Promise<void>;
+  /** Type into a pane (`text`, then logical `keys` such as `enter`); hosts that own the PTY implement it. */
+  input?(paneId: string, body: { text?: string; keys?: string[] }): void | Promise<void>;
 }
 
 export interface LaunchSpec {

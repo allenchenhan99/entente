@@ -126,8 +126,14 @@ export class ClaudeCodeRuntime implements AgentRuntime {
   private async trustFolder(cwd: string): Promise<void> {
     const root = await this.readJson(this.claudeJson);
     const projects = (root.projects ??= {}) as Record<string, Record<string, unknown>>;
-    const existing = projects[cwd] ?? {};
-    projects[cwd] = { allowedTools: [], ...existing, hasTrustDialogAccepted: true };
+    // Claude Code keys the entry by the directory it actually runs in, which is the *real* path: on macOS a
+    // worktree under /tmp is /private/tmp to it (seen live: trust written for /tmp/…, dialog still shown).
+    const keys = new Set([cwd]);
+    try { keys.add(await fs.realpath(cwd)); } catch { /* the directory may not exist yet in tests */ }
+    for (const key of keys) {
+      const existing = projects[key] ?? {};
+      projects[key] = { allowedTools: [], ...existing, hasTrustDialogAccepted: true };
+    }
     await this.writeJsonAtomic(this.claudeJson, root);
   }
 

@@ -96,6 +96,8 @@ describe('claude runtime', () => {
     expect(written.bypassPermissionsModeAccepted).toBe(true);
     expect(written.projects['/keep/me']).toEqual({ hasTrustDialogAccepted: true });
     expect(written.projects[spec.cwd]).toMatchObject({ hasTrustDialogAccepted: true });
+    // Claude Code looks the entry up by the real path (macOS: /tmp → /private/tmp), so that key is trusted too
+    if (fs.existsSync(spec.cwd)) expect(written.projects[fs.realpathSync(spec.cwd)]).toMatchObject({ hasTrustDialogAccepted: true });
   });
 });
 

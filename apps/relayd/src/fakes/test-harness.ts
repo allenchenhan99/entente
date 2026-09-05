@@ -24,6 +24,9 @@ export interface TestRelayOptions {
   repair?: RepairPolicy;
   clock?: () => string;
   dir?: string;
+  /** Declared-tier prompt delivery knobs (see OrchestratorDeps); tests use short values. */
+  contactTimeoutMs?: number;
+  contactNudges?: number;
 }
 
 export function createTestRelay(opts: TestRelayOptions = {}) {
@@ -37,6 +40,7 @@ export function createTestRelay(opts: TestRelayOptions = {}) {
   const orchestrator: Orchestrator = createOrchestrator({
     store, worktrees, checks, repair, host, runtimes,
     repoRoot: dir, relayDir: path.join(dir, '.relay'), mcpUrl: 'http://127.0.0.1:0/mcp', clock: opts.clock,
+    contactTimeoutMs: opts.contactTimeoutMs, contactNudges: opts.contactNudges,
     worktreeExists: (wt) => !worktrees.missing.has(wt.path),
   });
   const types = (): EventType[] => store.all().map((e) => e.type);
