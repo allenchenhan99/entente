@@ -42,6 +42,17 @@ pub struct Disc {
     pub status: VisualStatus,
     pub is_agent: bool,
     pub badge: Option<String>,
+    /// World units this node owns horizontally.
+    pub slot: f64,
+    /// Draw this node's label a row lower. Neighbours in a tier are only ~8 columns apart, so
+    /// alternating rows is what lets both keep their whole name.
+    pub stagger: bool,
+}
+
+/// World units a tier gives each of its nodes — the widest a label may be before it runs into the
+/// neighbour's.
+pub fn slot_width(count: usize) -> f64 {
+    WORLD / (count.max(1) as f64 + 1.0)
 }
 
 /// Where each node sits. Nodes of a tier are spread evenly across the world's width, in protocol order.
@@ -71,6 +82,8 @@ pub fn layout_net(graph: &Graph) -> Vec<Disc> {
                 status: node.status,
                 is_agent: node.kind == GraphNodeKind::Agent,
                 badge: node.badge.clone(),
+                slot: slot_width(count),
+                stagger: index % 2 == 1,
             });
         }
     }
@@ -250,8 +263,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let discs = layout_net(&graph);
     let selected = app.selected.clone();
     let (x_bounds, y_bounds) = view_bounds(&app.graph_view, app.graph_viewport);
-    // World units per printed character, so labels can be centred under their disc.
-    let per_char = (x_bounds[1] - x_bounds[0]) / canvas_area.width.max(1) as f64;
+    // World units per printed character and per row, so labels can be centred and staggered.
+    let x_span = x_bounds[1] - x_bounds[0];
+    let per_char = x_span / canvas_area.width.max(1) as f64;
+    let per_row = (y_bounds[1] - y_bounds[0]) / canvas_area.height.max(1) as f64;
 
     let widget = Canvas::default()
         .marker(Marker::Braille)
@@ -347,10 +362,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                             .add_modifier(ratatui::style::Modifier::BOLD),
                     ),
                 );
-                let label = d.label.clone();
+                // A label may only use its own slot: at 40-odd columns two neighbours would otherwise
+                // print over each other (`humplanner`).
+                // Only the panel itself is a limit now that neighbours are on different rows.
+                let room = ((x_span / per_char) as usize).saturating_sub(2).max(3);
+                let label = if d.label.chars().count() > room {
+                    d.label
+                        .chars()
+                        .take(room.saturating_sub(1))
+                        .collect::<String>()
+                        + "…"
+                } else {
+                    d.label.clone()
+                };
                 ctx.print(
                     d.x - label.chars().count() as f64 * per_char / 2.0,
-                    d.y - d.radius - LABEL_GAP,
+                    d.y - d.radius - LABEL_GAP - if d.stagger { per_row } else { 0.0 },
                     Line::styled(
                         label,
                         if selected_is(selected.as_ref(), RefKind::Node, &d.id) {
