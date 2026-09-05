@@ -80,6 +80,7 @@ async fn main() -> Result<()> {
         // Before `start`, as the interactive path does: this is the mode used to look at what the TUI
         // draws, and it drew a single default workspace whatever it was pointed at.
         runtime.set_workspace_urls(&args.url);
+        runtime.set_launch_repo(args.repo.to_string_lossy().into_owned());
         runtime.start().await?;
         runtime.run(Some(frames.max(1))).await?;
         let buffer = runtime.terminal.backend().buffer().clone();
@@ -108,6 +109,7 @@ async fn main() -> Result<()> {
     runtime.set_workspace_urls(&args.url);
     // `t` opens a shell here — the repo the mission is about, not wherever relay-tui was started.
     runtime.workdir = args.repo.to_string_lossy().into_owned();
+    runtime.set_launch_repo(runtime.workdir.clone());
     let tx = runtime.sender();
     std::thread::spawn(move || loop {
         match crossterm::event::poll(Duration::from_millis(200)) {

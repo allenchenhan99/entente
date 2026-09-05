@@ -63,6 +63,7 @@ pub enum Msg {
         url: String,
         token: String,
         name: String,
+        repo: String,
         started: bool,
     },
     /// The daemon killed a pane the user closed; take it out of the grid.
@@ -141,6 +142,14 @@ impl<B: Backend> Runtime<B> {
         if urls.len() > 1 {
             self.app = App::with_urls(self.app.mode, urls);
         }
+    }
+
+    /// The repo the client was started against, which is the first workspace's.
+    ///
+    /// Set separately from `workdir` because they answer different questions: `workdir` is a fallback
+    /// for when nothing better is known, and this is what the first workspace actually serves.
+    pub fn set_launch_repo(&mut self, repo: String) {
+        self.app.set_workspace_repo(0, repo);
     }
 
     /// The daemon of the workspace the user is acting on.
@@ -440,9 +449,12 @@ impl<B: Backend> Runtime<B> {
                 url,
                 token,
                 name,
+                repo,
                 started,
             } => {
-                let index = self.app.add_workspace(url.clone(), Some(name.clone()));
+                let index =
+                    self.app
+                        .add_workspace(url.clone(), Some(name.clone()), Some(repo.clone()));
                 // One client per workspace, in the same order, so `Msg::Graph(index, …)` and the rest
                 // land on the project they came from.
                 if let Source::Live(clients) = &mut self.source {
@@ -666,12 +678,25 @@ impl<B: Backend> Runtime<B> {
                 };
                 let client = client.clone();
                 let tx = self.tx.clone();
-                let cwd = self.workdir.clone();
+                // The project this workspace is about, not wherever relay-tui was started. A pane in
+                // the wrong repo reads the wrong `.relay/session.token`, and the wrappers inside it
+                // then register their agent against another project's daemon — which is where a brain
+                // opened in a second workspace was quietly turning up.
+                let cwd = self
+                    .app
+                    .workspace_repo(self.app.active)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| self.workdir.clone());
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
                 // The shell opens in the mission's repo, which is where `.relay/session.token` lives,
                 // so `relay status` works there with no `--repo`. It only needs the commands on PATH,
                 // and they live in this workspace's node_modules; the launcher says where.
-                let env = shell_env();
+                // `RELAY_URL` and `RELAY_REPO` name this workspace's daemon, so the `claude` and
+                // `codex` wrappers ask the daemon that owns the pane they are running in rather than
+                // the default port.
+                let mut env = shell_env();
+                env.insert("RELAY_URL".to_string(), self.app.ws().url.clone());
+                env.insert("RELAY_REPO".to_string(), cwd.clone());
                 let argv = shell_argv(&shell);
                 self.tasks.push(tokio::spawn(async move {
                     let msg = match client
@@ -876,6 +901,7 @@ pub async fn open_workspace(repo: &str) -> anyhow::Result<Msg> {
     Ok(Msg::WorkspaceReady {
         url,
         token,
+        repo: repo_path.to_string(),
         name: std::path::Path::new(repo_path)
             .file_name()
             .and_then(|n| n.to_str())

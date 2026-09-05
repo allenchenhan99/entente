@@ -360,6 +360,10 @@ pub struct Workspace {
     pub metrics: Option<HostMetrics>,
     pub connection: Connection,
     pub last_seq: u64,
+    /// The repository this daemon serves. A pane opened here starts in it, and the wrappers inside
+    /// that pane read its `.relay/session.token` — so with the wrong one they register the agent
+    /// against a different project's daemon entirely.
+    pub repo: Option<String>,
 }
 
 impl Workspace {
@@ -374,6 +378,7 @@ impl Workspace {
             pane_states: BTreeMap::new(),
             focused_pane: None,
             metrics: None,
+            repo: None,
             connection: match mode {
                 Mode::Live => Connection::Connecting,
                 Mode::Replay => Connection::Replay,
@@ -1973,16 +1978,37 @@ impl App {
     ///
     /// Called once the runtime has a daemon to talk to: a workspace is a daemon, so there is nothing
     /// to add until one is answering. Returns the index it took.
-    pub fn add_workspace(&mut self, url: String, name: Option<String>) -> usize {
+    pub fn add_workspace(
+        &mut self,
+        url: String,
+        name: Option<String>,
+        repo: Option<String>,
+    ) -> usize {
         if let Some(existing) = self.workspaces.iter().position(|w| w.url == url) {
+            if repo.is_some() {
+                self.workspaces[existing].repo = repo;
+            }
             return existing;
         }
         let mut workspace = Workspace::new(url, self.mode);
         if let Some(name) = name {
             workspace.name = name;
         }
+        workspace.repo = repo;
         self.workspaces.push(workspace);
         self.workspaces.len() - 1
+    }
+
+    /// Where a pane opened in this workspace should start, and whose `.relay` its tools should read.
+    pub fn workspace_repo(&self, index: usize) -> Option<&str> {
+        self.workspaces.get(index)?.repo.as_deref()
+    }
+
+    /// Record the repo of the workspace the client was started against.
+    pub fn set_workspace_repo(&mut self, index: usize, repo: String) {
+        if let Some(ws) = self.workspaces.get_mut(index) {
+            ws.repo = Some(repo);
+        }
     }
 
     pub fn set_active(&mut self, index: usize) -> Vec<Effect> {

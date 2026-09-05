@@ -464,8 +464,16 @@ fn an_empty_path_opens_nothing() {
 #[test]
 fn a_project_already_open_is_switched_to_rather_than_added_twice() {
     let mut app = app_with(demo_graph());
-    let first = app.add_workspace("http://127.0.0.1:7461".into(), Some("other".into()));
-    let again = app.add_workspace("http://127.0.0.1:7461".into(), Some("other".into()));
+    let first = app.add_workspace(
+        "http://127.0.0.1:7461".into(),
+        Some("other".into()),
+        Some("/repo/other".into()),
+    );
+    let again = app.add_workspace(
+        "http://127.0.0.1:7461".into(),
+        Some("other".into()),
+        Some("/repo/other".into()),
+    );
 
     assert_eq!(first, again);
     assert_eq!(app.workspaces.len(), 2, "the original plus one");
@@ -475,7 +483,11 @@ fn a_project_already_open_is_switched_to_rather_than_added_twice() {
 #[test]
 fn digits_switch_between_open_projects() {
     let mut app = app_with(demo_graph());
-    let second = app.add_workspace("http://127.0.0.1:7461".into(), Some("other".into()));
+    let second = app.add_workspace(
+        "http://127.0.0.1:7461".into(),
+        Some("other".into()),
+        Some("/repo/other".into()),
+    );
     assert_eq!(second, 1);
     assert_eq!(app.active, 0);
 
@@ -490,7 +502,11 @@ fn digits_switch_between_open_projects() {
 fn a_second_project_starts_out_connecting_and_is_told_apart_from_the_first() {
     use relay_tui::app::Connection;
     let mut app = app_with(demo_graph());
-    app.add_workspace("http://127.0.0.1:7461".into(), Some("other".into()));
+    app.add_workspace(
+        "http://127.0.0.1:7461".into(),
+        Some("other".into()),
+        Some("/repo/other".into()),
+    );
 
     // News about one daemon belongs to that daemon. Writing it to whichever workspace was in front of
     // you meant the second one's stream coming up marked the first as live, and the second stayed on
@@ -505,4 +521,23 @@ fn a_second_project_starts_out_connecting_and_is_told_apart_from_the_first() {
         Some(Connection::Live),
         "the first was not touched"
     );
+}
+
+#[test]
+fn a_pane_opens_in_the_project_its_workspace_is_about() {
+    let mut app = app_with(demo_graph());
+    app.set_workspace_repo(0, "/repo/first".into());
+    app.add_workspace(
+        "http://127.0.0.1:7461".into(),
+        Some("other".into()),
+        Some("/repo/other".into()),
+    );
+
+    assert_eq!(app.workspace_repo(0), Some("/repo/first"));
+    app.set_active(1);
+    // A pane in the wrong repo reads the wrong `.relay/session.token`, and the wrappers inside it then
+    // register their agent against another project's daemon — which is where a brain opened in a
+    // second workspace was quietly turning up.
+    assert_eq!(app.workspace_repo(app.active), Some("/repo/other"));
+    assert_eq!(app.ws().url, "http://127.0.0.1:7461");
 }
