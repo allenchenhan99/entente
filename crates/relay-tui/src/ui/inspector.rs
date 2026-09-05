@@ -246,7 +246,12 @@ mod snapshots {
         }
         let rows = draw_rows(&mut app, 120, 40);
         let text = screen_text(&rows);
-        assert!(text.contains("answer> magic"), "{text}");
+        // The editor names the question its answer goes to, and says the other is still waiting —
+        // this fixture's task has two open.
+        assert!(
+            text.contains("answer Q1 (1 more after this)> magic"),
+            "{text}"
+        );
         assert!(
             text.contains("actions: a answer · x cancel · Esc close"),
             "{text}"

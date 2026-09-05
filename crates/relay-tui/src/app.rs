@@ -791,7 +791,24 @@ impl App {
 
     pub fn prompt_line(&self) -> Option<String> {
         match self.input_mode? {
-            InputMode::Answer => Some(format!("answer> {}", self.input_value)),
+            // Which question, and how many are left. `a` answers one at a time — the command carries a
+            // single question_id — so an editor that just said `answer>` sent your words to the first
+            // of them and told you nothing about it.
+            InputMode::Answer => {
+                let ids = self
+                    .pending_action
+                    .as_ref()
+                    .and_then(|a| a.target.question_ids.clone())
+                    .unwrap_or_default();
+                let label = match ids.split_first() {
+                    Some((first, [])) => format!("answer {first}"),
+                    Some((first, rest)) => {
+                        format!("answer {first} ({} more after this)", rest.len())
+                    }
+                    None => "answer".to_string(),
+                };
+                Some(format!("{label}> {}", self.input_value))
+            }
             InputMode::Reply => Some(format!("reply> {}", self.input_value)),
             InputMode::ReviewFailure => Some(format!("observed failure> {}", self.input_value)),
             InputMode::CancelConfirm => Some("cancel task? y/N".to_string()),

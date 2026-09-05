@@ -1174,3 +1174,72 @@ fn moving_the_selection_brings_it_back_into_view() {
         "the selected item is on screen: {text:?}"
     );
 }
+
+// --- answering questions one at a time ------------------------------------------------------------
+
+/// An item whose action carries two open questions, as a task with two of them produces.
+fn two_question_app() -> App {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.select(Some(GraphObjectRef::node("t-backend-auth")));
+    app.set_actions(
+        &GraphObjectRef::node("t-backend-auth"),
+        vec![ObjectAction {
+            key: "a".into(),
+            kind: ActionKind::Clarify,
+            label: "answer".into(),
+            target: ActionTarget {
+                task_id: Some("t-backend-auth".into()),
+                question_ids: Some(vec!["Q1".into(), "Q2".into()]),
+                ..Default::default()
+            },
+        }],
+    );
+    app
+}
+
+#[test]
+fn the_editor_names_the_question_it_is_answering() {
+    let mut app = two_question_app();
+
+    app.handle_key(Key::char('a'));
+
+    let prompt = app.prompt_line().expect("an editor");
+    assert!(
+        prompt.contains("Q1"),
+        "the answer goes to Q1, and says so: {prompt}"
+    );
+    assert!(
+        prompt.contains("1 more after this"),
+        "and says the other is still waiting: {prompt}"
+    );
+}
+
+#[test]
+fn a_single_question_is_named_without_a_count() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.select(Some(GraphObjectRef::node("t-backend-auth")));
+    app.set_actions(
+        &GraphObjectRef::node("t-backend-auth"),
+        vec![ObjectAction {
+            key: "a".into(),
+            kind: ActionKind::Clarify,
+            label: "answer".into(),
+            target: ActionTarget {
+                task_id: Some("t-backend-auth".into()),
+                question_ids: Some(vec!["Q1".into()]),
+                ..Default::default()
+            },
+        }],
+    );
+
+    app.handle_key(Key::char('a'));
+
+    let prompt = app.prompt_line().expect("an editor");
+    assert!(prompt.contains("answer Q1"), "{prompt}");
+    assert!(
+        !prompt.contains("more after"),
+        "there is no other: {prompt}"
+    );
+}

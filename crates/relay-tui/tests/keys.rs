@@ -147,7 +147,11 @@ fn keys_a_or_c_answers_a_question_with_the_ink_clarify_body() {
     keys(&mut app, "magic link");
     app.handle_key(Key::BACKSPACE);
     keys(&mut app, "ks");
-    assert_eq!(app.prompt_line().as_deref(), Some("answer> magic links"));
+    // The editor names the question the answer goes to; this task has two open, so it says so.
+    assert_eq!(
+        app.prompt_line().as_deref(),
+        Some("answer Q1 (1 more after this)> magic links")
+    );
     let effects = app.handle_key(Key::ENTER);
     let expected = Command::Clarify {
         task_id: "t-backend-auth".into(),
