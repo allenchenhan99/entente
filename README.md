@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/runtimes-Claude_Code_%7C_Codex-635096?style=flat-square" alt="Claude Code and Codex runtimes" />
 </p>
 <p align="center">
-  <a href="https://allenchenhan99.github.io/entente/">Interactive hackathon report</a> ·
+  <a href="https://allenchenhan99.github.io/entente/?v=2#1">Interactive hackathon report</a> ·
   <a href="#install">Install</a> ·
   <a href="#quick-start-no-agent-or-api-key">Replay demo</a> ·
   <a href="#how-to-contribute">How to contribute</a> ·
@@ -132,7 +132,7 @@ npx tsx apps/cli/src/index.ts story --replay fixtures/events-live-4.jsonl --task
 
 The completed `live-4` fixture has an empty inbox; that is expected. In a live mission, the inbox lists handoffs that need human attention.
 
-**[Open the two-minute, seven-page report →](https://allenchenhan99.github.io/entente/)** Team Atrophied Intelligence presents the handoff problem, Contract and context design, terminal Demo, case results, contribution paths, and engineering scope. Diagrams animate automatically; the team Demo video is linked from the deck.
+**[Open the two-minute, seven-page report →](https://allenchenhan99.github.io/entente/?v=2#1)** Team Atrophied Intelligence presents the handoff problem, Contract and context design, terminal Demo, case results, contribution paths, and engineering scope. Diagrams animate automatically; the team Demo video is linked from the deck.
 
 ## How a handoff works
 
