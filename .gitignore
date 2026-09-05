@@ -3,6 +3,7 @@ docs/superpowers/
 docs/plans/
 .claude/
 CLAUDE.local.md
+/PRD.md
 
 # Runtime
 node_modules/
