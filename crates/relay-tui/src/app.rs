@@ -563,6 +563,9 @@ impl App {
     /// Port of `refsForRegion` (`App.tsx`): the objects j/k walk in each panel.
     pub fn refs_for_region(&self, region: Region) -> Vec<GraphObjectRef> {
         match region {
+            // Agents on contracts, then the ones the human opened in a terminal. Leaving those out
+            // meant j/k in this panel could not reach a brain at all, and the panel that lists the
+            // agents disagreed with the network about which agents there were.
             Region::Tree => self
                 .ws()
                 .graph
@@ -570,6 +573,11 @@ impl App {
                 .iter()
                 .filter(|n| n.kind == GraphNodeKind::Agent)
                 .map(|n| GraphObjectRef::node(n.id.clone()))
+                .chain(
+                    self.unattached_agents()
+                        .into_iter()
+                        .map(|n| GraphObjectRef::node(n.id)),
+                )
                 .collect(),
             Region::Graph => self
                 .ws()
@@ -1081,13 +1089,35 @@ impl App {
         };
         // Picking an agent shows its terminal. `focus_pane` selects back, and the guard above stops
         // there, so the two directions agree instead of chasing each other.
+        if let Some(pane_id) = self.pane_for_selection() {
+            effects.extend(self.focus_pane(pane_id, true));
+        }
+        effects
+    }
+
+    /// The pane the current selection is about.
+    ///
+    /// An agent working a task is found through the task. A brain is not: the human opened it in a
+    /// terminal, so it has no contract and no task, and the network draws it under its own pane id.
+    /// Looking only through the task meant selecting a brain focused nothing — with one brain you
+    /// might not notice, but with three there is no way to reach the other two from the network.
+    pub fn pane_for_selection(&self) -> Option<String> {
         if let Some(pane_id) = self
             .selected_task_id()
             .and_then(|task| self.pane_for_task(&task))
         {
-            effects.extend(self.focus_pane(pane_id, true));
+            return Some(pane_id);
         }
-        effects
+        let reference = self.selected.as_ref()?;
+        if reference.kind != RefKind::Node {
+            return None;
+        }
+        // An unattached agent's node id is the pane hosting it.
+        self.ws()
+            .panes
+            .iter()
+            .find(|p| **p == reference.id)
+            .cloned()
     }
 
     fn move_selection(&mut self, delta: i32) -> Vec<Effect> {
@@ -1153,14 +1183,23 @@ impl App {
         if post {
             effects.push(Effect::FocusPane(pane_id.clone()));
         }
-        let task_node = self
+        // Select the node this pane is: through its task when it has one, and otherwise the pane
+        // itself — a brain the human opened has no contract, so the network draws it under its own
+        // pane id and that is the only name it has.
+        let node = self
             .ws()
             .pane_states
             .get(&pane_id)
             .and_then(|p| p.info.task_id.clone())
             .filter(|t| self.ws().graph.node(t).is_some())
+            .or_else(|| {
+                self.unattached_agents()
+                    .iter()
+                    .any(|n| n.id == pane_id)
+                    .then(|| pane_id.clone())
+            })
             .map(GraphObjectRef::node);
-        if let Some(r) = task_node {
+        if let Some(r) = node {
             effects.extend(self.select(Some(r)));
         }
         effects
@@ -2144,8 +2183,12 @@ pub fn region_for_ref(graph: &Graph, r: &GraphObjectRef) -> Region {
 
 /// Does the pane's task match the selection (used by the pane grid to highlight the selected task's pane)?
 pub fn pane_matches_selection(app: &App, pane: &PaneState) -> bool {
-    match (&app.selected, &pane.info.task_id) {
-        (Some(r), Some(t)) => same_task(&app.ws().graph, r, t),
-        _ => false,
+    let Some(reference) = app.selected.as_ref() else {
+        return false;
+    };
+    match &pane.info.task_id {
+        Some(task) => same_task(&app.ws().graph, reference, task),
+        // A brain has no task; the network draws it under its own pane id.
+        None => reference.kind == RefKind::Node && reference.id == pane.info.pane_id,
     }
 }

@@ -1570,3 +1570,82 @@ fn a_key_between_the_two_escapes_breaks_the_gesture() {
     ));
     assert!(app.terminal_input);
 }
+
+// --- reaching a brain from the network --------------------------------------------------------
+
+/// Three brains the human opened, plus one agent working a task — the live shape.
+fn three_brains() -> App {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![
+            loose_agent("relay:23", "brain", true),
+            loose_agent("relay:32", "brain", true),
+            loose_agent("relay:33", "brain", true),
+            pane("relay:28", Some("t-backend-auth"), "backend", true),
+        ],
+        Some("relay:28".into()),
+    );
+    draw_rows(&mut app, 120, 32);
+    app
+}
+
+#[test]
+fn selecting_a_brain_shows_its_terminal() {
+    let mut app = three_brains();
+    assert_eq!(
+        app.unattached_agents().len(),
+        3,
+        "three brains on the network"
+    );
+
+    // A brain has no contract and no task, so the network draws it under its own pane id. Resolving
+    // a pane only through the task meant selecting one focused nothing — survivable with one brain,
+    // and with three it left no way to reach the other two from the network at all.
+    app.select(Some(GraphObjectRef::node("relay:32")));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:32"));
+
+    app.select(Some(GraphObjectRef::node("relay:33")));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:33"));
+
+    // And an agent working a task still resolves through the task, as it always did.
+    app.select(Some(GraphObjectRef::node("t-backend-auth")));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:28"));
+}
+
+#[test]
+fn focusing_a_brains_pane_selects_it_on_the_network() {
+    let mut app = three_brains();
+
+    app.focus_pane("relay:33".into(), false);
+
+    // The two directions agree: the network points at what the grid is showing.
+    assert_eq!(app.selected, Some(GraphObjectRef::node("relay:33")));
+    let pane = &app.ws().pane_states["relay:33"];
+    assert!(
+        relay_tui::app::pane_matches_selection(&app, pane),
+        "and its row is marked as the selected one"
+    );
+}
+
+#[test]
+fn the_agent_list_shows_the_brains_too_so_j_and_k_can_reach_them() {
+    let mut app = three_brains();
+    app.region = Region::Tree;
+
+    let listed: Vec<String> = app
+        .refs_for_region(Region::Tree)
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+
+    // The panel whose job is to list the agents was listing only the ones on contracts, so a brain
+    // was absent from it and j/k could not reach one.
+    for brain in ["relay:23", "relay:32", "relay:33"] {
+        assert!(
+            listed.contains(&brain.to_string()),
+            "{brain} missing from {listed:?}"
+        );
+    }
+    assert!(listed.contains(&"t-backend-auth".to_string()), "{listed:?}");
+}

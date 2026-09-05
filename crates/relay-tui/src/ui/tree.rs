@@ -245,12 +245,17 @@ fn workspace_rows(app: &App, height: usize) -> Vec<TreeRow> {
 }
 
 fn agent_lines(app: &App, height: usize) -> Vec<TreeRow> {
+    // Agents on contracts, then the ones the human opened in a terminal — the same set the network
+    // draws. A brain has no contract, so listing only contract agents hid it from the one panel whose
+    // job is to list the agents.
+    let loose = app.unattached_agents();
     let agents: Vec<&GraphNode> = app
         .ws()
         .graph
         .nodes
         .iter()
         .filter(|n| n.kind == GraphNodeKind::Agent)
+        .chain(loose.iter())
         .collect();
     if agents.is_empty() {
         return vec![(
