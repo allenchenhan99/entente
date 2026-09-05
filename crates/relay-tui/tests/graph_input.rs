@@ -26,7 +26,7 @@ fn app_with_canvas() -> App {
 /// A cell that lands on the node — what the user's pointer would be over. A row spans several world
 /// units, so this asks the same question the app does rather than looking for the exact centre.
 fn cell_of(app: &App, node_id: &str) -> (u16, u16) {
-    let discs = layout_net(&app.graph, &[]);
+    let discs = layout_net(&app.graph, &[], app.planner_present());
     let viewport = app.graph_viewport;
     let wanted = Some(GraphObjectRef::node(node_id));
     for row in viewport.y..viewport.y + viewport.height {
@@ -44,11 +44,11 @@ fn cell_of(app: &App, node_id: &str) -> (u16, u16) {
 fn clicking_a_node_selects_it_and_focuses_the_graph() {
     let mut app = app_with_canvas();
     app.region = Region::Tree;
-    let (col, row) = cell_of(&app, "planner");
+    let (col, row) = cell_of(&app, "t-frontend-login");
 
     app.handle_mouse(Mouse::new(MouseKind::Down, col, row));
 
-    assert_eq!(app.selected, Some(GraphObjectRef::node("planner")));
+    assert_eq!(app.selected, Some(GraphObjectRef::node("t-frontend-login")));
     assert_eq!(
         app.region,
         Region::Graph,
@@ -208,7 +208,7 @@ fn m_hands_the_mouse_back_to_the_terminal_and_takes_it_again() {
     );
 
     // While the terminal has it, the app ignores what it is sent.
-    let (col, row) = cell_of(&app, "planner");
+    let (col, row) = cell_of(&app, "t-frontend-login");
     app.selected = None;
     assert!(app
         .handle_mouse(Mouse::new(MouseKind::Down, col, row))
@@ -228,7 +228,7 @@ fn an_open_overlay_keeps_the_mouse_out_of_the_graph() {
     let mut app = app_with_canvas();
     app.help_open = true;
     app.selected = None;
-    let (col, row) = cell_of(&app, "planner");
+    let (col, row) = cell_of(&app, "t-frontend-login");
 
     assert!(app
         .handle_mouse(Mouse::new(MouseKind::Down, col, row))

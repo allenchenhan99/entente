@@ -366,7 +366,7 @@ fn nothing_connects_it_because_nothing_has_been_agreed() {
     app.set_panes(vec![loose_agent("relay:7", "scout", true)], None);
     let loose = app.unattached_agents();
 
-    let discs = relay_tui::ui::graph::layout_net(&app.graph, &loose);
+    let discs = relay_tui::ui::graph::layout_net(&app.graph, &loose, true);
     assert!(discs.iter().any(|d| d.id == "relay:7"), "it is drawn");
     for edge in &app.graph.edges {
         assert_ne!(edge.from, "relay:7");
@@ -508,5 +508,86 @@ fn a_dismissal_is_forgotten_once_the_daemon_forgets_the_pane() {
     assert!(
         app.panes.contains(&"relay:1".to_string()),
         "a new pane with that id is not the one that was closed"
+    );
+}
+
+// --- an empty network ----------------------------------------------------------------------------
+
+#[test]
+fn a_fresh_launch_with_no_agents_draws_no_brain() {
+    // What `entente` shows before you have started anything: relayd is up, no mission, nothing
+    // spawned. buildGraph still hands over human, planner and verifier nodes.
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(Graph {
+        nodes: vec![
+            GraphNode {
+                id: "planner".into(),
+                kind: GraphNodeKind::Planner,
+                label: "planner".into(),
+                task_id: None,
+                runtime: None,
+                task_state: None,
+                handoff_state: None,
+                column: 0,
+                status: VisualStatus::Verified,
+                badge: None,
+            },
+            GraphNode {
+                id: "verifier".into(),
+                kind: GraphNodeKind::Verifier,
+                label: "verifier".into(),
+                task_id: None,
+                runtime: None,
+                task_state: None,
+                handoff_state: None,
+                column: 2,
+                status: VisualStatus::Pending,
+                badge: None,
+            },
+        ],
+        ..Graph::default()
+    });
+    app.set_panes(vec![], None);
+
+    let text = String::from_iter(draw_rows(&mut app, 100, 30));
+
+    assert!(
+        !text.contains("brain 1"),
+        "the object model always carries a planner node; nobody is doing that job yet:\n{text}"
+    );
+    assert!(!app.planner_present());
+}
+
+#[test]
+fn spawning_a_planner_is_what_makes_brain_1_appear() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(vec![], None);
+    assert!(!app.planner_present());
+
+    // relayd spawns a planner with `name: planner`, which is the pane's role.
+    app.set_panes(vec![pane("relay:1", None, "planner", true)], None);
+
+    assert!(app.planner_present());
+    let text = String::from_iter(draw_rows(&mut app, 100, 30));
+    assert!(text.contains("brain 1"), "{text}");
+}
+
+#[test]
+fn an_agent_you_launched_is_a_brain_without_any_planner() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(vec![pane("relay:3", None, "scout", true)], None);
+
+    assert!(!app.planner_present(), "a scout is not a planner");
+    let naming = relay_tui::ui::network::name_nodes(
+        &app.graph,
+        &app.unattached_agents(),
+        app.planner_present(),
+    );
+    assert!(
+        naming["relay:3"].label.starts_with("brain "),
+        "{:?}",
+        naming["relay:3"]
     );
 }

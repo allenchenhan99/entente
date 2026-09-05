@@ -411,7 +411,7 @@ impl App {
                 .nodes
                 .iter()
                 // Only what the network actually draws, so j/k never lands on an invisible node.
-                .filter(|n| crate::ui::graph::is_visible(n))
+                .filter(|n| crate::ui::graph::is_visible(n, self.planner_present()))
                 .map(|n| GraphObjectRef::node(n.id.clone()))
                 .chain(
                     self.unattached_agents()
@@ -1292,6 +1292,12 @@ impl App {
         )
     }
 
+    /// Is a planner agent actually there? The graph always has the node; a pane is what says someone
+    /// is doing the job.
+    pub fn planner_present(&self) -> bool {
+        self.pane_states.values().any(|p| p.info.role == "planner")
+    }
+
     /// Agents relayd is hosting that no contract accounts for; they are on the network too.
     pub fn unattached_agents(&self) -> Vec<GraphNode> {
         crate::ui::graph::unattached_agents(&self.graph, self.pane_states.values().map(|p| &p.info))
@@ -1301,7 +1307,11 @@ impl App {
     pub fn hit_at(&self, col: u16, row: u16) -> Option<GraphObjectRef> {
         let point =
             crate::ui::graph::cell_to_world(&self.graph_view, self.graph_viewport, col, row);
-        let discs = crate::ui::graph::layout_net(&self.graph, &self.unattached_agents());
+        let discs = crate::ui::graph::layout_net(
+            &self.graph,
+            &self.unattached_agents(),
+            self.planner_present(),
+        );
         crate::ui::graph::hit_test(&self.graph, &discs, point)
     }
 

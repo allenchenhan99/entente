@@ -50,12 +50,21 @@ fn is_brain(graph: &Graph, node: &GraphNode) -> bool {
 
 /// Names every agent in the network. `unattached` are agents relayd hosts that no contract accounts
 /// for — you launched them, so they are brains.
-pub fn name_nodes(graph: &Graph, unattached: &[GraphNode]) -> BTreeMap<String, Naming> {
+pub fn name_nodes(
+    graph: &Graph,
+    unattached: &[GraphNode],
+    planner_present: bool,
+) -> BTreeMap<String, Naming> {
     let mut naming: BTreeMap<String, Naming> = BTreeMap::new();
     let agents: Vec<&GraphNode> = graph
         .nodes
         .iter()
-        .filter(|n| matches!(n.kind, GraphNodeKind::Agent | GraphNodeKind::Planner))
+        .filter(|n| match n.kind {
+            GraphNodeKind::Agent => true,
+            // A planner nobody spawned is not on the network, so it is not brain 1 either.
+            GraphNodeKind::Planner => planner_present,
+            _ => false,
+        })
         .chain(unattached.iter())
         .collect();
 
@@ -178,7 +187,7 @@ mod tests {
             vec![contract("human", "t-one"), contract("t-one", "t-two")],
         );
 
-        let naming = name_nodes(&graph, &[]);
+        let naming = name_nodes(&graph, &[], true);
 
         assert_eq!(naming["t-one"].label, "brain 1");
         assert_eq!(naming["t-one"].tier, 0);
@@ -201,7 +210,7 @@ mod tests {
             ],
         );
 
-        let naming = name_nodes(&graph, &[]);
+        let naming = name_nodes(&graph, &[], true);
 
         assert_eq!(naming["t-a"].label, "sub 1.1");
         assert_eq!(naming["t-b"].label, "sub 1.2");
@@ -224,7 +233,7 @@ mod tests {
             ],
         );
 
-        let naming = name_nodes(&graph, &[]);
+        let naming = name_nodes(&graph, &[], true);
 
         assert_eq!(naming["t-one"].label, "brain 1");
         assert_eq!(naming["t-two"].label, "brain 2");
@@ -238,7 +247,7 @@ mod tests {
         // asked for that work, so those agents are the ones you prompt.
         let graph = fixture("live-1").graph;
 
-        let naming = name_nodes(&graph, &[]);
+        let naming = name_nodes(&graph, &[], true);
 
         assert_eq!(naming["planner"].label, "brain 1");
         for id in ["t-backend-auth", "t-frontend-login"] {
@@ -260,7 +269,7 @@ mod tests {
             }
         }
 
-        let naming = name_nodes(&graph, &[]);
+        let naming = name_nodes(&graph, &[], true);
 
         assert_eq!(naming["planner"].label, "brain 1");
         assert_eq!(naming["t-backend-auth"].label, "sub 1.1");
@@ -272,7 +281,7 @@ mod tests {
         let graph = fixture("live-1").graph;
         let loose = agent("relay:7", "scout");
 
-        let naming = name_nodes(&graph, std::slice::from_ref(&loose));
+        let naming = name_nodes(&graph, std::slice::from_ref(&loose), true);
 
         assert!(
             naming["relay:7"].label.starts_with("brain "),
@@ -298,14 +307,14 @@ mod tests {
             ],
         );
 
-        let naming = name_nodes(&graph, &[]);
+        let naming = name_nodes(&graph, &[], true);
 
         assert_eq!(naming["t-deep"].label, "sub 1.1.1");
     }
 
     #[test]
     fn the_verifier_and_the_human_are_not_named_as_agents() {
-        let naming = name_nodes(&fixture("live-1").graph, &[]);
+        let naming = name_nodes(&fixture("live-1").graph, &[], true);
 
         assert!(!naming.contains_key("verifier"));
         assert!(!naming.contains_key("human"));

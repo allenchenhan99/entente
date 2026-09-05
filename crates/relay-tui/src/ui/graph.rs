@@ -58,7 +58,12 @@ pub struct Disc {
 /// relayd is the verifier — no agent ever fills that role — so the node only means something once a
 /// task has produced something to check. Until then its status is `pending` and it is a lifeless dot
 /// taking space a 40-column panel does not have.
-pub fn is_visible(node: &GraphNode) -> bool {
+pub fn is_visible(node: &GraphNode, planner_present: bool) -> bool {
+    // The object model always carries a planner node. Whether anyone is doing that job is a different
+    // question, and its pane is what answers it: no planner spawned, no brain on the network.
+    if node.kind == GraphNodeKind::Planner && !planner_present {
+        return false;
+    }
     // The human is not an agent on the network: you are the one reading it. What you asked for is
     // drawn as the brain you asked it of.
     if node.kind == GraphNodeKind::Human {
@@ -140,17 +145,17 @@ pub fn slot_width(count: usize) -> f64 {
 }
 
 /// Where each node sits. Nodes of a tier are spread evenly across the world's width, in protocol order.
-pub fn layout_net(graph: &Graph, unattached: &[GraphNode]) -> Vec<Disc> {
+pub fn layout_net(graph: &Graph, unattached: &[GraphNode], planner_present: bool) -> Vec<Disc> {
     // Two layers of agents and the verifier under them: who you prompted, who they called, and what
     // checks the result. The protocol's `column` is not used for agents — an agent's layer is who gave
     // it its contract, not which column the object model happens to put it in.
-    let naming = name_nodes(graph, unattached);
+    let naming = name_nodes(graph, unattached, planner_present);
     let mut tiers: [Vec<(&GraphNode, Option<&Naming>)>; 3] = [Vec::new(), Vec::new(), Vec::new()];
     for node in graph
         .nodes
         .iter()
         .chain(unattached.iter())
-        .filter(|n| is_visible(n))
+        .filter(|n| is_visible(n, planner_present))
     {
         let named = naming.get(&node.id);
         // The protocol's fourth column (`done`) has no object behind it yet; fold it into the verifier
@@ -393,7 +398,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let graph = app.graph.clone();
     let unattached = app.unattached_agents();
-    let mut discs = layout_net(&graph, &unattached);
+    let mut discs = layout_net(&graph, &unattached, app.planner_present());
     // The pane is the better witness than the event-derived runtime state: an agent's contract exists
     // long before a coding shell is spawned for it, and the shell can die while the task stays open.
     for disc in &mut discs {
@@ -595,7 +600,7 @@ mod tests {
 
     #[test]
     fn brains_sit_above_their_subs_and_the_verifier_below_both() {
-        let discs = layout_net(&graph_with_a_sub("live-1"), &[]);
+        let discs = layout_net(&graph_with_a_sub("live-1"), &[], true);
         let brain = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
         let sub = discs.iter().find(|d| d.id == "t-frontend-login").unwrap();
         let verifier = discs.iter().find(|d| d.id == "verifier").unwrap();
@@ -614,7 +619,7 @@ mod tests {
 
     #[test]
     fn a_tier_spreads_its_nodes_evenly_and_never_stacks_them() {
-        let discs = layout_net(&fixture("live-1").graph, &[]);
+        let discs = layout_net(&fixture("live-1").graph, &[], true);
         let agents: Vec<&Disc> = discs.iter().filter(|d| d.is_agent).collect();
         assert!(agents.len() >= 2, "fixture has two agents");
         for pair in agents.windows(2) {
@@ -629,15 +634,15 @@ mod tests {
     #[test]
     fn placement_does_not_move_when_the_view_does() {
         let graph = fixture("live-1").graph;
-        let before = layout_net(&graph, &[]);
-        let after = layout_net(&graph, &[]);
+        let before = layout_net(&graph, &[], true);
+        let after = layout_net(&graph, &[], true);
         assert_eq!(before, after, "layout is fixed, never force-directed");
     }
 
     #[test]
     fn edges_start_and_end_on_the_rims_not_the_centres() {
         let graph = graph_with_a_sub("live-1");
-        let discs = layout_net(&graph, &[]);
+        let discs = layout_net(&graph, &[], true);
         let edge = graph
             .edges
             .iter()
@@ -685,7 +690,7 @@ mod tests {
     #[test]
     fn clicking_a_disc_finds_its_node() {
         let graph = fixture("live-1").graph;
-        let discs = layout_net(&graph, &[]);
+        let discs = layout_net(&graph, &[], true);
         let target = discs.iter().find(|d| d.id == "t-backend-auth").unwrap();
 
         let hit = hit_test(&graph, &discs, (target.x, target.y)).unwrap();
@@ -695,7 +700,7 @@ mod tests {
     #[test]
     fn clicking_between_two_discs_finds_the_edge_that_runs_there() {
         let graph = graph_with_a_sub("live-1");
-        let discs = layout_net(&graph, &[]);
+        let discs = layout_net(&graph, &[], true);
         let edge = graph
             .edges
             .iter()
@@ -717,7 +722,7 @@ mod tests {
     #[test]
     fn clicking_empty_space_selects_nothing() {
         let graph = fixture("live-1").graph;
-        let discs = layout_net(&graph, &[]);
+        let discs = layout_net(&graph, &[], true);
         assert_eq!(hit_test(&graph, &discs, (-40.0, -40.0)), None);
     }
 
@@ -765,7 +770,9 @@ mod tests {
             }
         }
         assert!(
-            !layout_net(&graph, &[]).iter().any(|d| d.id == "verifier"),
+            !layout_net(&graph, &[], true)
+                .iter()
+                .any(|d| d.id == "verifier"),
             "relayd verifies; the node means nothing until a task has produced something"
         );
 
@@ -774,7 +781,9 @@ mod tests {
                 node.status = VisualStatus::Working;
             }
         }
-        assert!(layout_net(&graph, &[]).iter().any(|d| d.id == "verifier"));
+        assert!(layout_net(&graph, &[], true)
+            .iter()
+            .any(|d| d.id == "verifier"));
     }
 
     #[test]
@@ -785,7 +794,7 @@ mod tests {
                 node.status = VisualStatus::Pending;
             }
         }
-        let discs = layout_net(&graph, &[]);
+        let discs = layout_net(&graph, &[], true);
         for edge in graph.edges.iter().filter(|e| e.to == "verifier") {
             assert!(edge_ends(&discs, edge).is_none());
         }
