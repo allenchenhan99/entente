@@ -54,6 +54,8 @@ pub enum Msg {
     Connection(Connection),
     /// A pane was created on the daemon; focus it once the refreshed list arrives.
     PaneOpened(String),
+    /// The daemon killed a pane the user closed; take it out of the grid.
+    PaneDismissed(String),
     Error(String),
     Notice(String),
     Quit,
@@ -338,6 +340,10 @@ impl<B: Backend> Runtime<B> {
                 self.app.handle_key(key)
             }
             Msg::Mouse(mouse) => self.app.handle_mouse(mouse),
+            Msg::PaneDismissed(pane_id) => {
+                self.app.dismiss_pane(&pane_id);
+                Vec::new()
+            }
             Msg::PaneOpened(pane_id) => {
                 self.pending_pane = Some(pane_id.clone());
                 self.app
@@ -511,13 +517,13 @@ impl<B: Backend> Runtime<B> {
                 let client = client.clone();
                 let tx = self.tx.clone();
                 self.tasks.push(tokio::spawn(async move {
+                    // relayd keeps a killed pane in `/panes` (its cast outlives the process), so the
+                    // grid drops it here rather than waiting for a list that will still contain it.
                     let msg = match client.kill_pane(&pane_id).await {
-                        // The pane list is what says it is gone, so ask for it rather than guessing.
-                        Ok(()) => Msg::Notice(format!("closed {pane_id}")),
+                        Ok(()) => Msg::PaneDismissed(pane_id),
                         Err(e) => Msg::Notice(format!("could not close {pane_id}: {e}")),
                     };
                     let _ = tx.send(msg);
-                    let _ = tx.send(Msg::Refresh);
                 }));
             }
             Effect::SetMouseCapture(on) => {

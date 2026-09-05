@@ -339,6 +339,10 @@ pub struct App {
     graph_drag: Option<(u16, u16)>,
     /// Pane the user is being asked about before it is closed.
     pending_pane_close: Option<String>,
+    /// Panes the user has closed. relayd keeps a killed pane in `/panes` — the record and its cast
+    /// outlive the process — so the grid has to remember what was dismissed or a closed pane comes
+    /// straight back on the next poll, looking as though `X` did nothing.
+    dismissed_panes: std::collections::BTreeSet<String>,
     pub tick: u64,
 }
 
@@ -385,6 +389,7 @@ impl App {
             mouse_capture: true,
             graph_drag: None,
             pending_pane_close: None,
+            dismissed_panes: std::collections::BTreeSet::new(),
             tick: 0,
         }
     }
@@ -481,6 +486,17 @@ impl App {
 
     /// New `/panes` listing: new panes get a screen model sized like the PTY; known ones keep theirs.
     pub fn set_panes(&mut self, panes: Vec<PaneInfo>, focused: Option<String>) -> Vec<Effect> {
+        // Forget dismissals for panes the daemon no longer lists, so the set cannot grow forever.
+        let listed: std::collections::BTreeSet<String> =
+            panes.iter().map(|p| p.pane_id.clone()).collect();
+        self.dismissed_panes.retain(|id| listed.contains(id));
+        let panes: Vec<PaneInfo> = panes
+            .into_iter()
+            .filter(|p| !self.dismissed_panes.contains(&p.pane_id))
+            .collect();
+        self.pane_states
+            .retain(|id, _| !self.dismissed_panes.contains(id));
+
         self.panes = panes.iter().map(|p| p.pane_id.clone()).collect();
         for info in panes {
             match self.pane_states.get_mut(&info.pane_id) {
@@ -869,7 +885,17 @@ impl App {
             let mut effects = Vec::new();
             if answer == Some('y') {
                 if let Some(pane_id) = self.pending_pane_close.clone() {
-                    effects.push(Effect::KillPane(pane_id));
+                    let alive = self
+                        .pane_states
+                        .get(&pane_id)
+                        .map(|p| p.alive())
+                        .unwrap_or(false);
+                    if alive {
+                        effects.push(Effect::KillPane(pane_id));
+                    } else {
+                        // Nothing to kill; the pane is only a record now.
+                        self.dismiss_pane(&pane_id);
+                    }
                 }
             }
             if answer == Some('y') || answer == Some('n') || key.code == KeyCode::Esc {
@@ -1224,6 +1250,22 @@ impl App {
             .iter()
             .find(|(_, rect)| rect.contains(col, row))
             .map(|(id, _)| id.clone())
+    }
+
+    /// Take a closed pane out of the grid. The daemon keeps it — the recording is worth more than the
+    /// row it occupied — but this view is done with it.
+    pub fn dismiss_pane(&mut self, pane_id: &str) {
+        self.dismissed_panes.insert(pane_id.to_string());
+        self.panes.retain(|id| id != pane_id);
+        self.pane_states.remove(pane_id);
+        self.pane_rects.remove(pane_id);
+        if self.focused_pane.as_deref() == Some(pane_id) {
+            self.terminal_input = false;
+            self.focused_pane = self
+                .first_alive_pane()
+                .or_else(|| self.panes.first().cloned());
+        }
+        self.set_notice(format!("closed {pane_id}"));
     }
 
     /// Focus a pane and put the keyboard straight into it — what `t` wants: a terminal you can type in.

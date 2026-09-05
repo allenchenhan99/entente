@@ -424,3 +424,89 @@ fn a_loose_agent_whose_process_died_says_so() {
     let loose = app.unattached_agents();
     assert_eq!(loose[0].runtime, Some(RuntimeState::Exited));
 }
+
+// --- closing a pane ------------------------------------------------------------------------------
+
+#[test]
+fn a_closed_pane_leaves_the_grid_even_though_the_daemon_still_lists_it() {
+    let mut app = app_with_panes();
+    app.handle_key(Key::char('X'));
+    app.handle_key(Key::char('y'));
+    // The runtime does this when the daemon confirms the kill.
+    app.dismiss_pane("relay:1");
+    assert!(!app.panes.contains(&"relay:1".to_string()));
+
+    // relayd keeps a killed pane in /panes, marked dead — the next poll must not bring it back.
+    app.set_panes(
+        vec![
+            PaneInfo {
+                alive: false,
+                exit_code: Some(0),
+                ..pane("relay:1", Some("t-backend-auth"), "backend", false)
+            },
+            pane("relay:2", Some("t-frontend-login"), "frontend", true),
+        ],
+        None,
+    );
+
+    assert!(
+        !app.panes.contains(&"relay:1".to_string()),
+        "a closed pane stays closed: {:?}",
+        app.panes
+    );
+    assert!(app.panes.contains(&"relay:2".to_string()));
+}
+
+#[test]
+fn closing_the_focused_pane_moves_focus_to_a_live_one() {
+    let mut app = app_with_panes();
+    assert_eq!(app.focused_pane.as_deref(), Some("relay:1"));
+
+    app.dismiss_pane("relay:1");
+
+    assert_eq!(app.focused_pane.as_deref(), Some("relay:2"));
+    assert!(!app.terminal_input, "typing does not survive the pane");
+}
+
+#[test]
+fn closing_a_pane_whose_process_already_exited_needs_no_kill() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![PaneInfo {
+            alive: false,
+            exit_code: Some(0),
+            ..pane("relay:5", None, "backend", false)
+        }],
+        Some("relay:5".to_string()),
+    );
+
+    app.handle_key(Key::char('X'));
+    let effects = app.handle_key(Key::char('y'));
+
+    assert!(effects.is_empty(), "nothing to kill: {effects:?}");
+    assert!(
+        !app.panes.contains(&"relay:5".to_string()),
+        "but it is gone from the grid"
+    );
+}
+
+#[test]
+fn a_dismissal_is_forgotten_once_the_daemon_forgets_the_pane() {
+    let mut app = app_with_panes();
+    app.dismiss_pane("relay:1");
+    // The daemon drops it (a new run, say), then a pane reuses the id.
+    app.set_panes(vec![pane("relay:2", None, "frontend", true)], None);
+    app.set_panes(
+        vec![
+            pane("relay:1", None, "scout", true),
+            pane("relay:2", None, "frontend", true),
+        ],
+        None,
+    );
+
+    assert!(
+        app.panes.contains(&"relay:1".to_string()),
+        "a new pane with that id is not the one that was closed"
+    );
+}
