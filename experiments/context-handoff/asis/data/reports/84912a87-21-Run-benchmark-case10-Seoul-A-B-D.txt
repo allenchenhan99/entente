@@ -1,0 +1,10 @@
+Committed locally (not pushed), hash `56434ed`.
+
+**Case 10 (Seoul, 5 days, A/B/D) — clean baseline, both systems tied.**
+
+- TripGenie: excluded Gyeongbokgung/Myeongdong (explicitly listed), covered both must-visits + all 12 other candidates (14/14), no day >3 stops (3/3/3/3/2, last day slot deliberately reserved for flexibility), plus proactively disclosed an unrequested risk (Bukchon Hanok Village's 17:00–10:00 no-entry restriction). 6 real screenshots read and verified (`case10_tripgenie_1..6.png`).
+- Traivial: same result via real `build_itinerary()` (no `apply_live_constraints()`, per instructions since this case has no clock constraints) — 0 leakage, 2/2 must-visits, 14/14 candidates, 2/3/3/3/3 stops/day, empty caveats. Validated against `ItineraryResponse`, rendered and screenshotted (`case10_traivial_render.png`).
+- Six-metric scores: both scored 0 leakage / 100% coverage / 0 infeasible / 0 manual fixes / has evidence; TripGenie also had an UNKNOWN/honesty bonus (time-window disclosure) that Traivial's template-based reasoning doesn't provide.
+- This is a genuine "no problem found" baseline (second one after case01), honestly reported as such — the write-up explicitly notes it does not invalidate the architectural bugs found in cases 02/05/07/08/09, since this case's mild inputs (14 candidates vs 15 slots, no arrival/departure constraints) never exercised those code paths.
+
+Files: `docs/experiments/trip_com_tool_benchmark_2026-09.md` (appended §Case10 + progress line), `docs/experiments/trip_com_tool_benchmark_2026-09/case10_traivial_harness.py`, `case10_traivial.json`, and 7 screenshots under `screenshots/`.

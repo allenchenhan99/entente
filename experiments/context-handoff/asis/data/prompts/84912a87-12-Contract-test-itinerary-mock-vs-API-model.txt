@@ -1,0 +1,13 @@
+Repo: D:\vscode_python\unvisited (Traivial). You may ONLY add a new test file under tests/ (e.g. tests/test_api_contract_mock_itinerary_next.py). Do NOT modify any file under traivial/ or web/ except reading them for reference.
+
+This is P1 item 5 from docs/PRODUCT_COMPLETION_PLAN.md ("API 契約機械化"): "把 web/mock/*.json 納入契約測試...確保 mock fixture 與真實 presenter 不會欄位分岔." This is the `itinerary` endpoint slice (mirrors an already-completed combos-endpoint slice at tests/test_api_contract_mock_combos_next.py — read that file first as a structural template, but adapt to itinerary's actual shape).
+
+Steps:
+1. Read tests/test_api_contract_mock_combos_next.py to see the established pattern for this kind of contract test in this repo.
+2. Check tests/ for whether an itinerary-mock-vs-model contract test already exists (grep "mock/itinerary.json" or "ItineraryResponse" in tests/) — if fully covered already, report and stop.
+3. Read web/mock/itinerary.json to see its shape. Check web/js/api.js for how the frontend consumes this mock in mock-mode to understand which exact shape matters (itinerary responses in this repo include live_telemetry, days, caveats — read PRD.md's "live itinerary" section and web/API_CONTRACT.md for the itinerary response contract if helpful).
+4. Read traivial/server/api_models.py and grep for "Itinerary" related response models, and traivial/server/presenters.py or traivial/server/app.py for what shape the itinerary endpoint actually returns in production.
+5. Write a pytest test that validates the mock JSON parses successfully against the real response model(s). If the mock shape genuinely differs from the real model (real drift), do not weaken the test to force a pass — write it to assert reality and report the drift precisely with file:line citations.
+6. Run `python -m pytest <your_new_test_file> -q` and paste actual output. Also run `.\scripts\test.ps1 -Tier p1_3 -q` (PowerShell) to confirm no regression and paste that output.
+
+Report: whether already covered, what you added, actual test output, and any real drift found (report precisely, do not fix it yourself — the main agent will review and decide).

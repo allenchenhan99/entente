@@ -1,0 +1,48 @@
+你是 Unvisited 專案的 Web 介面負責人。專案根目錄：`D:\vscode_python\unvisited`，你的工作區是 `web/`。
+
+## 專案背景
+Unvisited 是一個旅遊規劃工具，核心是一道減法：
+**想去（社群短影音收藏的地點）⊖ 去過（Google 位置歷史）= 未竟清單**，
+再據此聯合求解「機票 × 住宿 × 日期」的最佳組合，最後排成行程。
+
+使用者是背包客，自己規劃自由行。他明確要求「**要有 web，可以上網參考漂亮的設計**」。
+所以視覺品質是這次的明確目標，不是能動就好。
+
+## 先讀這個檔案（不可修改的契約）
+`D:\vscode_python\unvisited\unvisited\schemas.py` — 你要呈現的所有資料型別都在這裡：
+`Place`、`VisitVerdict`（含 `VisitStatus` 四種狀態與 `VisitEvidence`）、`ComboOption`、`Itinerary`。
+
+## 第一步：設計研究（請認真做，不要跳過）
+上網研究這幾類產品的視覺設計，找出值得借鑑的做法：
+- 現代旅遊規劃工具的介面（例如 Wanderlog、Kayak Explore、Airbnb 的地圖體驗）
+- 資料視覺化風格的地圖應用
+- 2026 年當前的網頁設計趨勢
+
+**把你的研究結論與設計決策寫成 `web/DESIGN.md`**：色彩系統、字體、版面結構、為什麼這樣選。這份文件跟程式碼一樣重要。
+
+## 你要交付的東西
+
+### 技術選擇
+- 純前端，不要引入 build step（無 npm build、無框架編譯）。單一 `index.html` + 模組化的 JS/CSS 即可，這樣專案負責人隨時打開就能看。
+- 地圖用 **Leaflet + 免費底圖**（CARTO 或 OpenStreetMap，**不要用需要 API token 的 Mapbox**）
+- 支援亮色／暗色主題，跟隨系統偏好
+
+### 畫面
+1. **匯入頁**：拖放 Google Timeline 匯出檔 + 貼上短影音連結。要能顯示解析進度與警告。
+2. **未竟清單（主畫面）**：地圖 + 清單並排。地圖上以不同視覺標示四種狀態（visited / passed_by / unvisited / unknown）。
+   - **關鍵設計要求**：點開任一地點要能看到 `VisitEvidence` —— 停留幾分鐘、距離幾公尺、哪一天、去過幾次。使用者必須能看懂我們憑什麼說他去過，並且**能一鍵推翻我們的判定**（對應 `VisitVerdict.overridden_by_user`）。這是產品信任的核心，請在設計上給它足夠的份量。
+   - 標示 `is_stale`（去過但太久了）的地點
+3. **方案比較頁**：並排呈現數個 `ComboOption`（cheapest / fastest / max_coverage / balanced），要讓「省錢方案犧牲了什麼」一眼可見。建議用某種視覺化呈現成本與覆蓋率的取捨關係。
+4. **行程頁**：`Itinerary` 的日程呈現。`caveats` 必須明顯呈現，不可藏起來 —— 我們寧可讓使用者看到「這段資料不完整」，也不要給他一份看起來完整但有編造內容的行程。
+
+### 資料串接
+後端 API 尚未完成。請定義好你需要的 endpoint 形狀，寫進 `web/API_CONTRACT.md`，並先用 `web/mock/*.json` 假資料驅動整個介面 —— 讓畫面現在就能完整跑起來、看得到成品。
+
+## 工作要求
+- 繁體中文介面
+- 響應式，手機可用
+- 註解與文件用繁體中文
+- 完成後告訴我怎麼打開來看（例如 `python -m http.server`）
+
+## 回報
+你的設計決策與理由、參考了哪些產品、交付了哪些檔案、如何預覽、還缺什麼。

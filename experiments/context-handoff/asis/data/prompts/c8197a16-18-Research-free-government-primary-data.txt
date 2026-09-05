@@ -1,0 +1,9 @@
+You are on the data-strategy team of A-D-Aperture, a quant US-equity research shop. We already pull SEC 13F (via a custom EDGAR builder) and FRED macro, and get fundamentals/insider/ownership via FMP. But we likely UNDER-use free FIRST-HAND government/regulatory/primary sources.
+
+Your job: research FREE government / primary / regulatory data sources for US-equity alpha — broadly, not limited to what we already do. Cover:
+1. **SEC EDGAR** beyond the basics: full-text search (EFTS), 8-K real-time event feed, XBRL "frames" (one metric across all companies), Financial Statement & Notes Data Sets, N-PORT/N-CEN (fund holdings), Form 3/4/5 (insider), SC 13D/13G (activist), Form 144, proxy (DEF 14A), S-1/IPO, comment letters. What each gives + timestamps.
+2. **Macro/economic primaries**: FRED/ALFRED (vintages), BLS (CPI/jobs), BEA (GDP), Census (retail/trade/construction), Treasury (yields/auctions), EIA (energy/oil inventories), Fed (H.4.1, SLOOS), FDIC.
+3. **Other US-gov datasets with equity signal**: USPTO patents (PatentsView), FDA (drug approvals/adverse events openFDA), USDA, DOT, FAA, NOAA weather, government contracts (USAspending/SAM.gov), lobbying disclosures, congressional/senate trading (official).
+4. **Legal/IP/regulatory**: court filings (PACER/CourtListener), clinical trials (ClinicalTrials.gov).
+
+For EACH: (1) what + concrete quant/alpha use; (2) exact API/dataset + URL; (3) access (open / free key / bulk download) and rate limits; (4) history/latency + PIT/timestamp quality; (5) blunt priority (High/Med/Low) for a small shop, favoring high-signal + easy access. Emphasize genuinely FREE, first-hand, timestamped sources. Use web search to ground every source in a REAL URL (2026). Concise, structured, ~1 page, actionable. Your FINAL MESSAGE is your full self-contained report with sources (synthesized by the lead).

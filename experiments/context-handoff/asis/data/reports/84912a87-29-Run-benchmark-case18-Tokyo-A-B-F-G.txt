@@ -1,0 +1,9 @@
+Committed locally (not pushed), commit `54bfbb9`.
+
+## Case 18 report (Tokyo, 4 days, A/B/F/G)
+
+**TripGenie**: 6 screenshots captured/read (`case18_tripgenie_1..6.png`). Correctly excluded both VISITED places (明治神宮, 原宿竹下通). Explicitly recognized 六本木之丘 = Roppongi Hills as one place and scheduled it only once, with reasoning stated. Correctly treated 表參道 (PASSED_BY) as schedulable, not visited — scheduled Day1. All 3 must-visit (澀谷/秋葉原電器街/台場) covered. Every day had exactly 3 stops. Only 三鷹之森吉卜力美術館 was dropped, with explicit reasoning (4-day capacity + reservation risk) and alternative swap suggestions. Six-metric: 0/3/0/0/有/有 — essentially clean.
+
+**Traivial**: harness ran real `build_itinerary()` (no live constraints, as instructed). `len(result["days"])==4`, matching expected 4 — case17's day-count bug did NOT reproduce here (14 candidates vs capacity 12 isn't a boundary-divisible case). VISITED correctly excluded, PASSED_BY (表參道) correctly scheduled, all 3 must-visit covered. **New finding**: the 六本木之丘/Roppongi Hills duplicate was NOT deduped — both scheduled as separate stops on Day1/Day2, consuming a real capacity slot and displacing 東京鐵塔/晴空塔 (caveats named the drop but didn't flag the duplicate itself as the cause). This is the 5th confirmed instance of this bug (after case03/06/12/13), first time it demonstrably displaced a real candidate rather than being cosmetic.
+
+Artifacts: `docs/experiments/trip_com_tool_benchmark_2026-09/case18_traivial_harness.py`, `case18_traivial.json`, `screenshots/case18_traivial_render.png`, `screenshots/case18_tripgenie_1..6.png` — all created and visually verified by reading. Markdown appended at `docs/experiments/trip_com_tool_benchmark_2026-09.md`. Commit `54bfbb9`, not pushed.

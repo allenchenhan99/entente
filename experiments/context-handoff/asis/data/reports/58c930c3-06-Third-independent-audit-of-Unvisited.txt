@@ -1,0 +1,27 @@
+Report at `...\scratchpad\QA_REPORT_5.md`. Probes and screenshot in `qa5/`. Project tree clean, servers stopped.
+
+# 可以交付。
+
+兩項阻斷項都真的修好了，而且修在根因上——阻斷項 2 擋在 `_build_combos()` 的入口（centroid 計算之前），阻斷項 1 是移除重算而不是把重算改對。我在瀏覽器裡把後端 payload 與畫面文字逐欄比對：同行者頁現在「0 所有人都未訪 / 無法判定 / 誰的資料不足：你 / 成員 你 的資料不足：2021 年 coverage 過低」全部與後端一致，第四輪那三句假話一句不剩；而且它把**整段引擎 note** 帶上了畫面，比修好之前更好。
+
+**沒有新的阻斷項。** 我沿用自己上輪定的判準——系統在畫面上主動宣稱一件它自己的資料明確否定的事——找不到任何一處。前三輪修好的項目我全部重跑加瀏覽器複驗，**零迴歸**。
+
+## 你問的那個模式，掃完了
+
+前端已經清乾淨：`party.js` 的 status 重算移除、`findDominated` 早已移除；`discover.js` 的 `cpu()` fallback 我驗算過與後端公式完全一致；`combos.js` 的 `missed`／unique 集合是展示層推導而非重算後端結論。
+
+還在的只剩 **`format.js` 的 `quoteIsStale()`**，而它是被逼的——`presenters.py` 對 `VisitVerdict` 補了 `is_stale`，對 `FlightQuote`／`StayQuote` 沒補。加兩行就能讓前端改成讀欄位。
+
+**但我找到一個更深的同類問題，在後端**：`state.party_verdicts()` 從來沒把 `previous=` 傳給 `match_party()`，儘管那個參數的 docstring 明寫是給使用者改判用的。實測 PATCH 之後 `/api/party/verdicts` 仍回改判前的值。**這正是前端當初要寫 `applySelfOverride()` 的原因**——四輪來每一次「前端重算後端結論」，背後都是後端某個結論沒算完整、前端補位、然後補錯。
+
+## 交付後第一優先
+
+**M1：同城市地點相距超過約 22 公里就產不出方案，而畫面說「原因請見上方資料限制」——上面沒有那個原因。** 我量到門檻是 22 km；真實例子是東京車站 + 高尾山（兩者的 `city` 都合法是 Tokyo，相距 47 km）。
+
+更要緊的是：**你以為建立的那道不變式是空的。** `_explain_empty_combo_payload()` 在 `caveats` 非空時早退，而 `optimize_trip()` 只要跑過住宿查詢就一定會 append 一條 caveat——所以它在真實路徑上**從來不會執行**。不變式寫成了「有沒有任何 caveat」，需要的是「有沒有解釋無方案原因的 caveat」。而新增的那個不變式測試把 `_build_combos` monkeypatch 成回傳空 `ComboBuildResult()`，剛好繞開了這件事。
+
+**第二優先**是把 `previous=` 補在 `party_verdicts()`，然後刪掉 `applySelfOverride()`——這一刀同時解決改判後同行者頁統計數字沒跟上的問題，並且把那個重複四輪的模式從根上收掉。
+
+其餘（方案頁錯誤訊息重複、同行者頁 `<small>` 在暗色下 10.3px／3.66:1 低於 AA、`test_frontend_views.py` 缺 node skip guard，以及前幾輪已列可延後的那些）都在報告裡按順序排好了。
+
+最後記一筆：**這是四輪來第一次，修法本身沒有引入新的同級缺陷。** 第二輪引入了過度保守，第三輪暴露了 Promise.all 白屏，第四輪的 M8 修法引入了 party 覆蓋——這輪沒有。`tests/test_frontend_views.py` 應該是主因，前端第一次有東西擋著，而且它的負向斷言釘住的正是那幾句具體的假話，讓它們再也回不來。

@@ -1,0 +1,12 @@
+You are a read-only QA agent for the Traivial repo at D:\vscode_python\unvisited. Do NOT modify any files. Your job is to verify one P0 acceptance criterion:
+
+"API、mock、presenter 對品質狀態語意一致" — the quality-status vocabulary (observed, partial, stale, failed, not_queried, synthetic, unknown) must be used consistently across: the FastAPI server responses (traivial/server/app.py, traivial/server/api_models.py, traivial/server/presenters.py if it exists), the mock/demo data paths, and the frontend presenter code (web/js/*).
+
+Steps:
+1. Read traivial/schemas.py to find the canonical quality-status enum/literal definitions.
+2. Grep across traivial/server/, traivial/optimize/, traivial/providers/, and web/js/ for these status values and any place that presents/labels quality status to the API consumer.
+3. Check whether mock/demo data (search for "demo" or "mock" in traivial/server/) uses the same status vocabulary as real data paths, or if it silently uses different/looser values.
+4. Check web/js presenter/view code (e.g. web/js/views/*.js, web/js/store.js) renders these statuses without inventing new unlisted status strings or collapsing distinct statuses into one label incorrectly.
+5. Run any existing tests that cover this (search tests/ for "quality" "status" "presenter" related test files) and report pass/fail with the actual command and output.
+
+Report: PASS or FAIL for the criterion, with concrete file:line evidence for both directions (consistent cases AND any inconsistency found). If you find a genuine inconsistency, describe exactly what and where — do not fix it, just report. Keep the report under 400 words, cite file paths and line numbers.

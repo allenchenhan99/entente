@@ -1,0 +1,13 @@
+Committed locally (not pushed), hash `6fdda31`.
+
+## Case 20 report (Osaka, 4 days, A/F)
+
+**Both systems**: 心齋橋筋商店街 (VISITED) correctly excluded, 通天閣 (must-visit) covered, no day >3 stops.
+
+**天神橋 ambiguity — the key finding, and it split the two systems cleanly:**
+- **TripGenie: asked** (best of the three oracle outcomes). It explicitly stated "我不會在沒說明的情況下自行假設 / 不會默默假設你指的是天神橋筋商店街", produced a full 4-day itinerary with 天神橋 deliberately withheld, and closed by directly asking the user to clarify which 天神橋 they meant.
+- **Traivial: silently picked one** (worst outcome). The `Place` schema requires a single fixed lat/lng at data-construction time — there is no "unresolved candidate" representation anywhere in the pipeline. The harness (standing in for production ingest) committed to the shopping-arcade interpretation, and it was scheduled into Day 4 with zero caveat or flag distinguishing it from any other stop — the output gives no hint this station was ever ambiguous.
+
+Six-metric scores: both 0 visited-leakage, both 100% must-visit coverage, both 0 capacity violations. TripGenie: 0 manual fixes needed, strong UNKNOWN-honesty. Traivial: 1 manual fix needed (user must notice/confirm 天神橋), UNKNOWN-honesty judged a clear failure for this case — first case in the F-category where Traivial's disclosure is rated "silently assumed" rather than partial credit.
+
+Evidence: 5 TripGenie screenshots (`case20_tripgenie_1..5.png`, all read and verified) covering the full scrolled response; `case20_traivial_render.png` (static render, matches JSON); harness `case20_traivial_harness.py` run for real via `build_itinerary()` only (no `apply_live_constraints()`, per instructions — no clock constraints this case), output validated against `ItineraryResponse` and written to `case20_traivial.json`; 4 days scheduled as expected. Write-up appended to `docs/experiments/trip_com_tool_benchmark_2026-09.md` as `### 案例20`.

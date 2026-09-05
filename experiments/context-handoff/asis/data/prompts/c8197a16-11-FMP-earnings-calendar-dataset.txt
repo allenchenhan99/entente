@@ -1,0 +1,25 @@
+Project: A-D-Aperture "Data" repo at D:\AD (Windows). Remote server via `ssh lab` (user317); operational repo `lab:~/AD`. Python 3.12, stdlib only. Final FMP data sweep: collect the earnings calendar (actual vs estimated EPS/revenue = earnings surprises) for our universe onto the server and load into ad.sqlite.
+
+KEY FACTS (rely on these):
+- FMP stable API base: `https://financialmodelingprep.com/stable/`. The API key is in Infisical on the server; run any fetch that needs it via:
+  `ssh lab "cd ~/AD && ~/.local/bin/infisical run --projectId 6a1461f2-0bb6-48d4-a9b1-aca30d4aa96a --env prod --silent -- python3 <script> <args>"`
+  The script reads the key from env var `FMP_API_KEY` (already injected by infisical run). NEVER print the key.
+- Endpoint (MARKET-WIDE, not per-symbol): `earnings-calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` returns a JSON list across ALL symbols for that window, each row: symbol, date, epsActual, epsEstimated, revenueActual, revenueEstimated, lastUpdated. FMP caps rows per call, so iterate one CALENDAR YEAR at a time (from=YYYY-01-01,to=YYYY-12-31) for years 2010..2026.
+- Our universe symbols (FMP-native) are in the server DB table `sp500_profile__company_profile`, column `symbol` (599 rows). Filter the earnings rows to symbols in this set.
+- DB engine + conventions: `~/AD/scripts/manage_db.py`, `~/AD/scripts/ad_db.py`; template `D:\AD\scripts\ad_datasets\sp500_corporate_actions.py` (surrogate id pk, indexes, source_file under data/, DATASET object). Server system python3 is stdlib-only.
+
+DELIVERABLE 1 — `D:\AD\scripts\fetch_fmp_earnings.py` (stdlib: argparse, csv, json, os, sqlite3, time, urllib). Reads FMP_API_KEY from env (exit 2 with a stderr message if absent, except under --self-test). Reads the universe symbol set from `--db ad.sqlite` (sp500_profile). For years `--from-year 2010` to `--to-year 2026`, GET earnings-calendar for that year (retry/backoff on 429/5xx), keep rows whose symbol is in the universe, and write ONE CSV `--out data/fmp` -> `fmp_earnings_calendar.csv` with header EXACTLY: symbol,date,epsActual,epsEstimated,revenueActual,revenueEstimated,lastUpdated. Print per-year kept-row counts and a final total. `--self-test`: monkeypatch the HTTP call to return a canned 2-row list (one in-universe symbol, one not) using a fake 1-symbol universe, assert only the in-universe row is written, print SELF-TEST PASS, exit 0.
+
+DELIVERABLE 2 — `D:\AD\scripts\ad_datasets\sp500_earnings.py`: Dataset name `sp500_earnings`, title "S&P 500 earnings calendar & surprises (FMP)", source "FMP (Financial Modeling Prep) stable API", version "2026-08-27", ONE table `earnings_calendar` src "fmp/fmp_earnings_calendar.csv", surrogate id pk, columns after id: symbol(TEXT), date(TEXT), epsActual(REAL coerce="real"), epsEstimated(REAL coerce="real"), revenueActual(REAL coerce="real"), revenueEstimated(REAL coerce="real"), lastUpdated(TEXT); indexes ("symbol",),("date",),("symbol","date"). Add a View `v_surprise` using {earnings_calendar}: symbol,date,epsActual,epsEstimated, and (epsActual-epsEstimated) AS eps_surprise WHERE epsActual IS NOT NULL AND epsEstimated IS NOT NULL. Docstring: `date` is the earnings date (event time); this is FMP-processed — actuals should be cross-checked to filings before use as formal evidence.
+
+STEP 3 — deploy + run + build ON THE SERVER:
+  `scp D:\AD\scripts\fetch_fmp_earnings.py lab:~/AD/scripts/` and `scp D:\AD\scripts\ad_datasets\sp500_earnings.py lab:~/AD/scripts/ad_datasets/`
+  `ssh lab "cd ~/AD && ~/.local/bin/infisical run --projectId 6a1461f2-0bb6-48d4-a9b1-aca30d4aa96a --env prod --silent -- python3 scripts/fetch_fmp_earnings.py --db ad.sqlite --out data/fmp --from-year 2010 --to-year 2026"`
+  `ssh lab "cd ~/AD && python3 scripts/manage_db.py --db ad.sqlite build sp500_earnings && python3 scripts/manage_db.py --db ad.sqlite verify | tail -4"`
+
+MANDATORY acceptance — run and paste real output:
+  A) `python D:\AD\scripts\fetch_fmp_earnings.py --self-test` -> SELF-TEST PASS, exit 0.
+  B) local import prints `sp500_earnings ['earnings_calendar']`.
+  C) server build shows earnings_calendar rows > 20000 and final verify prints `all tables consistent with catalog.`
+  D) `ssh lab "cd ~/AD && python3 scripts/manage_db.py --db ad.sqlite query \"SELECT COUNT(*) n, COUNT(DISTINCT symbol) syms, MIN(date) mn, MAX(date) mx FROM sp500_earnings__earnings_calendar\""` shows syms>=550.
+Boundaries: create only the two new files locally + the scp/ssh actions; modify nothing else; never print the API key. If rows < 5000, treat as FAILURE (universe-filter or pagination bug) and investigate. After finishing, INDEPENDENTLY re-run A/B/C/D and report the real output.

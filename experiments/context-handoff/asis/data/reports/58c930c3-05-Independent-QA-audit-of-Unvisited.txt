@@ -1,0 +1,53 @@
+第二輪稽核完成。報告在 `C:\Users\User\AppData\Local\Temp\claude\D----\58c930c3-4222-4038-90d4-ac971c0aa305\scratchpad\QA_REPORT_2.md`，探測腳本 `q1`–`q5` 在同層 `qa\`。專案檔案零修改（`git status` 乾淨）。
+
+## 修復驗證：15 項中 11 項真的修好，4 項只修了一半
+
+C1–C4 我獨立重現過，四個案例全部回 UNKNOWN。C5 我推導過新的 `_dominates()`，排序鍵與集合包含式支配相容，front 只增不減不會留下被支配解 —— 是紮實的修法不是繞過。presenter 的 property 覆蓋我逐一比對 API_CONTRACT，完整。`geo/coverage.py` 的抽取、CORS regex、`has_coords` 驗證都是直接命中根因。
+
+**但 M1/M3/M5/M9 只修在引擎，沒修在出口。** 這是本輪的主軸：問題幾乎全部落在「模組誠實產生了警告，然後在交給下一層時被丟掉」。
+
+## Critical（3）
+
+**C1 — `/api/combos` 交付合成房價，警告被 server 丟掉。** `state._build_combos()` 只 `return result.options`，把 `caveats`/`failures`/`stay_is_synthetic` 全部丟棄。實測真實資料模式下：`stay.source: synthetic:stay-model-v1`、`total_cost: 17491.17`，payload 裡沒有任何欄位告知這是編造的；`/api/itinerary` 的 caveats 是 `[]`、`is_complete: true`。而 `optimize_trip()` 明明產生了「不可視為真實報價」。`combos.js`/`discover.js` 對 `synthetic`/`caveat`/`.error` 零引用。這比第一輪更嚴重 —— 現在有畫面把數字寫給使用者看。
+
+**C2 — 空洞閘門過度修正，而且門檻是 14 天不是 30 天。** PM 問的過度保守：確實存在，比預期更糟。實測 7 年資料：
+
+```
+缺 13 天(連續) density=0.995 -> unvisited conf=0.995
+缺 14 天(連續) density=0.995 -> unknown   conf=0.0     <- 懸崖
+散佈短洞、密度僅 88%          -> unvisited conf=0.925  <- 反而被信任
+```
+
+密度差 0.03%，信心從 0.995 掉到 0。而且是**布林、全域、與地點無關**的 veto：2019 年的 61 天空洞讓 2026 年任何地點都無法判定。一趟沒漫遊的出國、一次換手機、或 Google 自己的雲端→裝置搬遷，就會讓整份未竟清單變成 UNKNOWN。**我的判斷：這與原本的缺陷一樣有害。** `data_gaps` 該是降信心+寫進 note 的依據，不是 veto —— `density` 已經是連續可校準的量，veto 與它重複且互相打架。順帶一提，demo 用 `daily_record_probability=1.0` 永遠踩不到，只有真實使用者會踩到。
+
+**C3 — 前端在 demo 模式顯示「真實後端」。** `api.js` 用 `/api/config/rules` 當探測點，而它是唯一不經過 `present(is_demo=...)` 的端點；`markDemo()` 只看頂層物件，但 `/api/places`、`/api/verdicts`、`/api/discover`、`/api/party/verdicts` 都是陣列，旗標被蓋在每個元素上。預設路由 `list` 剛好只抓那兩個陣列 → 使用者對著 5 個編造的地點看到「真實後端 · 自動」。`test_server.py:94/97` 斷言的正是那個讓前端瞎掉的形狀。
+
+## Major（7，摘要）
+
+`/api/discover` 在預設 server（`flight_client=None`）回 `[]` 無理由｜`/api/combos` 的 `error` 不在契約也沒人讀，且京都/奈良這類無機場城市直接 503 並被誤分類成 `flight_source_failed`｜`places.json` 重複 id → `/api/verdicts` 500（引擎 raise 了，HTTP 邊界沒接）｜**server 自己重寫了一套 discover，`missing_city` 修復從未被執行到**（grep 確認只有測試 import `discover_destinations`），且同樣 `if place.city: continue`｜PASSED_BY 排進行程但證據沒跟進去｜**上傳的 Timeline 被解析兩次**（`.uploads/` 與 `imports/` 都在，336 筆變 672 筆）｜`covers()` 的雙重語意讓 VISITED 側完全無感、UNVISITED 側直接封殺。
+
+## 遺留 Minor：8 項全部仍在，1 項升級
+
+`discover._centroid_area()` 的算術平均經度**升級 Major** —— server 新增的 `_area_for_places()` 複製了同樣的寫法，現在是 1 對 2。跨換日線的落腳點被放到地球另一邊，配合新的 `if total_place_count and not cov.place_ids: continue` 會把所有候選剪光、無 caveat。而且新測試 `test_centroid_uses_circular_mean_for_dateline_longitudes` **測的是 `itinerary.plan._centroid`** —— 第一輪就已經正確的那個函式。
+
+新引入的 Minor：evidence note 變成中英混雜且會被 `list.js:197` 原樣渲染；跨午夜短停留現在算兩天覆蓋（合併時掉了 `< 1 day` 短路），而 test helper 在同一 commit 從 `+30h` 改成 `+22h` 剛好遮住；`MIN_COVERAGE_SPAN_DAYS_FOR_UNVISITED=180` 的實際生效點是 126 天（四個月完整紀錄就能滿分宣告「從沒去過」）。
+
+## 新測試品質：比上輪好，但同一個毛病
+
+修對的：`MIN_COVERAGE_QUALITY_FOR_UNVISITED` 兩側都測了（113/365 vs 361/365），`test_a_visit_before_the_coverage_window_is_never_seen` 的弱斷言改成單一狀態。
+
+仍有的盲區：**修好一個門檻、又新增了一個沒測的門檻** —— 14 天這條線兩側完全沒測，唯一的空洞測試用 242 天。更根本的是，**沒有任何測試斷言「正常使用者仍然拿得到 UNVISITED」** —— 測試只釘住保守方向的邊界，沒釘住可用性的邊界，所以 C2 全綠通過。另外 `/api/discover` 零 server 測試、`flight_source_unavailable` 分支沒測（正好是 M1），沒有測試驗證合成價格會被告知使用者（正好是 C1）。
+
+## 兩個問題
+
+**1. 三個承諾成立了嗎？**
+- 承諾一：**成立**，有一處退步（M5 + note 中英混雜）。
+- 承諾二：**技術上成立，代價過高。** 四條漏洞全堵死了，但現在只要有一絲不完美就一律 UNKNOWN。原文是「寧可回傳 UNKNOWN，也不猜」，現在的實作是棄權。一個永遠說 UNKNOWN 的系統跟一個永遠說 UNVISITED 的一樣沒用。
+- 承諾三：**不成立。** 引擎修好了，`state._build_combos()` 把 caveats 全丟了。
+
+**2. 可以交付了嗎？還不行，差三件事，都在引擎與畫面之間：**
+1. 合成房價必須在畫面上標示（C1）—— 資料已標好、caveat 已產生，只是被丟掉，這是最短的一段路。
+2. 空洞閘門從 veto 改成降信心（C2）—— 否則唯一的目標使用者幾乎必然踩到。
+3. demo 模式必須在第一屏誠實（C3）。
+
+修完這三項我認為可以交付；M1–M7 可以排在交付後（但兩份 discover 實作建議儘早收斂）。工程品質是高的 —— 剩下的問題有一個共同形狀：**每個模組都誠實地產生了警告，然後在交給下一層時被丟掉。** `OptimizeResult.caveats`、`is_demo`、`DiscoveryCandidate.failure_reason` 都是同一回事。不是演算法問題，是出口沒接上。

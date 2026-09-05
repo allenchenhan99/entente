@@ -1,0 +1,36 @@
+Repo: D:\vscode_python\unvisited (Traivial). You may ONLY touch web/mock/verdicts.json. Do not touch any other file.
+
+A QA contract test (tests/test_api_contract_mock_verdicts_next.py, already committed) found real drift between web/mock/verdicts.json (17 entries) and the real VerdictResponse Pydantic model (traivial/server/api_models.py:97-110). Your job: fix web/mock/verdicts.json to match reality exactly, using the EXACT production logic below — do not guess or invent values.
+
+**Bug 1 — wrong status wire value:** `traivial/schemas.py:54-56` defines the real enum: `VISITED = "visited"`, `PASSED_BY = "passed_by"`, `UNVISITED = "traivial"` (deliberate pun on the product name — yes, the real wire value for "not yet visited" is literally the string `"traivial"`, not `"unvisited"`), `UNKNOWN = "unknown"`. The mock currently has 5 entries with `"status": "unvisited"` (place_ids: p_arashiyama, p_arabica, p_umeda, p_nakazaki, p_katsuoji). Change all 5 to `"status": "traivial"`.
+
+**Bug 2 — 6 missing required fields on every entry:** `visit_evidence_kind`, `is_inferred_visit`, `needs_confirmation`, `confirmation_reason`, `effective_match_radius_meters`, `effective_match_radius_kind`. Compute each using this EXACT algorithm (read traivial/server/presenters.py lines 370-398 and 331-355 yourself to confirm before writing, and traivial/geo/match.py's `_effective_rule_for_place` and `_path_dwell_radius` functions, and `rule_for()` for category-based default radius):
+
+```
+def visit_evidence_kind(entry):
+    if entry.status not in ("visited", "passed_by"):
+        return "none"
+    ev = entry.evidence
+    if ev.matched_segment_ids:  # non-empty list
+        return "stay_segment"
+    if (ev.dwell_minutes is not None and ev.distance_meters is not None
+        and ev.visit_count > 0 and ev.first_visit is not None and ev.last_visit is not None):
+        return "path_dwell"
+    return "none"
+
+is_inferred_visit = (visit_evidence_kind == "path_dwell")
+needs_confirmation = (visit_evidence_kind == "path_dwell") and (not overridden_by_user)
+confirmation_reason = "path_dwell_without_stay_segment" if needs_confirmation else None
+```
+
+For `effective_match_radius_meters`/`effective_match_radius_kind`: this requires knowing each place's category and coordinates, since it's computed from the joined `Place` object, not the verdict alone. Cross-reference each `place_id` in verdicts.json against `web/mock/places.json` (same place_ids) to get `category` and `has_coords`.
+- If the place is not found in places.json, or `has_coords` is false: `effective_match_radius_meters: null, effective_match_radius_kind: null`.
+- Otherwise: read `traivial/geo/match.py` for `_effective_rule_for_place(place)` and `rule_for(category)` to determine the real `match_radius_meters` for that place's category (and whether an area-specific override applies vs the plain category default — if you can't determine an area-specific override from a mock place, use the category default via `rule_for(category).match_radius_meters`).
+  - If `visit_evidence_kind == "path_dwell"`: `effective_match_radius_meters = _path_dwell_radius(rule)` (read that function's actual formula), `effective_match_radius_kind = "path_dwell"`.
+  - Else: `effective_match_radius_meters = rule.match_radius_meters`, `effective_match_radius_kind = "category_rule"` (use "category_rule" unless you find concrete evidence in match.py that an area-specific rule applies to this exact mock place, in which case use "area_place").
+
+Apply this to all 17 entries (note p_gion already has visit_evidence_kind/is_inferred_visit/needs_confirmation/confirmation_reason set correctly — only add its missing effective_match_radius_meters/effective_match_radius_kind, verify the existing 4 fields are still correct per the algorithm above and fix if not).
+
+After editing, run `python -m pytest tests/test_api_contract_mock_verdicts_next.py -q` and paste actual output — it must pass. Then run `.\scripts\test.ps1 -Tier p1_3 -q` (PowerShell) and paste actual output — must show no regressions (347 passed baseline). Then run `.\scripts\test.ps1 -Tier browser -q` and paste output too, since this mock feeds frontend rendering.
+
+Report: exact diff summary (which fields changed for which place_ids and why, citing your category/radius lookups per place), and full real test output for all three commands. Do not claim success without pasting real output.

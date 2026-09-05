@@ -1,0 +1,13 @@
+Committed locally (not pushed), commit `26f9945`.
+
+## Report: Case 16 (Osaka, 5 days, B/D/E)
+
+**TripGenie**: 4/4 must-visit (大阪城/道頓堀/環球影城/通天閣) all included. Dropped exactly 5 of 17 candidates, each with a named, specific reason (e.g., 大阪造幣局 rejected for being off-season for its cherry-blossom identity vs a November trip). Last day: 1 light stop 08:00–10:00 near Umeda, nothing after 11:00 — matches oracle. Full "取捨邏輯" (decision-logic) section at the end. Screenshots: `case16_tripgenie_1.png` through `_7.png`, all read and verified.
+
+**Traivial**: Only 3/4 must-visit — Universal Studios Japan (環球影城) was silently dropped by `build_itinerary()`'s geography-based clustering (USJ sits far from the other clusters), and this drop is **not disclosed anywhere**: `excluded_place_ids` is an empty array, and no caveat names USJ. Only `is_complete=false` hints something is missing. Last day: 0 stops (even more conservative than oracle's "ideally 0"), correctly respecting the 11:00 cutoff. All days ≤3 stops. Per-stop `reason` fields are generic template text, not individualized like TripGenie's. Harness: `case16_traivial_harness.py`, output validated against `ItineraryResponse`, JSON at `case16_traivial.json`, render screenshot `case16_traivial_render.png`.
+
+**Six-metric comparison**: coverage of must-visit is the standout gap (TripGenie 4/4 vs Traivial 3/4); infeasibility is 0 for both; manual-edit count is 0 (TripGenie) vs ≥1 (Traivial, user must discover USJ's absence); judgment evidence is strong/named (TripGenie) vs partial/templated with an empty `excluded_place_ids` (Traivial); UNKNOWN honesty present on both sides but Traivial's flag doesn't identify what's missing.
+
+Deliberate workaround applied and documented: `outbound_arrival="10:00"` to avoid the known case08/09 arrival-day-wipe bug (oracle has no real arrival constraint this case).
+
+Commit: `26f9945` (local only, not pushed, per instructions).

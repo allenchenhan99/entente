@@ -1,0 +1,12 @@
+Repo: D:\vscode_python\unvisited (Traivial). You may ONLY add a new test file under tests/ (e.g. tests/test_api_contract_mock_discover_next.py). Do NOT modify any file under traivial/ or web/ except reading them for reference.
+
+P1 item 5 ("API 契約機械化"): extend mock/model contract-test coverage to the `discover` endpoint slice. tests/test_api_contract_mock_combos_next.py is the established pattern for this kind of test in this repo — read it first as a structural template.
+
+Steps:
+1. Check tests/ for whether a discover-mock-vs-model contract test already exists (grep "mock/discover.json" in tests/) — if fully covered, report and stop.
+2. Read web/mock/discover.json to see its shape. Check web/js/api.js for how the frontend consumes this mock in mock-mode to understand which shape actually matters.
+3. Read traivial/server/api_models.py and grep for "Discover" related response models, and traivial/server/presenters.py or traivial/server/app.py for what shape the discover endpoint actually returns in production.
+4. Write a pytest test validating the mock JSON parses against the real response model(s). If the mock genuinely differs from the real model, do NOT weaken the test — assert reality and report the drift precisely with file:line citations; do not fix it yourself.
+5. Run `python -m pytest <your_new_test_file> -q` and paste actual output. Also run `.\scripts\test.ps1 -Tier p1_3 -q` (PowerShell) and paste output.
+
+Report: whether already covered, what you added, actual test output, and any real drift found (report precisely; the main agent will review and decide the fix).

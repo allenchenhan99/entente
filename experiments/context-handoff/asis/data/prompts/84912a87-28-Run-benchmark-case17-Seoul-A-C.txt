@@ -1,0 +1,70 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-16 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-16 writeups are good templates for concise-but-rigorous format.
+
+## Your assigned case: Case 17
+
+**City**: Seoul. **Days**: 4 (dates 2026-11-14 to 2026-11-17).
+**Categories**: A (already-visited exclusion), C (arrival constraint so late it's effectively next-day).
+**Already visited (VISITED, exclude)**: 弘大商圈 (Hongdae shopping district).
+**Arrival constraint**: flight arrives 23:30 on day 1 (2026-11-14) — essentially equivalent to nothing being schedulable that day at all.
+**Must-visit**: 汝矣島 (Yeouido).
+**Other candidates (8)**: 東大門, 梨泰院, 南山公園, 仁寺洞, 益善洞韓屋街, 西村, 新沙洞林蔭道, 廣藏市場.
+**Daily capacity**: 3/day. **Party**: 2 adults. No departure constraint this case.
+
+## Oracle (write down before testing)
+- 弘大商圈 must NOT appear in either output.
+- 汝矣島 (must-visit) should appear if feasible.
+- Day 1 (23:30 arrival) should have 0 stops — this is even more extreme than case08's 20:00 arrival, essentially no scheduling should happen.
+- No day should exceed 3 stops.
+- Candidates: 1 must-visit + 8 others = 9 schedulable items vs 4 days×3=12 slots minus whatever day 1 loses (so effectively 3 days×3=9 slots) — this is right at the edge, watch whether the "lost" day-1 slots get reflected honestly or whether either system pretends day 1 still has capacity.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 3, "我已經去過弘大商圈（有明確逛過紀錄）請不要排進行程", "第一天晚上23:30才抵達首爾，等於隔天才能開始行程", must-visit 汝矣島, other 8 candidates, ask for day-by-day with reasons.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case17_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — build_itinerary + apply_live_constraints)
+- Template: case02/08's arrival-only constraint pattern (FixtureRouteProvider/FixtureHoursProvider synthetic, no live queries). Set `outbound_arrival="23:30"`, leave `return_departure` unset (no departure constraint) — but per case09's confirmed finding, leaving it unset while calling apply_live_constraints will ALSO wipe the LAST day (not just arrival day) due to `is_departure_day = (departure_at is None and index==last_index)`. This means BOTH day 1 (correctly, given 23:30 arrival) AND day 4 (incorrectly/bug-triggered) may get wiped. Run it, see what actually happens, and report the real result honestly — if day 4 also empties out due to the known bug, say so explicitly as yet another confirmation, don't hide or route around it this time (unlike case16 where a workaround was used) — this case is specifically useful for observing the SAME bug from a different case's data to strengthen the pattern.
+- Real approximate Seoul coordinates (reuse from case10/11/12 harnesses: Hongdae ~37.5563,126.9236, Yeouido ~37.5219,126.9245, etc).
+- VISITED verdict for 弘大商圈, UNVISITED for rest.
+- base_area="首爾" (no specific area constraint this case) — pick a reasonable central Seoul coordinate for area_lat/area_lng, e.g. 37.5665,126.9780 (city center), and note in your write-up that this case's "stay area" is unconstrained/nominal, not a real E-test.
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case17_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case17_traivial_harness.py`, capture real output — report Day1/2/3/4 stop counts explicitly, whether 弘大商圈 leaked, and whether 汝矣島 survived (and if not, whether it was lost to the arrival-side or departure-side default bug).
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case17_traivial.json`, screenshot to `screenshots/case17_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例17（首爾，4天，情境A/C）` to the benchmark .md, concise bullet format matching case06-16: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. If day 4 gets unexpectedly wiped by the unset-departure bug, name this explicitly as "第N次確認同一個bug" (Nth confirmation), consistent with how prior cases numbered these confirmations.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, Day1-4 stop counts for Traivial, whether 汝矣島 survived and why/why not, confirmation screenshots/harness were actually created and read, commit hash.

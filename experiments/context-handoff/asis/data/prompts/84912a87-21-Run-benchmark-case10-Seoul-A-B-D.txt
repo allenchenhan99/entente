@@ -1,0 +1,67 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology notes and case01-09 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-09 writeups are good templates for concise-but-rigorous format. IMPORTANT CONTEXT: cases 08 and 09 found a real systemic bug in Traivial's `traivial/itinerary/live_constraints.py` — leaving arrival OR departure time unset causes that boundary day to be silently wiped entirely (treated as "flight evidence missing" rather than "no constraint"). This case has NO arrival/departure clock constraints at all (pure A/B/D test), so you should NOT call `apply_live_constraints()` at all this time — just use plain `build_itinerary()` like case01/03/06/07 did. Do not introduce that bug artificially by calling a function this case doesn't need.
+
+## Your assigned case: Case 10
+
+**City**: Seoul. **Days**: 5 (dates 2026-11-14 to 2026-11-18).
+**Categories**: A (already-visited exclusion), B (many candidates vs available days), D (daily capacity 3/day, normal).
+**Already visited (VISITED, exclude)**: 景福宮 (Gyeongbokgung Palace), 明洞 (Myeongdong).
+**Must-visit (2)**: 北村韓屋村 (Bukchon Hanok Village), 望遠市場 (Mangwon Market).
+**Other candidates (12, deliberately more than the remaining slots to force real selection — 5 days×3=15 total slots, minus the 2 must-visit leaves 13 slots for 12 others, so it's tight but should mostly fit; the real B-test here is combined with A since 2 spots are pre-excluded)**: 東大門, 弘大, 梨泰院, 南山公園, 仁寺洞, 汝矣島, 樂天世界塔, 益善洞韓屋街, 西村, 新沙洞林蔭道, 廣藏市場, 首爾路7017.
+**Daily capacity**: 3/day. **Party**: 2 adults. No arrival/departure clock constraints this case.
+
+## Oracle (write down before testing)
+- 景福宮 and 明洞 must NOT appear in either output.
+- 北村韓屋村 and 望遠市場 should appear if feasible.
+- No day should exceed 3 stops.
+- With 14 total non-excluded candidates (2 must-visit + 12 others) against 15 slots, coverage should be near-complete on both sides — this case is more of a baseline/control check after the more adversarial cases 05-09, similar spirit to case01.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for the launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 3, "我已經去過景福宮和明洞（有明確入內/逛過紀錄）請不要排進行程", must-visit 北村韓屋村+望遠市場, the other 12 candidates, ask for day-by-day with reasons.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case10_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — plain build_itinerary, NO apply_live_constraints)
+- Template: `case01_traivial_harness.py` or `case03_traivial_harness.py` (plain, no live-constraints layer).
+- Real approximate Seoul coordinates (Gyeongbokgung ~37.5796,126.9770, Myeongdong ~37.5636,126.9850, Bukchon ~37.5826,126.9832, Mangwon Market ~37.5563,126.9106, etc — use your own knowledge for the rest, plausible real-world values).
+- VISITED verdicts for 景福宮/明洞 with real evidence fields, UNVISITED for the rest.
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case10_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case10_traivial_harness.py`, capture real oracle-check output.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case10_traivial.json`, screenshot to `screenshots/case10_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例10（首爾，5天，情境A/B/D）` to the benchmark .md, concise bullet format matching case06-09: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding (even if this case is a "both did fine" baseline result, say so honestly — don't force-find a problem that isn't there).
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, whether this was a clean baseline case or found anything new, confirmation screenshots/harness were actually created and read, commit hash.

@@ -1,0 +1,17 @@
+## Summary
+
+I've successfully completed the itinerary contract test (P1 item 5). Here are the results:
+
+**Deliverables:**
+- ✅ Created `tests/test_api_contract_mock_itinerary_next.py` — mirrors the established combos pattern
+- ✅ New test passes: `test_mock_itinerary_json_validates_against_itinerary_response_model`
+- ✅ P1.3 regression: 347 tests passed, no regressions
+
+**Findings:**
+- **No contract drift detected** — the mock JSON in `web/mock/itinerary.json` validates perfectly against the real `ItineraryResponse` Pydantic model
+- Mock includes all required fields: combo_id, generated_at, is_complete, plan_mode, pace, is_schedule, excluded_place_ids, caveats, and properly structured days/stops
+- Optional fields (live_telemetry) and fields with defaults (max_stops_per_day=3) are correctly handled
+
+**Test file location:** D:\vscode_python\unvisited\tests\test_api_contract_mock_itinerary_next.py
+
+The test is now part of the contract validation suite and will catch any future divergence between the mock fixture and the actual API response model.

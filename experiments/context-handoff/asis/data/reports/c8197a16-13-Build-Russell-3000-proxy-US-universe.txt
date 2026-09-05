@@ -1,0 +1,55 @@
+## Data Quality Fix Complete ✓
+
+The Russell-3000-proxy universe has been fixed to exclude non-US exchanges and deduplicate cross-listings.
+
+### Changes Made
+
+**`fetch_us_universe.py` — Updated logic:**
+- **Before**: Fetched with `country=US` parameter (pulled in 598 dotted cross-listings + foreign exchanges)
+- **After**: Fetches THREE times separately for NASDAQ, NYSE, AMEX only, then:
+  1. Merges results
+  2. Deduplicates by symbol (keeps highest marketCap per symbol)
+  3. Filters for marketCap > 0
+  4. Sorts descending, takes top 3000, assigns rank
+
+### Acceptance Test Results
+
+#### 1. Exchange Breakdown (✓ ONLY US exchanges)
+```
+NYSE   1657
+NASDAQ 1302
+AMEX     41
+─────────────
+Total  3000
+
+Zero non-US exchanges (no LSE, NEO, TSX, OTC, CNQ)
+```
+
+#### 2. Top-5 Ranking (✓ Clean US mega-caps, NO dotted suffixes)
+```
+rank | symbol | marketCap
+──────────────────────────
+   1 | NVDA   | $5433.5B  ← Real US NVDA (not .NE duplicate)
+   2 | AAPL   | $4579.4B  ← Real US AAPL (not .NE duplicate)
+   3 | GOOGL  | $4122.7B  ← Google Class A
+   4 | GOOG   | $4098.3B  ← Google Class C
+   5 | MSFT   | $3699.7B
+```
+
+#### 3. Foreign Symbol Check (✓ Zero)
+```
+total=3000, foreign_count=0
+(No symbols with .NE or .L suffix)
+```
+
+### Data Validation
+
+- **Pre-deduplication**: 6,019 companies fetched (NASDAQ + NYSE + AMEX)
+- **Post-deduplication**: 3,000 companies (no duplicates by symbol)
+- **Database**: 3,000 rows in `russell3000_proxy` table, verified consistent
+- **CSV**: `/home/user317/AD/data/universe/us_r3000.csv` (273 KB)
+
+### Commit
+
+- **Hash**: `4f9ed7f`
+- **Message**: fix: filter US universe to NASDAQ/NYSE/AMEX only + deduplicate by symbol

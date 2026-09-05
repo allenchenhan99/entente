@@ -1,0 +1,15 @@
+Committed locally as `27b7780` (not pushed, per instructions).
+
+**Case 19 summary (Kyoto, 3 days, C/D/E):**
+
+No partial/broken case19 files existed — prior attempt had left only the (valid, complete) Traivial harness+JSON; I reran it fresh and did the TripGenie test from scratch (screenshots + full-text extraction, both read/verified).
+
+**Traivial**: Day1=2 stops (清水寺, 錦市場), Day2=3 stops (二年坂三年坂, 平安神宮, 嵐山竹林), Day3=0 stops. `len(days)`=3 (correct, no case17 day-count bug). 錦市場 **survived** (in Day1). Both boundary clocks set correctly avoided the null-default departure-wipe bug (08/09/17) and the day-count/capacity-divides-evenly bug (17) — Day3's wipe is traceable to the real 11:30 flight, not a None-default.
+
+**TripGenie**: Day1=2 (錦市場+祇園花見小路), Day2=3 (清水寺, 二年坂三年坂, 伏見稻荷大社), Day3=0. 錦市場 explicitly placed on arrival day with reasoning; all 4 excluded candidates named with reasons plus an alternate itinerary offered.
+
+**Six metrics**: both systems scored well — must-visit coverage 1/1 (100%) for both, 0 infeasible days, 0 manual fixes needed, evidence present, N/A for repeat-visited/UNKNOWN (no such data in this case).
+
+**Geo-proximity question (case11/14/19 series)**: This is the third data point and it *survived* this time, unlike case11 (far, lost) and case14 (inside stay area, lost). But tracing the mechanism shows survival was incidental, not protective: `build_itinerary()`'s clustering has no `must_visit` awareness — it just happened to nearest-neighbor-bucket 錦市場 into Day1 (non-wipe day) rather than Day3, the same random-bucketing mechanism that lost case14's must-visit into Day3. Conclusion: geographic proximity to stay area has no stable causal relationship with must-visit survival — it's luck of which day the clustering assigns, independent of and blind to the later boundary-day wipe step.
+
+Evidence: `docs/experiments/trip_com_tool_benchmark_2026-09/case19_traivial_harness.py`, `case19_traivial.json`, 5 screenshots under `.../screenshots/case19_*`. Commit hash `27b7780`.

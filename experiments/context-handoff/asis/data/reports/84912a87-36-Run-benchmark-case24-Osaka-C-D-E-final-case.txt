@@ -1,0 +1,15 @@
+Committed locally (not pushed, per standing no-auto-push rule). Commit hash: `9ecf6a7`.
+
+**Case 24 (Osaka, 3 days, C/D/E) — all 24 cases complete.**
+
+Six metrics:
+- Traivial: 重複推薦=N/A; 必去覆蓋=1/1(100%, 大阪城存活but by grouping coincidence); 不可執行=0; 人工修改=0; 判定證據=部分(邊界日清空有真實班機時間根因,但不點名哪5個候選被犧牲/為何); UNKNOWN誠實=N/A
+- TripGenie: 必去覆蓋=1/1; 不可執行=0; 人工修改=1(中之島公園分類/最終行程輕微不一致); 判定證據=有(8候選5必排3可選完整取捨清單); 未完全命中字面0站預期(Day1實排2站/Day3實排1站,但文字明確定性為非正式行程)
+
+Stop counts: Traivial Day1=0, Day2=3 (黑門市場/難波八阪神社/大阪城), Day3=0 — confirmed via harness stdout and the render screenshot. TripGenie Day1=2 (道頓堀/心齋橋), Day2=3 (大阪城/中之島公園/梅田空中庭園展望台), Day3=1 (難波八阪神社). 大阪城 present in both.
+
+Evidence: harness `docs/experiments/trip_com_tool_benchmark_2026-09/case24_traivial_harness.py`, validated JSON `case24_traivial.json`, 5 TripGenie screenshots + 1 Traivial render screenshot all read and verified in `docs/experiments/trip_com_tool_benchmark_2026-09/screenshots/`.
+
+Aggregate summary headline numbers (in the new 總結 section): must-visit no cross-phase protection confirmed in 5 cases (07,11,14,19,24); arrival/departure null-default day-wipe bug in 3 cases (08,09,17) vs. correct explicit-clock path holding in 4 cases (02,05,19,24); day-count/span decoupling found once (17) and checked-not-reproduced twice (18,19); bilingual/duplicate no-dedup confirmed in 6 cases (03,06,12,13,18,23); place-identity ambiguity pushed silently into schema in 1 case (20); Trip.Planner CORS infra failure blocking it from all 23 subsequent cases after case01's diagnosis. TripGenie's own flaws: 2 cases of internal draft/conclusion inconsistency (07, 24).
+
+All 24 cases complete.

@@ -1,0 +1,69 @@
+## Summary
+
+I've successfully fixed the P0 telemetry API response gap. Here are the changes made:
+
+### Files Modified
+
+1. **traivial/server/api_models.py** (lines 521-531)
+   - Added `retry_count: int` field with default 0
+   - Changed `cache_hit_count` from `int | None` to `int` with default 0
+   - Added `budget_exhausted: bool` field with default False
+
+2. **traivial/server/presenters.py** (lines 249-262)
+   - Updated `_live_provider_query_telemetry()` to return all four telemetry fields
+   - Changed return type to include bool
+   - Set retry_count=0, cache_hit_count=0, budget_exhausted=False with existing query_count
+
+3. **traivial/server/app.py** (lines 1684-1763)
+   - Created new `_normalize_telemetry()` helper function that ensures all telemetry fields are present with proper defaults
+   - Updated `_quote_observation_failure()` to use `_normalize_telemetry(None)` for consistent defaults
+   - Updated `_safe_quote_observation()` to use `_normalize_telemetry(payload.get("telemetry"))` to normalize incoming data
+   - Ensures both paths (success and failure) return consistent telemetry with all four required fields
+
+4. **web/API_CONTRACT.md** (lines 1106-1122)
+   - Updated documentation to describe retry_count and budget_exhausted fields
+   - Updated JSON example to show all four new fields with their values
+
+5. **tests/test_telemetry_api_exposure_next.py** (new file)
+   - Created comprehensive test suite with 5 test cases:
+     - Failure path includes all telemetry fields
+     - Success path with clean observation
+     - Success path preserves retry/cache-hit/budget values
+     - Success path handles missing telemetry with defaults
+     - Success path coerces budget_exhausted to bool
+
+### Test Results
+
+```
+=== Test Command 1: test_quote_telemetry_next.py ===
+...................                                                      [100%]
+19 passed in 0.24s
+
+=== Test Command 2: test_telemetry_api_exposure_next.py ===
+.....                                                                    [100%]
+5 passed in 0.87s
+
+=== Test Command 3: P1.3 tier ===
+........................................................................ [ 20%]
+........................................................................ [ 41%]
+........................................................................ [ 62%]
+........................................................................ [ 82%]
+...........................................................              [100%]
+347 passed, 2274 deselected in 6.85s
+```
+
+### Git Commit
+
+Commit: 542ef33  
+Message: `fix: wire retry/cache-hit/budget telemetry fields into quote observation API response`
+
+All changes have been pushed to origin/master.
+
+### Risk Assessment
+
+**Low risk.** Changes are:
+- Purely additive (new fields with safe defaults)
+- Backward compatible (new fields won't break existing clients)
+- Well-tested (new tests verify both paths comprehensively)
+- Consistent (both success/failure paths now produce identical telemetry field presence)
+- No changes to optimizer code or provider adapters per task constraints

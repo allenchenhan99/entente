@@ -1,0 +1,69 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication, no assuming results.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09\screenshots\
+
+Read the benchmark doc fully first — especially section 5 (case matrix), section 6 (evidence rules), section 7 (Trip.Planner is CONFIRMED BROKEN via a CORS bug, do NOT test it, TripGenie only), and case01-06 writeups for exact format/rigor. Case06's writeup (most recent) is a good template for concision — bullet points are fine, don't need long prose, but the actual TESTING must be fully rigorous (real TripGenie query + real screenshots + real Traivial harness run).
+
+## Your assigned case: Case 07
+
+**City**: Osaka. **Days**: 3 (use dates 2026-11-14 to 2026-11-16, giving exactly 3 days per Traivial's `(return-depart).days+1` formula — verify in your harness).
+**Categories**: B (many candidates vs a short trip, forcing real selection pressure), D (daily capacity 3/day — a normal cap, not lowered this time).
+**Already visited**: none this case.
+**Must-visit (2)**: 大阪城 (Osaka Castle), 道頓堀 (Dotonbori).
+**Other candidates (9, deliberately more than 3 days×3=9 slots can barely fit alongside the 2 must-visit, i.e. total 11 candidates vs 9 slots — real B-pressure)**: 通天閣, 黑門市場, 心齋橋, 環球影城, 梅田藍天大廈, 大阪府立狹山池博物館(a lesser-known one), 四天王寺, 新世界, 中之島公園, 阿倍野HARUKAS展望台.
+**Party**: 2 adults.
+
+## Oracle (write down before testing)
+- Both must-visit places should appear if at all feasible.
+- With 11 total candidates and only 9 slots, at least 2 candidates should be honestly dropped/deprioritized rather than forced in by violating the daily cap — check HOW each system chooses what to drop (by what logic) and whether that logic is disclosed to the user.
+- No day should exceed 3 stops.
+- This case is specifically about coverage-under-scarcity trade-off quality and disclosure, not about correctness of exclusion (there's no VISITED item this time).
+
+## Steps (same method as prior cases — reuse, don't reinvent)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/ with Playwright, browser_resize to 1280x1400.
+- Open TripGenie chat. Use a `depth: 6` targeted snapshot (not full-page dumps) to find the launcher button ref if needed.
+- Type + send via browser_evaluate (avoids flaky locator timeouts):
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Write the prompt in natural Traditional Chinese: dates, party size, daily cap 3, the 2 must-visit places, the other 9 candidates, ask for a day-by-day itinerary with reasons, and explicitly ask it to explain how it decided what (if anything) to leave out given the list won't all fit.
+- Wait ~25s, check `#tripgenie-content`'s scroll container's scrollHeight/clientHeight via browser_evaluate (it may still be streaming — recheck after first screenshot, restart from top if it grew), take enough scrolled screenshots to cover the FULL response, save as `screenshots/case07_tripgenie_1.png`, `_2.png`, etc.
+- Actually Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness, no live queries)
+- Use `case01_traivial_harness.py` or `case03_traivial_harness.py` as your template (plain `build_itinerary()` call, no live-constraints layer needed since this case has no C-type arrival/departure clock limits).
+- Real approximate Osaka coordinates (look up real lat/lng for each place — Osaka Castle ~34.6873,135.5262, Dotonbori ~34.6687,135.5013, etc; use your own knowledge for the rest, they just need to be plausible real-world coordinates).
+- All UNVISITED verdicts (no VISITED items this case).
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse` (see case01-06 harnesses for the exact dict-shape pattern), write `case07_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case07_traivial_harness.py`, capture real oracle-check output — specifically print WHICH candidates got dropped (not scheduled) and confirm/refute whether that's disclosed anywhere in caveats.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` is running (start in background if not), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case07_traivial.json`, screenshot to `screenshots/case07_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例07（大阪，3天，情境B/D）` to the end of the benchmark .md (Bash `cat >> ... << 'EOF'` or Edit tool), following case06's concise-but-rigorous style: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. Be honest about what actually happened — especially which candidates each system dropped and whether the drop logic was disclosed/reasoned or silent.
+
+### 4. Commit locally (DO NOT PUSH — user requires explicit approval before any push to master in this repo)
+`git add docs/experiments/` then commit describing the actual substantive finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, the key finding about coverage-under-scarcity handling, confirmation screenshots/harness were actually created and read, commit hash.

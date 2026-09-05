@@ -1,0 +1,77 @@
+You are executing the FINAL case (case 24 of 24) of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and recent case18-23 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only.
+
+## Your assigned case: Case 24 (LAST CASE)
+
+**City**: Osaka. **Days**: 3 (dates 2026-11-20 to 2026-11-22).
+**Categories**: C (arrival/departure clock limits), D (daily capacity vs many candidates — short trip), E (fixed stay area).
+**Scenario**: 8 candidate places, only 3 days (forces selection/prioritization).
+**Must-visit (1)**: 大阪城 (Osaka Castle).
+**Arrival**: Day1 flight arrives 21:00 (very late — day1 should have ~0 stops).
+**Departure**: Day3 flight departs 10:00 (very early — day3 should have ~0 stops).
+**Stay area**: fixed to 難波 (Namba) — use case05/case02's `apply_live_constraints` pattern (needs `day.area_lat`/`area_lng` set to Namba coords before calling it).
+**Daily capacity**: 3/day (but effectively only Day2 has real capacity given the clock constraints).
+**8 candidates** (incl. must-visit): 大阪城, 道頓堀, 心齋橋, 通天閣, 梅田空中庭園展望台, 黑門市場, 難波八阂神社, 中之島公園.
+**Party**: 2 adults.
+
+## Oracle (write down before testing)
+- Day1 (arrival 21:00): expect 0 stops — too late to visit anything.
+- Day3 (departure 10:00): expect 0 stops — too early, checkout/airport transfer only.
+- Day2 is the only real capacity: with cap=3, only 3 of 8 candidates can be scheduled even though the trip nominally has "3 days" — this is the core B/D test: does the system correctly reflect that only ~3 slots exist total (not 3/day × 3 days = 9), and does it protect 大阪城 (must-visit) within those 3?
+- Compare: does TripGenie explicitly warn about the arrival/departure time squeeze, or does it silently schedule things that don't fit? Does Traivial's `apply_live_constraints` correctly wipe day1/day3 down to 0 (this is the FOURTH time confirming the arrival/departure null-vs-specified day-wipe pattern from cases 02/05/19 — but here arrival/departure ARE specified, so this tests the CORRECT-usage path, not the null-default bug)?
+- Does 大阪城 survive into the ~3 available slots given only Day2 has room?
+
+Osaka coordinates (approximate, real-world): 大阪城 34.6873,135.5262; 道頓堀 34.6687,135.5013; 心齋橋 34.6745,135.5013; 通天閣 34.6524,135.5064; 梅田空中庭園展望台 34.7055,135.4900; 黑門市場 34.6656,135.5065; 難波八阪神社 34.6598,135.4949; 中之島公園 34.6937,135.4959; Namba stay area ~34.6663,135.5010.
+
+## Steps (reuse established method exactly)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat.
+- Type+send via browser_evaluate (native setter pattern):
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: 大阪3天2夜 (2026-11-20~11-22), 2位成人, 第一天班機21:00才到, 最後一天班機10:00起飛, 住宿固定在難波, 8個候選景點列出, 必去大阪城, 每天最多3個行程點, 請給出逐日行程並說明第一天/最後一天為什麼這樣安排.
+- Wait ~25s, check `#tripgenie-content` scrollHeight/clientHeight via browser_evaluate (recheck if still growing), screenshot scrolled to cover full response as `screenshots/case24_tripgenie_1.png`, `_2.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — build_itinerary + apply_live_constraints, like case02/case05)
+- Write `case24_traivial_harness.py` following case05's exact structure (arrival/departure clock via FlightQuote outbound_arrival="21:00"/return_departure="10:00", FixtureRouteProvider, FixtureHoursProvider, area_lat/area_lng set to Namba coords via dataclasses.replace before apply_live_constraints).
+- `max_stops_per_day=3`, `plan_mode="schedule"`, VERDICTS all UNVISITED except confirm 大阪城 has must-visit protection semantics if the codebase distinguishes must-visit at the VisitVerdict/combo level (check case03/case04 for how must-visit is actually threaded through — it may just be a documented expectation, not an enforced field; if so, note that honestly).
+- Validate against `ItineraryResponse`, write `case24_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case24_traivial_harness.py`, capture real output — report day1/day3 stop counts (expect 0/0), day2 stop count and which 3 of 8 got in, whether 大阪城 is among them.
+- Render visual: `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` (start in background if not already running), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case24_traivial.json`, screenshot to `screenshots/case24_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例24（大阪，3天，情境C/D/E）` to the benchmark .md, concise bullet format matching case18-23: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結.
+
+### 4. Since this is the LAST case, ALSO add a short `## 總結` (summary) section at the end of the .md:
+- A markdown table: 24 rows (case01-24), columns = the 6 metrics (重複推薦已去過地點/未竟地點覆蓋率/不可執行行程/需要人工修改次數/能否提供判定證據/UNKNOWN是否誠實保留), one column per system (TripGenie/Traivial) per metric, OR a simplified 2-system aggregate row if per-case detail is already in the case sections (use your judgment for what's genuinely useful given 24 cases already documented in detail above it — don't just restate every case, aggregate meaningfully). Pull the actual metric values by reading through the existing case01-23 sections in the doc (you already read the full doc in step 1).
+- A short prose paragraph stating the aggregate finding honestly (e.g. how many cases found real Traivial architectural gaps vs how many were clean/comparable, and the nature of the gaps: must-visit no cross-phase protection count, arrival/departure bug count, day-count/span decoupling, duplicate/bilingual no-dedup count, place-ambiguity schema gap, Trip.Planner unusable due to CORS bug).
+- Do NOT oversell or undersell — this must be defensible from the case-by-case evidence already in the doc.
+
+### 5. Commit locally (DO NOT PUSH — standing rule, never push without the user's fresh explicit approval)
+`git add docs/experiments/` then commit describing the completion of all 24 cases + summary.
+
+### 6. Report back to me (supervisor)
+Under 250 words (slightly more allowed since this is the final case + summary): case24's six-metric scores, day1/day3/day2 stop counts both systems, 大阪城 coverage, confirmation screenshots/harness were actually created and read, the aggregate summary's headline numbers (how many cases each gap type appeared in), commit hash. State clearly: "All 24 cases complete."

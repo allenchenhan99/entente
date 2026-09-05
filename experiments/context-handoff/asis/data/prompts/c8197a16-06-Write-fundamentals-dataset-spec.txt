@@ -1,0 +1,20 @@
+Project: the A-D-Aperture "Data" repo at D:\AD (Windows). Python 3.12. Spec-clear task: write ONE dataset-spec file for our multi-dataset SQLite engine. Create EXACTLY: D:\AD\scripts\ad_datasets\sp500_fundamentals.py  (do not modify any other file).
+
+Read these existing files first to copy the exact conventions:
+- D:\AD\scripts\ad_datasets\sp500_corporate_actions.py  (the template: how Dataset/Table/Column/View from `ad_db` are used, surrogate `id` primary key with from_csv=False, indexes, source_file paths, VIEWS, DATASET object).
+- D:\AD\scripts\ad_db.py  (the Column/Table/View/Dataset dataclasses — note Column(name, sql_type, coerce=..., nullable=..., from_csv=..., pk=...); coerce is one of "text"|"int"|"real"|"bool").
+
+Build a Dataset named exactly `sp500_fundamentals` with THREE tables. Each table loads a CSV produced by our FMP fetcher; the CSV headers are FIXED and given below — your Column names MUST match these headers exactly (order matters for readability, not correctness). Every table gets a surrogate `Column("id","INTEGER", from_csv=False, pk=True)` as the sole primary key (do NOT make symbol/date the pk), plus indexes on ("symbol",), ("date",), and ("symbol","date"). Type mapping: symbol/period/reportedCurrency/cik/filingDate/acceptedDate/date -> TEXT (coerce default "text"); fiscalYear -> INTEGER coerce="int"; every financial amount and per-share value -> REAL coerce="real".
+
+Table 1 `income_statement`, source_file "fmp/fmp_income.csv", columns (after id): symbol, date, fiscalYear, period, reportedCurrency, cik, filingDate, acceptedDate, revenue, grossProfit, operatingIncome, netIncome, eps, epsDiluted, weightedAverageShsOut, weightedAverageShsOutDil.
+Table 2 `balance_sheet`, source_file "fmp/fmp_balance.csv", columns (after id): symbol, date, fiscalYear, period, reportedCurrency, cik, filingDate, acceptedDate, totalAssets, totalLiabilities, totalStockholdersEquity, totalDebt, netDebt, cashAndCashEquivalents.
+Table 3 `cash_flow`, source_file "fmp/fmp_cashflow.csv", columns (after id): symbol, date, fiscalYear, period, reportedCurrency, cik, filingDate, acceptedDate, operatingCashFlow, capitalExpenditure, freeCashFlow, netIncome, dividendsPaid, commonStockRepurchased.
+
+Add ONE View `v_latest_annual` (description "most recent annual income row per symbol") whose sql uses the {income_statement} placeholder (see how sp500_corporate_actions.py writes View SQL with {table} placeholders) to select, per symbol, the row with MAX(date). 
+
+In the module docstring and the DATASET.description, state plainly: filingDate/acceptedDate are the point-in-time availability timestamps — a fact is only usable strictly AFTER its acceptedDate; these are FMP-processed fundamentals and must be reconciled against SEC EDGAR XBRL before use. Set source="FMP (Financial Modeling Prep) stable API", version="2026-08-26".
+
+MANDATORY acceptance — actually RUN these and paste output:
+  A) python -c "import sys; sys.path.insert(0, r'D:/AD/scripts'); import ad_datasets.sp500_fundamentals as m; d=m.DATASET; assert d.name=='sp500_fundamentals'; assert len(d.tables)==3; assert [t.name for t in d.tables]==['income_statement','balance_sheet','cash_flow']; print('OK', d.name, [t.name for t in d.tables])"
+  B) python -c "import ast,io; ast.parse(io.open(r'D:/AD/scripts/ad_datasets/sp500_fundamentals.py',encoding='utf-8').read()); print('AST OK')"
+Boundary: create only that one file. After codex finishes, INDEPENDENTLY re-run A and B yourself (don't trust the self-report) and report the actual output plus the final file path.

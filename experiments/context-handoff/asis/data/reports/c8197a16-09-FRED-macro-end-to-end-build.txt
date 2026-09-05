@@ -1,0 +1,34 @@
+**Summary: FRED macro dataset successfully deployed and verified.**
+
+### Files Created/Deployed:
+- **Local**: `D:\AD\scripts\ad_datasets\macro_fred.py` — Dataset spec with 2 tables + 1 view
+- **Server**: `lab:~/AD/scripts/fetch_fred.py`, `lab:~/AD/scripts/ad_datasets/macro_fred.py`
+
+### Acceptance Results (All Pass):
+
+**A) Local module import:**
+```
+macro_fred ['observations', 'series_meta']
+```
+
+**B) Server build output:**
+```
+[macro_fred]  (US macro series (FRED))
+  table                               rows       csv   status
+  --------------------------------------------------------------
+  observations                       85421     85421   OK
+  series_meta                           35        35   OK
+```
+✓ observations: 85,421 rows (>10,000), status OK  
+✓ verify output: `all tables consistent with catalog.`
+
+**C) Server series query:**
+```
+s | n
+--------
+35 | 85421
+```
+✓ 35 distinct series_id (≥25)  
+✓ 85,421 total observations
+
+**Dataset now ready for use.** The macro_fred dataset contains 35 FRED series (Treasury yields, fed funds, CPI, employment, growth, credit spreads, housing, market/FX data) with full history from 2010 to present (85,421 observations). The view `v_series_coverage` provides per-series date coverage summary.

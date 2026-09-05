@@ -1,0 +1,13 @@
+Committed locally (not pushed), hash `629a8be`.
+
+## Summary — Case 14 (Tokyo, 3 days, C/D/E)
+
+**TripGenie**: nailed it. Day1=2 (上野公園+阿美橫丁), Day2=2 (淺草寺+秋葉原電器街), Day3=0. Must-visit (上野公園) covered 1/1, placed on arrival day. Gave itemized reasons for excluding all 3 unused candidates plus an alternate itinerary variant.
+
+**Traivial** (real `build_itinerary()` + `apply_live_constraints()`, both clocks set): Day1=2, Day2=2, Day3=0 — capacity and boundary-day rules technically obeyed. But **上野公園 (must-visit) was NOT scheduled, despite being inside the fixed stay area** — must-visit coverage 0/1. Root cause confirmed by isolating `build_itinerary()`: it geo-clustered 上野公園 with 谷中銀座 onto Day 3 purely by nearest-neighbor distance (no awareness of `must_visit` or of the upcoming departure-day wipe); `apply_live_constraints()` then correctly wiped Day 3 for the 11:00 flight, taking the must-visit down with it. This case also newly stacks capacity truncation (7 candidates vs. 6 slots) on top, silently dropping 東京國立博物館 before the clock constraint even applied — two independent, uncommunicated loss mechanisms in one case.
+
+Key finding for the supervisor's specific question: **geographic overlap with the stay area does NOT protect a must-visit** — the clustering algorithm never checks `must_visit` status, so proximity is irrelevant to whether the item lands on a day later wiped by boundary constraints. This is the same architectural gap as case11, now verified under the most favorable possible geographic condition and shown to still fail.
+
+Six-metric scores: TripGenie — leakage N/A, coverage 1/1, infeasible 0, manual-fix 0, evidence rich, UNKNOWN-honesty yes. Traivial — leakage N/A, coverage 0/1, infeasible 1 finding, manual-fix ≥1, evidence partial (caveats don't name casualties), UNKNOWN-honesty partial.
+
+Screenshots read and verified: `docs/experiments/trip_com_tool_benchmark_2026-09/screenshots/case14_tripgenie_{1..4}.png`, `case14_traivial_render.png`. Harness: `docs/experiments/trip_com_tool_benchmark_2026-09/case14_traivial_harness.py`, output `case14_traivial.json` (validated against `ItineraryResponse`). Write-up appended to `docs/experiments/trip_com_tool_benchmark_2026-09.md`. Commit `629a8be`, not pushed.

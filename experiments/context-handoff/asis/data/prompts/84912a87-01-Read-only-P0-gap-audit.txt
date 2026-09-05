@@ -1,0 +1,23 @@
+Do a read-only gap audit of D:\vscode_python\unvisited for the P0 goal (data trust & query governance for flights/stays/date-cell/transit observations). You've already read AGENTS.md and PRD.md in the parent context — don't re-read those, I have them.
+
+Now read: README.md, web/API_CONTRACT.md, docs/PRODUCT_COMPLETION_PLAN.md, docs/architecture/traivial-runtime.architecture.html (or its .json source if easier), and then survey the actual code/tests in these areas:
+- traivial/optimize/ (or wherever optimization/ComboOption/Pareto lives)
+- traivial provider code for flights/stays (Google Flights, Trip.com, Booking playwright adapters)
+- date-cell / grid supply status code (complete/partial/unknown/failed/stale/empty/not_queried)
+- traivial/itinerary/
+- traivial/server/ (API routes, especially anything related to quality status, telemetry, budget)
+- traivial/schemas.py (the frozen contract)
+- corresponding tests for each of the above
+
+For each of these 7 P0 items, report: ALREADY DONE (cite file/function), PARTIALLY DONE (what's missing), or NOT STARTED:
+1. Unified quality semantics across flights/stays/date-cells/transit: observed, partial, stale, failed, not_queried, synthetic, unknown
+2. Per-record provenance: source, fetched_at, query conditions, currency, pax count, price_scope, tax scope, coordinate source, failure reason, query count
+3. Provider throttle, cache, dedup, bounded retry, hard query budget
+4. Fail-closed behavior for 429/CAPTCHA/empty shell pages/selector drift/partial results
+5. No zero-price/missing-data/unqueried-date used to prove cheapness
+6. global_certified only for complete coverage of a well-defined bounded space; else bounded_observed
+7. Backend determination of "supply readiness C5": quote freshness, stay geolocation, route evidence, date supply, unresolved gaps
+
+Also report: what test tiers exist and how to run them (scripts/test.ps1 tiers), and any obvious existing telemetry/query-budget reporting mechanism already in code.
+
+Be concrete with file paths and line numbers/function names. Do NOT modify anything. Keep the final report well-organized but as compact as possible while still being complete and actionable — this will become the actual work backlog for a multi-agent team, so precision matters more than brevity, but don't paste huge code blocks, just cite locations and summarize.

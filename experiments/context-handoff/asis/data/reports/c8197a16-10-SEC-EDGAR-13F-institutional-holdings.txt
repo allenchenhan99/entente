@@ -1,0 +1,51 @@
+Perfect! Task complete. Here's a summary of what was accomplished:
+
+## Summary
+
+Successfully created SEC Form 13F institutional holdings collection system for the S&P 500 universe.
+
+### Deliverables Created
+
+**File 1:** `D:\AD\scripts\fetch_sec_13f.py` (458 lines)
+- Stdlib-only SEC Form 13F data fetcher
+- Loads 592 CUSIPs from sp500_profile__company_profile
+- Fetches SEC EDGAR landing page and extracts ZIP links
+- Streams INFOTABLE TSV line-by-line (no whole-file memory load)
+- Filters holdings to S&P 500 universe by CUSIP (case-insensitive, stripped)
+- Outputs CSV with exact column order: report_period, filing_manager, cusip, symbol, nameofissuer, titleofclass, value, sshprnamt, sshprnamttype, putcall, investment_discretion, voting_sole, voting_shared, voting_none
+- Includes `--self-test` mode with mocked COVERPAGE/INFOTABLE
+- CLI: `--db ad.sqlite`, `--out data/sec13f`, `--quarters 4`
+
+**File 2:** `D:\AD\scripts\ad_datasets\institutional_13f.py` (49 lines)
+- Dataset definition following sp500_corporate_actions.py conventions
+- Table `holdings` from `sec13f/sec13f_holdings.csv`
+- Columns with proper coercion (REAL for numeric fields)
+- Indexes on (symbol), (cusip), (report_period), (filing_manager)
+- Docstring: 13F filed within 45 days of quarter-end
+
+### Test Results
+
+**A) Self-test:** `python fetch_sec_13f.py --self-test` → **PASS**
+- Correctly filtered 1 in-universe CUSIP (00846U101), excluded 1 out-of-universe
+
+**B) Import test:** Module import and inspection → **PASS**
+```
+institutional_13f ['holdings']
+```
+
+**C) Server build:** Database build and verify → **PASS**
+- Loaded 5,038,140 holdings rows across 4 quarters
+- Verify output: "all tables consistent with catalog"
+
+**D) Data quality query:**
+```
+mgrs: 8,586 (requirement: thousands) ✓
+syms: 587   (requirement: >= 400)   ✓
+rows: 5,038,140 (requirement: > 100,000) ✓
+```
+
+### Files
+- `D:\AD\scripts\fetch_sec_13f.py` - Fetcher script
+- `D:\AD\scripts\ad_datasets\institutional_13f.py` - Dataset definition
+- Deployed to server at `lab:~/AD/scripts/`
+- Committed to remote: commit 79813a3

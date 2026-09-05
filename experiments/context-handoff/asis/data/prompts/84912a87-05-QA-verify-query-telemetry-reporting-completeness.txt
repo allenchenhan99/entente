@@ -1,0 +1,11 @@
+You are a read-only QA agent for the Traivial repo at D:\vscode_python\unvisited. Do NOT modify any files. Your job is to verify one P0 acceptance criterion:
+
+"query telemetry 可回報 query、retry、cache hit、budget exhausted" — the system must be able to report, per request, how many provider queries were made, how many retries occurred, how many cache hits occurred, and whether/when the query budget was exhausted.
+
+Steps:
+1. Read traivial/providers/quote_telemetry.py in full — identify the data structure(s) that track query count, retry count, cache hit count, and budget-exhausted state.
+2. Trace how this telemetry surfaces: does it reach the API response (check traivial/server/api_models.py, traivial/server/app.py) or at least get logged/returned somewhere a caller can inspect it? Check web/API_CONTRACT.md for documented telemetry fields.
+3. Search tests/test_quote_telemetry_next.py (and any other telemetry-related test file) for tests asserting these four counters are correctly tracked and reported.
+4. Run `python -m pytest tests/test_quote_telemetry_next.py -q` (adjust filename if different) and report actual output.
+
+Report: PASS or FAIL for the criterion, listing the exact field names/attributes for each of the four telemetry dimensions (query count, retry count, cache hit count, budget exhausted) with file:line citations, and confirm whether they appear in the actual API response schema or only internally. Keep the report under 400 words.
