@@ -1,0 +1,50 @@
+name: Publish hackathon presentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'presentation/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: presentation/package-lock.json
+      - name: Install presentation dependencies
+        run: npm ci
+        working-directory: presentation
+      - name: Type-check and build the static presentation
+        run: npm run build
+        working-directory: presentation
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: presentation/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

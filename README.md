@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/runtimes-Claude_Code_%7C_Codex-635096?style=flat-square" alt="Claude Code and Codex runtimes" />
 </p>
 <p align="center">
-  <a href="https://entente-provenance.test831.chatgpt.site">Interactive hackathon report</a> ·
+  <a href="https://allenchenhan99.github.io/entente/">Interactive hackathon report</a> ·
   <a href="#quick-start-no-agent-or-api-key">Quick start</a> ·
   <a href="#how-to-contribute">How to contribute</a> ·
   <a href="https://github.com/allenchenhan99/entente/issues">Design discussions</a>
@@ -72,7 +72,7 @@ npx tsx apps/cli/src/index.ts story --replay fixtures/events-live-4.jsonl --task
 
 The completed `live-4` fixture has an empty inbox; that is expected. In a live mission, the inbox lists handoffs that need human attention.
 
-**[Open the six-page report →](https://entente-provenance.test831.chatgpt.site)** It includes our scope model, rejected approaches, implementation, and evidence. One demo slot is reserved for a video of up to two minutes; the video is not yet included.
+**[Open the six-page report →](https://allenchenhan99.github.io/entente/)** It includes our scope model, rejected approaches, implementation, and evidence. One demo slot is reserved for a video of up to two minutes; the video is not yet included.
 
 ## How a handoff works
 

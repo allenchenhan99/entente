@@ -1,0 +1,182 @@
+{
+    "schema_version":  1,
+    "diagram_type":  "architecture",
+    "meta":  {
+                 "title":  "可驗證的任務交接",
+                 "quality_profile":  "showcase",
+                 "viewBox":  [
+                                 1200,
+                                 720
+                             ],
+                 "animation":  "trace",
+                 "views":  [
+                               {
+                                   "label":  "契約與驗證",
+                                   "id":  "delivery",
+                                   "focus":  [
+                                                 "contract",
+                                                 "agent",
+                                                 "verifier",
+                                                 "verified"
+                                             ],
+                                   "note":  "接受契約後執行，再由 relayd 檢查交付。"
+                               },
+                               {
+                                   "label":  "失敗後局部修復",
+                                   "id":  "repair-loop",
+                                   "focus":  [
+                                                 "verifier",
+                                                 "repair",
+                                                 "agent"
+                                             ],
+                                   "note":  "只針對失敗條件要求修正，修復仍受預算限制。"
+                               }
+                           ]
+             },
+    "components":  [
+                       {
+                           "id":  "contract",
+                           "type":  "backend",
+                           "label":  "Task Contract",
+                           "sublabel":  "範圍、驗收與修復預算",
+                           "pos":  [
+                                       60,
+                                       120
+                                   ],
+                           "size":  [
+                                        240,
+                                        90
+                                    ]
+                       },
+                       {
+                           "id":  "agent",
+                           "type":  "backend",
+                           "label":  "Coding Agent",
+                           "sublabel":  "接受或澄清，再執行",
+                           "pos":  [
+                                       470,
+                                       120
+                                   ],
+                           "size":  [
+                                        240,
+                                        90
+                                    ]
+                       },
+                       {
+                           "id":  "verifier",
+                           "type":  "security",
+                           "label":  "relayd 檢查",
+                           "sublabel":  "在 task worktree 執行",
+                           "pos":  [
+                                       880,
+                                       120
+                                   ],
+                           "size":  [
+                                        240,
+                                        90
+                                    ]
+                       },
+                       {
+                           "id":  "events",
+                           "type":  "database",
+                           "label":  "JSONL 事件",
+                           "sublabel":  "契約與修復歷程",
+                           "pos":  [
+                                       60,
+                                       420
+                                   ],
+                           "size":  [
+                                        240,
+                                        90
+                                    ]
+                       },
+                       {
+                           "id":  "repair",
+                           "type":  "backend",
+                           "label":  "局部 Repair",
+                           "sublabel":  "同任務的失敗条件與修正要求",
+                           "pos":  [
+                                       470,
+                                       420
+                                   ],
+                           "size":  [
+                                        240,
+                                        90
+                                    ]
+                       },
+                       {
+                           "id":  "verified",
+                           "type":  "backend",
+                           "label":  "Verified",
+                           "sublabel":  "檢查通過的交付",
+                           "pos":  [
+                                       880,
+                                       420
+                                   ],
+                           "size":  [
+                                        240,
+                                        90
+                                    ]
+                       }
+                   ],
+    "connections":  [
+                        {
+                            "id":  "accept",
+                            "from":  "contract",
+                            "to":  "agent"
+                        },
+                        {
+                            "id":  "submit",
+                            "from":  "agent",
+                            "to":  "verifier"
+                        },
+                        {
+                            "id":  "pass",
+                            "from":  "verifier",
+                            "to":  "verified"
+                        },
+                        {
+                            "id":  "fail",
+                            "from":  "verifier",
+                            "to":  "repair",
+                            "label":  "失敗",
+                            "variant":  "security"
+                        },
+                        {
+                            "id":  "retry",
+                            "from":  "repair",
+                            "to":  "agent",
+                            "variant":  "dashed"
+                        },
+                        {
+                            "id":  "record-contract",
+                            "from":  "contract",
+                            "to":  "events",
+                            "variant":  "dashed"
+                        },
+                        {
+                            "id":  "record-repair",
+                            "from":  "repair",
+                            "to":  "events",
+                            "variant":  "dashed"
+                        }
+                    ],
+    "cards":  [
+                  {
+                      "dot":  "cyan",
+                      "title":  "正式要求",
+                      "items":  [
+                                    "Scope 與驗收條件由契約定義",
+                                    "Agent 自述與 relayd 檢查結果分開保存"
+                                ]
+                  },
+                  {
+                      "dot":  "rose",
+                      "title":  "有界修復",
+                      "items":  [
+                                    "針對失敗條件要求修正",
+                                    "預算用盡或停滯時停止並升級處理"
+                                ]
+                  }
+              ]
+}
