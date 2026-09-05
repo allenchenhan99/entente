@@ -181,9 +181,27 @@ impl Client {
         cols: u16,
         rows: u16,
     ) -> Result<String> {
-        let body = serde_json::json!({
+        self.create_pane_with_env(name, argv, cwd, cols, rows, Default::default())
+            .await
+    }
+
+    /// As `create_pane`, with environment for the process — the shell panes use it to put `relay` on
+    /// PATH, since the commands live in the workspace rather than anywhere global.
+    pub async fn create_pane_with_env(
+        &self,
+        name: &str,
+        argv: &[String],
+        cwd: &str,
+        cols: u16,
+        rows: u16,
+        env: std::collections::BTreeMap<String, String>,
+    ) -> Result<String> {
+        let mut body = serde_json::json!({
             "name": name, "argv": argv, "cwd": cwd, "cols": cols, "rows": rows,
         });
+        if !env.is_empty() {
+            body["env"] = serde_json::to_value(env)?;
+        }
         let value = self.post_json("/panes", &body).await?;
         value
             .get("pane_id")

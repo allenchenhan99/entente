@@ -63,6 +63,16 @@ pub enum Msg {
     Quit,
 }
 
+/// PATH for a shell pane, with `relay` and `entente` on it when the launcher said where they are.
+fn shell_env() -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    if let Ok(tools) = std::env::var("RELAY_TOOLS") {
+        let path = std::env::var("PATH").unwrap_or_default();
+        env.insert("PATH".to_string(), format!("{tools}:{path}"));
+    }
+    env
+}
+
 pub enum Source {
     /// One client per workspace, in the order the urls were given: a workspace is a daemon.
     Live(Vec<Arc<Client>>),
@@ -547,8 +557,15 @@ impl<B: Backend> Runtime<B> {
                 let tx = self.tx.clone();
                 let cwd = self.workdir.clone();
                 let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+                // The shell opens in the mission's repo, which is where `.relay/session.token` lives,
+                // so `relay status` works there with no `--repo`. It only needs the commands on PATH,
+                // and they live in this workspace's node_modules; the launcher says where.
+                let env = shell_env();
                 self.tasks.push(tokio::spawn(async move {
-                    let msg = match client.create_pane("shell", &[shell], &cwd, 120, 40).await {
+                    let msg = match client
+                        .create_pane_with_env("shell", &[shell], &cwd, 120, 40, env)
+                        .await
+                    {
                         Ok(pane_id) => Msg::PaneOpened(pane_id),
                         Err(e) => Msg::Notice(format!("could not open a shell pane: {e}")),
                     };
