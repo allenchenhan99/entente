@@ -254,10 +254,16 @@ export const isPlannerTaskId = (id: string): boolean => id.startsWith('planner:'
 /** Per-agent config directory (`mcp.json`, `CODEX_HOME`); planners use `agents/planner-<mission>`. */
 /** Task states with nothing left running. */
 const TERMINAL_TASK_STATES: ReadonlySet<string> = new Set(['completed', 'failed', 'canceled']);
-/** What may be deleted: work that is over and did not land. A completed task is the record of work
- *  done, so removing it is not a tidy-up — cancel is not the path to that. */
-const DELETABLE_TASK_STATES: ReadonlySet<string> = new Set(['canceled', 'failed']);
-const DELETABLE_MISSION_STATES: ReadonlySet<string> = new Set(['canceled', 'failed']);
+/**
+ * What may be deleted: work that is over, however it ended. Finishing a run and wanting the board
+ * clear for the next one is the ordinary case, and a task id is global — so refusing to delete
+ * completed work only forced people to cancel something that had already succeeded.
+ *
+ * Nothing is lost by allowing it: the log keeps the whole story, and the evidence and the recordings
+ * stay on disk. Live work still has to be cancelled first, deliberately.
+ */
+const DELETABLE_TASK_STATES: ReadonlySet<string> = new Set(['completed', 'canceled', 'failed']);
+const DELETABLE_MISSION_STATES: ReadonlySet<string> = new Set(['verified', 'canceled', 'failed']);
 
 export const agentConfigDir = (relayDir: string, taskId: string): string =>
   path.join(relayDir, 'agents', isPlannerTaskId(taskId) ? `planner-${taskId.slice('planner:'.length)}` : taskId);
@@ -998,7 +1004,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   /** Deleting is for work that is over; anything else has to be stopped first, deliberately. */
   const requireOver = (what: string, state: string): void => {
     if (!DELETABLE_TASK_STATES.has(state)) {
-      throw conflict(`${what} is ${state}; cancel it before deleting it`);
+      throw conflict(`${what} is ${state}; it is still live — cancel it before deleting it`);
     }
   };
 
@@ -1030,7 +1036,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   const deleteMission: Orchestrator['deleteMission'] = async (missionId, reason) => {
     const m = mustMission(missionId);
     if (!DELETABLE_MISSION_STATES.has(m.status)) {
-      throw conflict(`mission ${missionId} is ${m.status}; cancel it before deleting it`);
+      throw conflict(`mission ${missionId} is ${m.status}; it is still live — cancel it before deleting it`);
     }
     for (const taskId of [...m.taskIds]) {
       const rec = tasks.get(taskId);

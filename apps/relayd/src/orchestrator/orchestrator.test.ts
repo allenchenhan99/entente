@@ -572,6 +572,19 @@ describe('cancel and delete', () => {
     expect(r.ofType('mission_deleted')).toHaveLength(1);
   });
 
+  it('a finished task can be deleted, so its id is free for the next run', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+    expect(r.orchestrator.taskView('t-a')!.task_state).toBe('completed');
+
+    await r.orchestrator.deleteTask('t-a', 'clearing the board');
+
+    expect(replay(r.store.all()).tasks['t-a']).toBeUndefined();
+  });
+
   it('refuses to delete a mission that was never stopped', async () => {
     const r = createTestRelay();
     const mission_id = await spawnedTask(r);
