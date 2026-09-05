@@ -134,6 +134,10 @@ impl TestServer {
         self.request("GET", path, None, Some(&self.token)).await
     }
 
+    pub async fn delete(&self, path: &str) -> Resp {
+        self.request("DELETE", path, None, Some(&self.token)).await
+    }
+
     pub async fn post(&self, path: &str, body: Value) -> Resp {
         self.request("POST", path, Some(body), Some(&self.token))
             .await

@@ -517,9 +517,9 @@ impl<B: Backend> Runtime<B> {
                 let client = client.clone();
                 let tx = self.tx.clone();
                 self.tasks.push(tokio::spawn(async move {
-                    // relayd keeps a killed pane in `/panes` (its cast outlives the process), so the
-                    // grid drops it here rather than waiting for a list that will still contain it.
-                    let msg = match client.kill_pane(&pane_id).await {
+                    // The host forgets the pane, so it stays closed across a restart of this client;
+                    // the grid drops it immediately rather than waiting for the next poll.
+                    let msg = match client.close_pane(&pane_id).await {
                         Ok(()) => Msg::PaneDismissed(pane_id),
                         Err(e) => Msg::Notice(format!("could not close {pane_id}: {e}")),
                     };

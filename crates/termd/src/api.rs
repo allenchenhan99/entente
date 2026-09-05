@@ -38,7 +38,7 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     let guarded = Router::new()
         .route("/panes", get(list_panes).post(create_pane))
-        .route("/panes/{id}", get(get_pane))
+        .route("/panes/{id}", get(get_pane).delete(close_pane))
         .route("/panes/{id}/kill", post(kill_pane))
         .route("/panes/{id}/focus", post(focus_pane))
         .route("/panes/{id}/resize", post(resize_pane))
@@ -245,6 +245,16 @@ async fn get_pane(
     Ok(Json(
         serde_json::to_value(state.host.require(&id)?.info()).unwrap_or(Value::Null),
     ))
+}
+
+/// `DELETE /panes/{id}` — kill it if it lives, then forget it. Closing a terminal is not erasing the
+/// run: the events and the cast are on disk.
+async fn close_pane(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state.host.remove(&id, Host::default_grace()).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn kill_pane(

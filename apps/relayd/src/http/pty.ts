@@ -79,6 +79,12 @@ export function mountPty(app: Hono, host: RelayHost, options: MountPtyOptions = 
 
   app.get(ptyRoutes.pane(':id'), (c) => withPane(c, (paneId) => c.json(host.get(paneId)!.info())));
 
+  // Closing a pane: kill it if it lives, then forget it, so it stops coming back on the next poll.
+  app.delete(ptyRoutes.pane(':id'), (c) => withPane(c, async (paneId) => {
+    await host.remove(paneId);
+    return c.json({ ok: true });
+  }));
+
   app.post(`${ptyRoutes.pane(':id')}/kill`, (c) => withPane(c, async (paneId) => {
     await host.kill(paneId);
     return c.json({ ok: true });

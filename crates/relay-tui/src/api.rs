@@ -192,10 +192,16 @@ impl Client {
             .ok_or_else(|| anyhow::anyhow!("POST /panes: no pane_id in the reply"))
     }
 
-    /// `POST /panes/:id/kill` — SIGTERM, then SIGKILL, on the host's schedule.
-    pub async fn kill_pane(&self, pane_id: &str) -> Result<()> {
-        self.post_json(&format!("/panes/{pane_id}/kill"), &serde_json::json!({}))
-            .await?;
+    /// `DELETE /panes/:id` — kill the process if it still runs, and have the host forget the pane, so
+    /// closing it survives this client exiting. The cast and the event log are untouched.
+    pub async fn close_pane(&self, pane_id: &str) -> Result<()> {
+        let url = self.url(&format!("/panes/{}", encode_component(pane_id)));
+        let response = self.authorize(self.http.delete(url)).send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("DELETE /panes/{pane_id} → {status}: {}", body.trim());
+        }
         Ok(())
     }
 

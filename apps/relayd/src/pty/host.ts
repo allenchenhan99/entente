@@ -153,6 +153,17 @@ export class RelayHost {
     await this.require(paneId).kill(graceMs);
   }
 
+  /**
+   * Kill the process if it is still running, then forget the pane: it leaves `list()`, so a client
+   * that closed it does not get it back on the next poll. The cast file stays where it is.
+   */
+  async remove(paneId: string, graceMs = KILL_GRACE_MS): Promise<void> {
+    const pane = this.require(paneId);
+    await pane.kill(graceMs);
+    this.panes.delete(paneId);
+    if (this.focusedPane === paneId) this.focusedPane = undefined;
+  }
+
   async killAll(graceMs = KILL_GRACE_MS): Promise<void> {
     await Promise.all([...this.panes.values()].map((p) => p.kill(graceMs)));
   }

@@ -187,6 +187,11 @@ export const ptyRoutes = {
    * `POST /panes/:id/kill` · `POST /panes/:id/focus` (records the focused pane for other clients).
    */
   panes: '/panes',
+  /**
+   * `GET` → PaneInfo · `DELETE` → the host kills the process if it is still running and forgets the
+   * pane, so it leaves `/panes` for every client. The run's event log and the pane's asciinema cast
+   * are on disk and outlive it: closing a terminal is not erasing what happened in it.
+   */
   pane: (paneId: string) => `/panes/${paneId}`,
   /** WebSocket. */
   pty: (paneId: string) => `/pty/${paneId}`,
