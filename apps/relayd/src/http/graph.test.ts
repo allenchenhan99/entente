@@ -188,14 +188,14 @@ describe('GET /story', () => {
     const { body } = await get(app, '/story');
     const lines = (body.items as StoryItem[]).map((i) => `${i.seq} ${i.line}`);
     expect(lines.slice(0, 13)).toEqual([
-      '1 you create mission "Add secure login to this application." in /Users/allenchenhan99/entente-demo/app',
+      '1 you create mission "Add secure login to this application." in /Users/relay-demo/entente-demo/app',
       '2 you propose t-backend-auth v1 to backend: "Implement secure login endpoints for this application, reusing the existing user model and session store" (5 criteria, paths src/auth/**, src/app.ts, tests/auth/**)',
       '3 RelayGraph lints t-backend-auth v1: clean',
-      '4 RelayGraph creates worktree relay/t-backend-auth at /Users/allenchenhan99/entente-demo/app/.relay/wt/t-backend-auth',
+      '4 RelayGraph creates worktree relay/t-backend-auth at /Users/relay-demo/entente-demo/app/.relay/wt/t-backend-auth',
       '5 RelayGraph spawns backend (claude-code) in pane wP:p9',
       '6 you propose t-frontend-login v1 to frontend: "Add a minimal login page that submits an email address to the backend login endpoint and shows the result" (2 criteria, paths public/**, tests/ui/**)',
       '7 RelayGraph lints t-frontend-login v1: clean',
-      '8 RelayGraph creates worktree relay/t-frontend-login at /Users/allenchenhan99/entente-demo/app/.relay/wt/t-frontend-login',
+      '8 RelayGraph creates worktree relay/t-frontend-login at /Users/relay-demo/entente-demo/app/.relay/wt/t-frontend-login',
       '9 RelayGraph spawns frontend (codex) in pane wP:pA',
       '10 you plan 2 tasks: t-backend-auth, t-frontend-login',
       '11 backend accepts v1 and restates it: Add passwordless email login: POST /auth/login takes an email, and when it matches a user in the existing UserRepo, gen…; Add POST /auth/verify that consumes the token: a valid, unexpired, never-used token creates a session in the existing S…; Replace the fixed 401 on GET /me with a real lookup: read the session cookie, look the session up in SessionStore, and…; Wire everything in src/app.ts through an options object with injectable UserRepo, SessionStore, LoginTokenStore, EmailS…; Cover all of this with vitest tests under tests/auth/, including tests/auth/valid-login.test.ts and tests/auth/expired-…',
