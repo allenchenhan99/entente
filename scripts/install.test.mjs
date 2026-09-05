@@ -12,7 +12,8 @@ const quote = text => `'${text.replaceAll("'", "'\\''")}'`;
 const write = (file, text) => { fs.writeFileSync(file, text, { mode: 0o755 }); };
 
 function fixture(t, { fail = false, brokenSmoke = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "entente install's "));
+  // macOS temp paths can start with /var, while cwd/pwd -P resolve /private/var.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "entente install's ")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const bin = path.join(root, 'bin');
   const tools = path.join(root, 'tools');

@@ -50,6 +50,14 @@
   worktree, zero new remote branches, zero uncertain branches introduced.
   Existing benchmark/report worktrees remain owned by their original tasks.
   The main worktree's preexisting modified/untracked files were preserved.
+- Post-push check: `2648a3c` reached original `main`, and the public installer
+  SHA-256 matches `f3f265199648e62b1a641c3951c5a181818c984f98086baef3b3783329c73336`.
+  CI run `33975525731` passed Linux installer checks but exposed four macOS
+  test assertions comparing `/var` aliases with `/private/var` physical paths.
+  The follow-up canonicalizes the temporary fixture root before assertions;
+  installation behavior and the published script are unchanged. The same
+  path distinction is exercised locally by running the 13 tests with TMPDIR
+  pointing through a directory symlink before checking the next CI run.
 
 ## 2026-09-05 — animated hackathon presentation and GitHub Pages
 
