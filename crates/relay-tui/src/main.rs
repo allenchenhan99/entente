@@ -1,4 +1,4 @@
-//! `relay-tui [--url http://127.0.0.1:7420] [--token …] [--repo .] [--replay <fixture dir>] [--frames N]
+//! `relay-tui [--url http://127.0.0.1:7420]... [--token …] [--repo .] [--replay <fixture dir>] [--frames N]
 //! [--width W --height H] [--metrics-json]`. With `--frames N` the TUI renders the first frame plus N more
 //! headlessly (no raw mode; the last frame is printed to stdout) — the demo fallback and the CI smoke test; otherwise it takes
 //! over the terminal until `q`.
@@ -23,9 +23,10 @@ use std::time::Duration;
     about = "Relay Terminal client for relayd"
 )]
 struct Args {
-    /// relayd base URL.
+    /// relayd base URL. Repeat it for several projects: one workspace per daemon, all their agents on
+    /// one network.
     #[arg(long, default_value = "http://127.0.0.1:7420")]
-    url: String,
+    url: Vec<String>,
     /// Session token (else RELAY_TOKEN, else <repo>/.relay/session.token).
     #[arg(long)]
     token: Option<String>,
@@ -62,7 +63,14 @@ async fn main() -> Result<()> {
                 std::env::var("RELAY_TOKEN").ok(),
                 &args.repo,
             );
-            Source::Live(Arc::new(Client::new(args.url.clone(), token)))
+            // One client per url: a workspace is a daemon, and they share the session token when the
+            // repos do (each daemon still checks it).
+            Source::Live(
+                args.url
+                    .iter()
+                    .map(|url| Arc::new(Client::new(url.clone(), token.clone())))
+                    .collect(),
+            )
         }
     };
 
@@ -94,6 +102,7 @@ async fn main() -> Result<()> {
     )?;
     let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
     let mut runtime = Runtime::new(terminal, source);
+    runtime.set_workspace_urls(&args.url);
     // `t` opens a shell here — the repo the mission is about, not wherever relay-tui was started.
     runtime.workdir = args.repo.to_string_lossy().into_owned();
     let tx = runtime.sender();

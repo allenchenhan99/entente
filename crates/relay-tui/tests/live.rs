@@ -335,13 +335,14 @@ async fn live_sse_graph_refresh_pane_bytes_input_and_resize() {
     let (fake, url) = start_fake().await;
     let client = Client::new(url, Some(TOKEN.to_string()));
     let terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-    let mut rt = Runtime::new(terminal, Source::Live(Arc::new(client)));
+    let mut rt = Runtime::new(terminal, Source::Live(vec![Arc::new(client)]));
     rt.start().await.unwrap();
 
     // Boot: tree from /graph, pane from /panes, hello + scrollback over the WebSocket, live via SSE.
     assert!(screen(&rt).contains("› t-backend-auth"), "{}", screen(&rt));
     until(&mut rt, "pane connected", |rt| {
         rt.app
+            .ws()
             .pane_states
             .get("relay:1")
             .map(|p| p.connected)
@@ -353,10 +354,10 @@ async fn live_sse_graph_refresh_pane_bytes_input_and_resize() {
     })
     .await;
     until(&mut rt, "live", |rt| {
-        rt.app.connection == relay_tui::app::Connection::Live
+        rt.app.ws().connection == relay_tui::app::Connection::Live
     })
     .await;
-    until(&mut rt, "metrics", |rt| rt.app.metrics.is_some()).await;
+    until(&mut rt, "metrics", |rt| rt.app.ws().metrics.is_some()).await;
     assert!(
         screen(&rt).contains("relay:1: ready 777ms · accept 33.0ms · render p95 0.5ms"),
         "{}",
@@ -405,7 +406,7 @@ async fn live_sse_graph_refresh_pane_bytes_input_and_resize() {
     })
     .await;
     assert!(*fake.graph_gets.lock().unwrap() > gets_before);
-    assert_eq!(rt.app.last_seq, 56, "seq from the refreshed graph");
+    assert_eq!(rt.app.ws().last_seq, 56, "seq from the refreshed graph");
     assert!(screen(&rt).contains("● live  seq 56"), "{}", screen(&rt));
 
     // `i` in the pane grid routes keys to the focused pane as base64 input frames.
@@ -483,7 +484,7 @@ async fn live_actions_post_the_ink_bodies_and_errors_reach_the_status_line() {
         .insert("node:t-backend-auth".into(), reply_actions());
     let client = Client::new(url, Some(TOKEN.to_string()));
     let terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-    let mut rt = Runtime::new(terminal, Source::Live(Arc::new(client)));
+    let mut rt = Runtime::new(terminal, Source::Live(vec![Arc::new(client)]));
     rt.start().await.unwrap();
     until(&mut rt, "actions fetched", |rt| !rt.app.actions.is_empty()).await;
     assert!(screen(&rt).contains("r reply"), "{}", screen(&rt));
@@ -563,7 +564,7 @@ async fn live_without_a_token_is_rejected_and_reported() {
     let (_fake, url) = start_fake().await;
     let client = Client::new(url, None);
     let terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-    let mut rt = Runtime::new(terminal, Source::Live(Arc::new(client)));
+    let mut rt = Runtime::new(terminal, Source::Live(vec![Arc::new(client)]));
     rt.start().await.unwrap();
     let text = screen(&rt);
     assert!(text.contains("ERROR GET /graph failed: 401"), "{text}");

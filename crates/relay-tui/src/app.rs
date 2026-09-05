@@ -302,8 +302,15 @@ pub enum Effect {
     Quit,
 }
 
-pub struct App {
-    pub mode: Mode,
+/// One project: the relayd hosting it and everything derived from that daemon.
+///
+/// A workspace is a daemon, not a folder — its event log lives in its own repo's `.relay`, it has its
+/// own worktrees, its own panes and its own port. Several can be open at once, and the handoff network
+/// draws all their agents together, each belonging to its own.
+pub struct Workspace {
+    /// Short name shown in the panel: the repo's own directory name, or the url when it has no repo yet.
+    pub name: String,
+    pub url: String,
     pub graph: Graph,
     pub state: State,
     /// Pane ids in `/panes` order.
@@ -311,6 +318,63 @@ pub struct App {
     pub pane_states: BTreeMap<String, PaneState>,
     pub focused_pane: Option<String>,
     pub metrics: Option<HostMetrics>,
+    pub connection: Connection,
+    pub last_seq: u64,
+}
+
+impl Workspace {
+    pub fn new(url: impl Into<String>, mode: Mode) -> Self {
+        let url = url.into();
+        Self {
+            name: workspace_name(&url),
+            url,
+            graph: Graph::default(),
+            state: State::default(),
+            panes: Vec::new(),
+            pane_states: BTreeMap::new(),
+            focused_pane: None,
+            metrics: None,
+            connection: match mode {
+                Mode::Live => Connection::Connecting,
+                Mode::Replay => Connection::Replay,
+            },
+            last_seq: 0,
+        }
+    }
+
+    /// The repo this workspace is for, once its state says; that is the name worth showing.
+    pub fn refresh_name(&mut self) {
+        // `repo` rides in the mission's flattened extras rather than a named field.
+        let repo = self
+            .state
+            .mission()
+            .and_then(|m| m.mission.extra.get("repo"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        if let Some(base) = repo
+            .as_deref()
+            .and_then(|r| r.rsplit('/').find(|s| !s.is_empty()))
+        {
+            self.name = base.to_string();
+        }
+    }
+}
+
+/// A readable name for a daemon we have not heard from yet: its port, which is how it was addressed.
+fn workspace_name(url: &str) -> String {
+    url.rsplit(':')
+        .next()
+        .filter(|p| p.chars().all(|c| c.is_ascii_digit()))
+        .map(|port| format!(":{port}"))
+        .unwrap_or_else(|| url.to_string())
+}
+
+pub struct App {
+    pub mode: Mode,
+    /// Every open project. There is always at least one, so `ws()` never has to answer "none".
+    pub workspaces: Vec<Workspace>,
+    /// Which workspace the panels and the keys act on.
+    pub active: usize,
     pub region: Region,
     pub selected: Option<GraphObjectRef>,
     /// Actions of the selected node / edge (inbox items carry their own).
@@ -325,8 +389,6 @@ pub struct App {
     pub help_open: bool,
     pub error: Option<String>,
     pub notice: Option<String>,
-    pub connection: Connection,
-    pub last_seq: u64,
     pub frames: FrameStats,
     /// (cols, rows) each pane widget was last drawn with; filled by `ui::panes`.
     pub pane_areas: BTreeMap<String, (u16, u16)>,
@@ -365,14 +427,22 @@ fn same_task(graph: &Graph, r: &GraphObjectRef, task_id: &str) -> bool {
 
 impl App {
     pub fn new(mode: Mode) -> Self {
+        Self::with_urls(mode, &["http://127.0.0.1:7420".to_string()])
+    }
+
+    /// One workspace per daemon url, in the order they were given.
+    pub fn with_urls(mode: Mode, urls: &[String]) -> Self {
+        let workspaces: Vec<Workspace> = if urls.is_empty() {
+            vec![Workspace::new("http://127.0.0.1:7420", mode)]
+        } else {
+            urls.iter()
+                .map(|u| Workspace::new(u.clone(), mode))
+                .collect()
+        };
         Self {
             mode,
-            graph: Graph::default(),
-            state: State::default(),
-            panes: Vec::new(),
-            pane_states: BTreeMap::new(),
-            focused_pane: None,
-            metrics: None,
+            workspaces,
+            active: 0,
             region: Region::Tree,
             selected: None,
             actions: Vec::new(),
@@ -385,11 +455,6 @@ impl App {
             help_open: false,
             error: None,
             notice: None,
-            connection: match mode {
-                Mode::Live => Connection::Connecting,
-                Mode::Replay => Connection::Replay,
-            },
-            last_seq: 0,
             frames: FrameStats::default(),
             pane_areas: BTreeMap::new(),
             graph_viewport: Viewport::EMPTY,
@@ -415,6 +480,7 @@ impl App {
     pub fn refs_for_region(&self, region: Region) -> Vec<GraphObjectRef> {
         match region {
             Region::Tree => self
+                .ws()
                 .graph
                 .nodes
                 .iter()
@@ -422,6 +488,7 @@ impl App {
                 .map(|n| GraphObjectRef::node(n.id.clone()))
                 .collect(),
             Region::Graph => self
+                .ws()
                 .graph
                 .nodes
                 .iter()
@@ -434,24 +501,27 @@ impl App {
                         .map(|n| GraphObjectRef::node(n.id)),
                 )
                 .chain(
-                    self.graph
+                    self.ws()
+                        .graph
                         .edges
                         .iter()
                         .map(|e| GraphObjectRef::edge(e.id.clone())),
                 )
                 .collect(),
             Region::Inbox => self
+                .ws()
                 .graph
                 .inbox
                 .iter()
                 .map(|i| GraphObjectRef::inbox(i.id.clone()))
                 .collect(),
             Region::Panes => self
+                .ws()
                 .panes
                 .iter()
-                .filter_map(|p| self.pane_states.get(p))
+                .filter_map(|p| self.ws().pane_states.get(p))
                 .filter_map(|p| p.info.task_id.clone())
-                .filter(|t| self.graph.node(t).is_some())
+                .filter(|t| self.ws().graph.node(t).is_some())
                 .map(GraphObjectRef::node)
                 .collect(),
         }
@@ -468,15 +538,15 @@ impl App {
     /// New graph from `/graph`: keeps the selection when the object still exists, else falls back like the
     /// Ink app; returns the fetches a changed selection needs.
     pub fn set_graph(&mut self, graph: Graph) -> Vec<Effect> {
-        self.graph = graph;
-        if let Some(seq) = self.graph.seq {
-            self.last_seq = self.last_seq.max(seq);
+        self.ws_mut().graph = graph;
+        if let Some(seq) = self.ws().graph.seq {
+            self.ws_mut().last_seq = self.ws().last_seq.max(seq);
         }
         let mut effects = Vec::new();
         let keep = self
             .selected
             .as_ref()
-            .map(|r| self.graph.contains(r))
+            .map(|r| self.ws().graph.contains(r))
             .unwrap_or(false);
         if !keep {
             let next = self.initial_ref();
@@ -484,7 +554,7 @@ impl App {
         }
         if self.inspector_open {
             if let Some(r) = self.inspector.reference.clone() {
-                if self.graph.contains(&r) {
+                if self.ws().graph.contains(&r) {
                     effects.push(Effect::FetchInspector(r));
                 } else {
                     self.inspector_open = false;
@@ -495,8 +565,8 @@ impl App {
     }
 
     pub fn set_state(&mut self, state: State) {
-        self.last_seq = self.last_seq.max(state.last_seq);
-        self.state = state;
+        self.ws_mut().last_seq = self.ws().last_seq.max(state.last_seq);
+        self.ws_mut().state = state;
     }
 
     /// New `/panes` listing: new panes get a screen model sized like the PTY; known ones keep theirs.
@@ -509,12 +579,14 @@ impl App {
             .into_iter()
             .filter(|p| !self.dismissed_panes.contains(&p.pane_id))
             .collect();
-        self.pane_states
-            .retain(|id, _| !self.dismissed_panes.contains(id));
+        let dismissed = self.dismissed_panes.clone();
+        self.ws_mut()
+            .pane_states
+            .retain(|id, _| !dismissed.contains(id));
 
-        self.panes = panes.iter().map(|p| p.pane_id.clone()).collect();
+        self.ws_mut().panes = panes.iter().map(|p| p.pane_id.clone()).collect();
         for info in panes {
-            match self.pane_states.get_mut(&info.pane_id) {
+            match self.ws_mut().pane_states.get_mut(&info.pane_id) {
                 Some(existing) => {
                     if info.exit_code.is_some() {
                         existing.exit_code = info.exit_code;
@@ -522,39 +594,48 @@ impl App {
                     existing.info = info;
                 }
                 None => {
-                    self.pane_states
+                    self.ws_mut()
+                        .pane_states
                         .insert(info.pane_id.clone(), PaneState::new(info));
                 }
             }
         }
         let focus_valid = self
+            .ws()
             .focused_pane
             .as_ref()
-            .map(|p| self.panes.contains(p))
+            .map(|p| self.ws().panes.contains(p))
             .unwrap_or(false);
         if !focus_valid {
-            self.focused_pane = focused
-                .filter(|f| self.panes.contains(f))
+            self.ws_mut().focused_pane = focused
+                .filter(|f| self.ws().panes.contains(f))
                 .or_else(|| self.first_alive_pane())
-                .or_else(|| self.panes.first().cloned());
+                .or_else(|| self.ws().panes.first().cloned());
         }
         Vec::new()
     }
 
     fn first_alive_pane(&self) -> Option<String> {
-        self.panes
+        self.ws()
+            .panes
             .iter()
-            .find(|p| self.pane_states.get(*p).map(|s| s.alive()).unwrap_or(false))
+            .find(|p| {
+                self.ws()
+                    .pane_states
+                    .get(*p)
+                    .map(|s| s.alive())
+                    .unwrap_or(false)
+            })
             .cloned()
     }
 
     pub fn set_metrics(&mut self, metrics: HostMetrics) {
-        self.metrics = Some(metrics);
+        self.ws_mut().metrics = Some(metrics);
     }
 
     /// A frame from `/pty/:id`.
     pub fn apply_pane_frame(&mut self, pane_id: &str, frame: PtyServerMessage) {
-        let Some(pane) = self.pane_states.get_mut(pane_id) else {
+        let Some(pane) = self.ws_mut().pane_states.get_mut(pane_id) else {
             return;
         };
         match frame {
@@ -571,7 +652,7 @@ impl App {
             PtyServerMessage::Exit { code } => {
                 pane.exit_code = Some(code);
                 pane.info.alive = false;
-                if self.terminal_input && self.focused_pane.as_deref() == Some(pane_id) {
+                if self.terminal_input && self.ws().focused_pane.as_deref() == Some(pane_id) {
                     self.terminal_input = false;
                 }
             }
@@ -580,7 +661,7 @@ impl App {
     }
 
     pub fn set_pane_connected(&mut self, pane_id: &str, connected: bool) {
-        if let Some(pane) = self.pane_states.get_mut(pane_id) {
+        if let Some(pane) = self.ws_mut().pane_states.get_mut(pane_id) {
             pane.connected = connected;
         }
     }
@@ -622,25 +703,26 @@ impl App {
     }
 
     pub fn set_connection(&mut self, connection: Connection) {
-        self.connection = connection;
+        self.ws_mut().connection = connection;
     }
 
     pub fn note_event(&mut self, seq: u64) {
-        self.last_seq = self.last_seq.max(seq);
+        self.ws_mut().last_seq = self.ws().last_seq.max(seq);
     }
 
     // --- queries -----------------------------------------------------------------------------------
 
     pub fn task_view(&self, task_id: &str) -> Option<&TaskView> {
-        self.state.tasks.get(task_id)
+        self.ws().state.tasks.get(task_id)
     }
 
     pub fn pane_for_task(&self, task_id: &str) -> Option<String> {
         // Prefer the alive pane (a resumed session gets a new pane id, e.g. relay:3 after relay:1).
         let mut candidates = self
+            .ws()
             .panes
             .iter()
-            .filter_map(|p| self.pane_states.get(p))
+            .filter_map(|p| self.ws().pane_states.get(p))
             .filter(|p| p.info.task_id.as_deref() == Some(task_id));
         let first = candidates.next()?;
         let alive = std::iter::once(first)
@@ -651,15 +733,17 @@ impl App {
     }
 
     pub fn focused_pane_state(&self) -> Option<&PaneState> {
-        self.focused_pane
+        self.ws()
+            .focused_pane
             .as_ref()
-            .and_then(|p| self.pane_states.get(p))
+            .and_then(|p| self.ws().pane_states.get(p))
     }
 
     /// Actions that apply to the selection: the inbox item's own, else the fetched ones.
     pub fn current_actions(&self) -> &[ObjectAction] {
         match &self.selected {
             Some(r) if r.kind == RefKind::Inbox => self
+                .ws()
                 .graph
                 .inbox_item(&r.id)
                 .map(|i| i.actions.as_slice())
@@ -709,7 +793,7 @@ impl App {
             InputMode::ClosePaneConfirm => {
                 let pane_id = self.pending_pane_close.clone().unwrap_or_default();
                 Some(
-                    match self.pane_states.get(&pane_id).map(|p| p.info.clone()) {
+                    match self.ws().pane_states.get(&pane_id).map(|p| p.info.clone()) {
                         Some(info) if info.task_id.is_some() => format!(
                             "close {}'s terminal ({pane_id})? its task keeps waiting for it  y/N",
                             info.role
@@ -731,10 +815,19 @@ impl App {
         }
         self.selected = reference.clone();
         self.actions.clear();
-        match reference {
-            Some(r) if r.kind != RefKind::Inbox => vec![Effect::FetchActions(r)],
+        let mut effects = match &reference {
+            Some(r) if r.kind != RefKind::Inbox => vec![Effect::FetchActions(r.clone())],
             _ => Vec::new(),
+        };
+        // Picking an agent shows its terminal. `focus_pane` selects back, and the guard above stops
+        // there, so the two directions agree instead of chasing each other.
+        if let Some(pane_id) = self
+            .selected_task_id()
+            .and_then(|task| self.pane_for_task(&task))
+        {
+            effects.extend(self.focus_pane(pane_id, true));
         }
+        effects
     }
 
     fn move_selection(&mut self, delta: i32) -> Vec<Effect> {
@@ -754,18 +847,19 @@ impl App {
     }
 
     fn move_pane_focus(&mut self, delta: i32) -> Vec<Effect> {
-        if self.panes.is_empty() {
+        if self.ws().panes.is_empty() {
             return Vec::new();
         }
         let current = self
+            .ws()
             .focused_pane
             .as_ref()
-            .and_then(|p| self.panes.iter().position(|x| x == p));
+            .and_then(|p| self.ws().panes.iter().position(|x| x == p));
         let next = match current {
             None => 0,
-            Some(i) => (i as i32 + delta).clamp(0, self.panes.len() as i32 - 1) as usize,
+            Some(i) => (i as i32 + delta).clamp(0, self.ws().panes.len() as i32 - 1) as usize,
         };
-        let pane = self.panes[next].clone();
+        let pane = self.ws().panes[next].clone();
         self.focus_pane(pane, false)
     }
 
@@ -774,7 +868,7 @@ impl App {
         let next = REGIONS[(index + 1) % REGIONS.len()];
         self.region = next;
         if next == Region::Panes {
-            if let Some(p) = self.focused_pane.clone() {
+            if let Some(p) = self.ws().focused_pane.clone() {
                 return self.focus_pane(p, false);
             }
             return Vec::new();
@@ -788,22 +882,23 @@ impl App {
 
     /// Make `pane_id` the large pane; `post` also tells relayd (`POST /panes/:id/focus`).
     pub fn focus_pane(&mut self, pane_id: String, post: bool) -> Vec<Effect> {
-        if !self.panes.contains(&pane_id) {
+        if !self.ws().panes.contains(&pane_id) {
             return Vec::new();
         }
         let mut effects = Vec::new();
-        if self.focused_pane.as_ref() != Some(&pane_id) {
-            self.focused_pane = Some(pane_id.clone());
+        if self.ws().focused_pane.as_ref() != Some(&pane_id) {
+            self.ws_mut().focused_pane = Some(pane_id.clone());
             self.terminal_input = false;
         }
         if post {
             effects.push(Effect::FocusPane(pane_id.clone()));
         }
         let task_node = self
+            .ws()
             .pane_states
             .get(&pane_id)
             .and_then(|p| p.info.task_id.clone())
-            .filter(|t| self.graph.node(t).is_some())
+            .filter(|t| self.ws().graph.node(t).is_some())
             .map(GraphObjectRef::node);
         if let Some(r) = task_node {
             effects.extend(self.select(Some(r)));
@@ -815,7 +910,7 @@ impl App {
         let Some(reference) = reference else {
             return Vec::new();
         };
-        if !self.graph.contains(&reference) {
+        if !self.ws().graph.contains(&reference) {
             return Vec::new();
         }
         self.inspector_open = true;
@@ -853,7 +948,7 @@ impl App {
 
     fn selected_task_id(&self) -> Option<String> {
         let r = self.selected.as_ref()?;
-        self.graph.task_of(r).map(str::to_string)
+        self.ws().graph.task_of(r).map(str::to_string)
     }
 
     fn find_action(&self, key: char) -> Option<ObjectAction> {
@@ -888,7 +983,7 @@ impl App {
                 self.terminal_input = false;
                 return Vec::new();
             }
-            return match self.focused_pane.clone() {
+            return match self.ws().focused_pane.clone() {
                 Some(pane_id) => {
                     // Typing means you want the live edge, as it does in any terminal.
                     self.scroll_pane_to_bottom(&pane_id);
@@ -927,6 +1022,7 @@ impl App {
             if answer == Some('y') {
                 if let Some(pane_id) = self.pending_pane_close.clone() {
                     let alive = self
+                        .ws()
                         .pane_states
                         .get(&pane_id)
                         .map(|p| p.alive())
@@ -1047,10 +1143,14 @@ impl App {
                 }
                 if let Some(r) = self.selected.clone() {
                     if r.kind == RefKind::Inbox {
-                        let target = self.graph.inbox_item(&r.id).map(|i| i.reference.clone());
+                        let target = self
+                            .ws()
+                            .graph
+                            .inbox_item(&r.id)
+                            .map(|i| i.reference.clone());
                         let mut effects = Vec::new();
                         if let Some(t) = target.clone() {
-                            self.region = region_for_ref(&self.graph, &t);
+                            self.region = region_for_ref(&self.ws().graph, &t);
                             effects.extend(self.select(Some(t)));
                         }
                         effects.extend(self.open_inspector(target));
@@ -1082,7 +1182,7 @@ impl App {
                     .and_then(|t| self.pane_for_task(&t))
                     .or_else(|| {
                         if self.region == Region::Panes {
-                            self.focused_pane.clone()
+                            self.ws().focused_pane.clone()
                         } else {
                             None
                         }
@@ -1104,7 +1204,7 @@ impl App {
                 } else {
                     -PAGE_ROWS
                 };
-                match self.focused_pane.clone() {
+                match self.ws().focused_pane.clone() {
                     Some(pane_id) => self.scroll_pane(&pane_id, rows),
                     None => self.set_notice("no pane to scroll"),
                 }
@@ -1154,7 +1254,7 @@ impl App {
                 Vec::new()
             }
             (_, Some('X')) => {
-                match self.focused_pane.clone() {
+                match self.ws().focused_pane.clone() {
                     Some(pane_id) => {
                         self.error = None;
                         self.pending_pane_close = Some(pane_id);
@@ -1167,6 +1267,10 @@ impl App {
             (_, Some('t')) => {
                 self.set_notice("opening a shell pane…");
                 vec![Effect::NewShellPane]
+            }
+            // With several projects open the digits pick one; with one they are free for the panes.
+            (_, Some(c)) if c.is_ascii_digit() && c != '0' && self.workspaces.len() > 1 => {
+                self.set_active(c.to_digit(10).unwrap_or(1) as usize - 1)
             }
             (_, Some('m')) => {
                 self.mouse_capture = !self.mouse_capture;
@@ -1305,6 +1409,84 @@ impl App {
         }
     }
 
+    /// A graph for a workspace that may not be the active one. The active workspace also refreshes
+    /// the selection and the inspector; the others just keep their nodes current for the network.
+    pub fn set_graph_for(&mut self, index: usize, graph: Graph) -> Vec<Effect> {
+        if index == self.active {
+            return self.set_graph(graph);
+        }
+        if let Some(ws) = self.workspaces.get_mut(index) {
+            ws.graph = graph;
+        }
+        Vec::new()
+    }
+
+    pub fn set_state_for(&mut self, index: usize, state: State) {
+        if index == self.active {
+            self.set_state(state);
+            self.ws_mut().refresh_name();
+            return;
+        }
+        if let Some(ws) = self.workspaces.get_mut(index) {
+            ws.state = state;
+            ws.refresh_name();
+        }
+    }
+
+    /// Every workspace's agents in one graph, so the network shows all of them.
+    ///
+    /// Ids are qualified with the workspace when there is more than one, because two projects can
+    /// each have a `t-backend-auth` and they are not the same agent. With a single workspace nothing
+    /// is renamed, so everything that addresses a node keeps working unchanged.
+    pub fn merged_graph(&self) -> Graph {
+        if self.workspaces.len() <= 1 {
+            return self.ws().graph.clone();
+        }
+        let mut merged = Graph::default();
+        for (index, ws) in self.workspaces.iter().enumerate() {
+            let tag = |id: &str| format!("{index}/{id}");
+            for node in &ws.graph.nodes {
+                let mut node = node.clone();
+                node.id = tag(&node.id);
+                merged.nodes.push(node);
+            }
+            for edge in &ws.graph.edges {
+                let mut edge = edge.clone();
+                edge.id = tag(&edge.id);
+                edge.from = tag(&edge.from);
+                edge.to = tag(&edge.to);
+                merged.edges.push(edge);
+            }
+        }
+        merged
+    }
+
+    /// The workspace the panels and the keys act on. There is always one.
+    pub fn ws(&self) -> &Workspace {
+        &self.workspaces[self.active.min(self.workspaces.len() - 1)]
+    }
+
+    pub fn ws_mut(&mut self) -> &mut Workspace {
+        let index = self.active.min(self.workspaces.len() - 1);
+        &mut self.workspaces[index]
+    }
+
+    /// Look at another workspace by index, for the panels that draw all of them.
+    pub fn workspace(&self, index: usize) -> Option<&Workspace> {
+        self.workspaces.get(index)
+    }
+
+    /// Make a workspace the active one; the selection belongs to whichever that is.
+    pub fn set_active(&mut self, index: usize) -> Vec<Effect> {
+        if index >= self.workspaces.len() || index == self.active {
+            return Vec::new();
+        }
+        self.active = index;
+        self.terminal_input = false;
+        let next = self.initial_ref();
+        self.select(next)
+    }
+
     /// The stored position, readable without touching the pane map.
     pub fn pane_scroll_of(&self, pane_id: &str) -> usize {
         self.pane_scroll.get(pane_id).copied().unwrap_or(0)
@@ -1343,7 +1525,7 @@ impl App {
             return Vec::new();
         }
         self.region = Region::Panes;
-        if self.focused_pane.as_deref() == Some(pane_id.as_str()) {
+        if self.ws().focused_pane.as_deref() == Some(pane_id.as_str()) {
             if self
                 .focused_pane_state()
                 .map(|p| p.alive())
@@ -1370,14 +1552,14 @@ impl App {
     /// row it occupied — but this view is done with it.
     pub fn dismiss_pane(&mut self, pane_id: &str) {
         self.dismissed_panes.insert(pane_id.to_string());
-        self.panes.retain(|id| id != pane_id);
-        self.pane_states.remove(pane_id);
+        self.ws_mut().panes.retain(|id| id != pane_id);
+        self.ws_mut().pane_states.remove(pane_id);
         self.pane_rects.remove(pane_id);
-        if self.focused_pane.as_deref() == Some(pane_id) {
+        if self.ws().focused_pane.as_deref() == Some(pane_id) {
             self.terminal_input = false;
-            self.focused_pane = self
+            self.ws_mut().focused_pane = self
                 .first_alive_pane()
-                .or_else(|| self.panes.first().cloned());
+                .or_else(|| self.ws().panes.first().cloned());
         }
         self.set_notice(format!("closed {pane_id}"));
     }
@@ -1410,7 +1592,7 @@ impl App {
     /// anything else; this is so the key can say why rather than posting a request that will fail.
     pub fn deletable_task(&self) -> Option<String> {
         let task_id = self.selected_task_id()?;
-        let node = self.graph.node(&task_id)?;
+        let node = self.ws().graph.node(&task_id)?;
         matches!(
             node.task_state,
             Some(TaskState::Canceled) | Some(TaskState::Failed)
@@ -1421,12 +1603,18 @@ impl App {
     /// Is a planner agent actually there? The graph always has the node; a pane is what says someone
     /// is doing the job.
     pub fn planner_present(&self) -> bool {
-        self.pane_states.values().any(|p| p.info.role == "planner")
+        self.ws()
+            .pane_states
+            .values()
+            .any(|p| p.info.role == "planner")
     }
 
     /// Agents relayd is hosting that no contract accounts for; they are on the network too.
     pub fn unattached_agents(&self) -> Vec<GraphNode> {
-        crate::ui::graph::unattached_agents(&self.graph, self.pane_states.values().map(|p| &p.info))
+        crate::ui::graph::unattached_agents(
+            &self.ws().graph,
+            self.ws().pane_states.values().map(|p| &p.info),
+        )
     }
 
     /// The object drawn under a cell, if any.
@@ -1434,18 +1622,18 @@ impl App {
         let point =
             crate::ui::graph::cell_to_world(&self.graph_view, self.graph_viewport, col, row);
         let discs = crate::ui::graph::layout_net(
-            &self.graph,
+            &self.ws().graph,
             &self.unattached_agents(),
             self.planner_present(),
         );
-        crate::ui::graph::hit_test(&self.graph, &discs, point)
+        crate::ui::graph::hit_test(&self.ws().graph, &discs, point)
     }
 
     // --- pane sizing -------------------------------------------------------------------------------
 
     /// After a draw: if the focused pane's widget changed size, resize its screen model and tell relayd.
     pub fn sync_pane_sizes(&mut self) -> Vec<Effect> {
-        let Some(pane_id) = self.focused_pane.clone() else {
+        let Some(pane_id) = self.ws().focused_pane.clone() else {
             return Vec::new();
         };
         let Some(&(cols, rows)) = self.pane_areas.get(&pane_id) else {
@@ -1454,7 +1642,7 @@ impl App {
         if cols == 0 || rows == 0 {
             return Vec::new();
         }
-        let Some(pane) = self.pane_states.get_mut(&pane_id) else {
+        let Some(pane) = self.ws_mut().pane_states.get_mut(&pane_id) else {
             return Vec::new();
         };
         if pane.size() == (cols, rows) {
@@ -1515,7 +1703,7 @@ pub fn region_for_ref(graph: &Graph, r: &GraphObjectRef) -> Region {
 /// Does the pane's task match the selection (used by the pane grid to highlight the selected task's pane)?
 pub fn pane_matches_selection(app: &App, pane: &PaneState) -> bool {
     match (&app.selected, &pane.info.task_id) {
-        (Some(r), Some(t)) => same_task(&app.graph, r, t),
+        (Some(r), Some(t)) => same_task(&app.ws().graph, r, t),
         _ => false,
     }
 }

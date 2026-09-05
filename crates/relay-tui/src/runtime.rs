@@ -38,10 +38,12 @@ pub enum Msg {
     Event(u64),
     /// The debounce elapsed: re-fetch graph, state and panes.
     Refresh,
-    Graph(Graph),
-    State(State),
-    Panes(Vec<PaneInfo>, Option<String>),
-    Metrics(HostMetrics),
+    /// Each carries the workspace it came from: several daemons are polled, and a reply must land on
+    /// the project it is about.
+    Graph(usize, Graph),
+    State(usize, State),
+    Panes(usize, Vec<PaneInfo>, Option<String>),
+    Metrics(usize, HostMetrics),
     Inspector(
         GraphObjectRef,
         ObjectDescription,
@@ -62,7 +64,8 @@ pub enum Msg {
 }
 
 pub enum Source {
-    Live(Arc<Client>),
+    /// One client per workspace, in the order the urls were given: a workspace is a daemon.
+    Live(Vec<Arc<Client>>),
     Replay(Arc<Fixture>),
 }
 
@@ -83,6 +86,30 @@ pub struct Runtime<B: Backend> {
 }
 
 impl<B: Backend> Runtime<B> {
+    /// Give the app one workspace per url, so the panel and the network know how many projects there
+    /// are before any of them has answered.
+    pub fn set_workspace_urls(&mut self, urls: &[String]) {
+        if urls.len() > 1 {
+            self.app = App::with_urls(self.app.mode, urls);
+        }
+    }
+
+    /// The daemon of the workspace the user is acting on.
+    fn active_client(&self) -> Option<&Arc<Client>> {
+        match &self.source {
+            Source::Live(clients) => clients.get(self.app.active).or_else(|| clients.first()),
+            Source::Replay(_) => None,
+        }
+    }
+
+    /// Every workspace's daemon, with its index, for the loops that refresh them all.
+    fn all_clients(&self) -> Vec<(usize, Arc<Client>)> {
+        match &self.source {
+            Source::Live(clients) => clients.iter().cloned().enumerate().collect(),
+            Source::Replay(_) => Vec::new(),
+        }
+    }
+
     pub fn new(terminal: Terminal<B>, source: Source) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let mode = match source {
@@ -126,7 +153,10 @@ impl<B: Backend> Runtime<B> {
                 self.app
                     .set_notice(format!("replay of {}", fixture.dir.display()));
             }
-            Source::Live(client) => {
+            Source::Live(_) => {
+                let Some(client) = self.active_client().cloned() else {
+                    return Ok(());
+                };
                 let client = client.clone();
                 let (state, graph, panes) =
                     tokio::join!(client.state(), client.graph(), client.panes());
@@ -153,12 +183,12 @@ impl<B: Backend> Runtime<B> {
     }
 
     fn spawn_sse(&mut self) {
-        let Source::Live(client) = &self.source else {
+        let Some(client) = self.active_client() else {
             return;
         };
         let client = client.clone();
         let tx = self.tx.clone();
-        let since = self.app.last_seq;
+        let since = self.app.ws_mut().last_seq;
         self.tasks.push(tokio::spawn(async move {
             let mut since = since;
             loop {
@@ -190,7 +220,9 @@ impl<B: Backend> Runtime<B> {
     }
 
     fn spawn_metrics(&mut self) {
-        let Source::Live(client) = &self.source else {
+        // Host metrics are about the daemon in front of you; the status line shows one workspace's.
+        let index = self.app.active;
+        let Some(client) = self.active_client() else {
             return;
         };
         let client = client.clone();
@@ -198,7 +230,7 @@ impl<B: Backend> Runtime<B> {
         self.tasks.push(tokio::spawn(async move {
             loop {
                 if let Ok(m) = client.metrics().await {
-                    if tx.send(Msg::Metrics(m)).is_err() {
+                    if tx.send(Msg::Metrics(index, m)).is_err() {
                         return;
                     }
                 }
@@ -215,7 +247,7 @@ impl<B: Backend> Runtime<B> {
         self.run_effects(effects);
         // A pane this session asked for is the one the user wants to be looking at.
         if let Some(pane_id) = self.pending_pane.clone() {
-            if self.app.panes.contains(&pane_id) {
+            if self.app.ws_mut().panes.contains(&pane_id) {
                 self.pending_pane = None;
                 // `t` asked for a terminal: focus it and put the keyboard in it, Esc to leave.
                 let effects = self.app.open_pane_for_typing(pane_id);
@@ -224,6 +256,7 @@ impl<B: Backend> Runtime<B> {
         }
         let missing: Vec<String> = self
             .app
+            .ws()
             .panes
             .iter()
             .filter(|p| !self.pane_senders.contains_key(*p))
@@ -236,7 +269,7 @@ impl<B: Backend> Runtime<B> {
 
     /// One WebSocket per pane: server frames become `Msg::PaneFrame`, `PtyClientMessage`s go out as JSON.
     fn spawn_pane(&mut self, pane_id: String) {
-        let Source::Live(client) = &self.source else {
+        let Some(client) = self.active_client() else {
             return;
         };
         let client = client.clone();
@@ -306,30 +339,30 @@ impl<B: Backend> Runtime<B> {
         });
     }
 
+    /// Every workspace is refreshed, not just the one in front: the network draws all their agents,
+    /// so a project you are not looking at still has to be current.
     fn refresh_now(&mut self) {
-        let Source::Live(client) = &self.source else {
-            return;
-        };
-        let client = client.clone();
-        let tx = self.tx.clone();
-        tokio::spawn(async move {
-            let (graph, state, panes) =
-                tokio::join!(client.graph(), client.state(), client.panes());
-            match graph {
-                Ok(g) => {
-                    let _ = tx.send(Msg::Graph(g));
+        for (index, client) in self.all_clients() {
+            let tx = self.tx.clone();
+            tokio::spawn(async move {
+                let (graph, state, panes) =
+                    tokio::join!(client.graph(), client.state(), client.panes());
+                match graph {
+                    Ok(g) => {
+                        let _ = tx.send(Msg::Graph(index, g));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Msg::Error(e.to_string()));
+                    }
                 }
-                Err(e) => {
-                    let _ = tx.send(Msg::Error(e.to_string()));
+                if let Ok(s) = state {
+                    let _ = tx.send(Msg::State(index, s));
                 }
-            }
-            if let Ok(s) = state {
-                let _ = tx.send(Msg::State(s));
-            }
-            if let Ok((panes, focused)) = panes {
-                let _ = tx.send(Msg::Panes(panes, focused));
-            }
-        });
+                if let Ok((panes, focused)) = panes {
+                    let _ = tx.send(Msg::Panes(index, panes, focused));
+                }
+            });
+        }
     }
 
     /// Apply one message; returns the effects it produced.
@@ -366,17 +399,25 @@ impl<B: Backend> Runtime<B> {
                 self.refresh_now();
                 Vec::new()
             }
-            Msg::Graph(graph) => self.app.set_graph(graph),
-            Msg::State(state) => {
-                self.app.set_state(state);
+            // A reply lands on the workspace it came from; only the active one drives the panels, so
+            // the others update quietly behind the network.
+            Msg::Graph(index, graph) => self.app.set_graph_for(index, graph),
+            Msg::State(index, state) => {
+                self.app.set_state_for(index, state);
                 Vec::new()
             }
-            Msg::Panes(panes, focused) => {
-                self.apply_panes(panes, focused);
+            Msg::Panes(index, panes, focused) => {
+                if index == self.app.active {
+                    self.apply_panes(panes, focused);
+                } else if let Some(ws) = self.app.workspaces.get_mut(index) {
+                    ws.panes = panes.iter().map(|p| p.pane_id.clone()).collect();
+                }
                 Vec::new()
             }
-            Msg::Metrics(m) => {
-                self.app.set_metrics(m);
+            Msg::Metrics(index, m) => {
+                if index == self.app.active {
+                    self.app.set_metrics(m);
+                }
                 Vec::new()
             }
             Msg::Inspector(r, description, story, actions) => {
@@ -429,7 +470,10 @@ impl<B: Backend> Runtime<B> {
                     let (d, s, a) = (f.describe(&r), f.story(&r), f.actions(&r));
                     self.app.set_inspector(r, d, s, a);
                 }
-                Source::Live(client) => {
+                Source::Live(_) => {
+                    let Some(client) = self.active_client() else {
+                        return;
+                    };
                     let client = client.clone();
                     let tx = self.tx.clone();
                     tokio::spawn(async move {
@@ -454,7 +498,10 @@ impl<B: Backend> Runtime<B> {
                     let actions = f.actions(&r);
                     self.app.set_actions(&r, actions);
                 }
-                Source::Live(client) => {
+                Source::Live(_) => {
+                    let Some(client) = self.active_client() else {
+                        return;
+                    };
                     let client = client.clone();
                     let tx = self.tx.clone();
                     tokio::spawn(async move {
@@ -491,7 +538,7 @@ impl<B: Backend> Runtime<B> {
             // A shell beside the agents, so a mission can be started without leaving the app. The UI never
             // sends a command line: the shell comes from the environment and the cwd from --repo.
             Effect::NewShellPane => {
-                let Source::Live(client) = &self.source else {
+                let Some(client) = self.active_client() else {
                     self.app
                         .set_notice("replay has no daemon to open a pane on");
                     return;
@@ -509,7 +556,7 @@ impl<B: Backend> Runtime<B> {
                 }));
             }
             Effect::DeleteTask(task_id) => {
-                let Source::Live(client) = &self.source else {
+                let Some(client) = self.active_client() else {
                     self.app.set_notice("replay has no daemon to delete on");
                     return;
                 };
@@ -526,7 +573,7 @@ impl<B: Backend> Runtime<B> {
                 }));
             }
             Effect::KillPane(pane_id) => {
-                let Source::Live(client) = &self.source else {
+                let Some(client) = self.active_client() else {
                     self.app
                         .set_notice("replay has no daemon to close a pane on");
                     return;
@@ -552,7 +599,7 @@ impl<B: Backend> Runtime<B> {
                 };
             }
             Effect::FocusPane(pane_id) => {
-                if let Source::Live(client) = &self.source {
+                if let Some(client) = self.active_client() {
                     let client = client.clone();
                     let tx = self.tx.clone();
                     tokio::spawn(async move {
@@ -571,8 +618,11 @@ impl<B: Backend> Runtime<B> {
                 self.app
                     .set_notice(format!("replay: not sent — {}", command.label()));
             }
-            Source::Live(client) => {
-                let client = client.clone();
+            Source::Live(_) => {
+                // A command goes to the workspace it is about: the active one.
+                let Some(client) = self.active_client().cloned() else {
+                    return;
+                };
                 let tx = self.tx.clone();
                 self.app.error = None;
                 tokio::spawn(async move {

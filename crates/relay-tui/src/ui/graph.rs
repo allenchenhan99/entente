@@ -336,7 +336,7 @@ pub fn detail_line(app: &App) -> Line<'static> {
         );
     };
     if reference.kind == RefKind::Edge {
-        if let Some(edge) = app.graph.edges.iter().find(|e| e.id == reference.id) {
+        if let Some(edge) = app.ws().graph.edges.iter().find(|e| e.id == reference.id) {
             let mut spans = vec![
                 Span::styled(edge.id.clone(), Style::new().fg(Color::Gray)),
                 Span::raw("  "),
@@ -356,7 +356,7 @@ pub fn detail_line(app: &App) -> Line<'static> {
             return Line::from(spans);
         }
     }
-    let Some(node) = app.graph.nodes.iter().find(|n| n.id == reference.id) else {
+    let Some(node) = app.ws().graph.nodes.iter().find(|n| n.id == reference.id) else {
         return Line::raw("");
     };
     let mut spans = vec![Span::styled(
@@ -380,6 +380,7 @@ pub fn detail_line(app: &App) -> Line<'static> {
         // A brain has no incoming edge to carry its contract — nobody called it, you did — so the
         // version and its state come here instead of being lost with the human node.
         if let Some(edge) = app
+            .ws()
             .graph
             .edges
             .iter()
@@ -415,7 +416,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
     app.graph_viewport = viewport_of(canvas_area);
 
-    let graph = app.graph.clone();
+    // Every workspace's agents, on one network. They belong to different projects — nothing connects
+    // across a workspace, because no contract does — so each keeps its own name and its own colouring.
+    let graph = app.merged_graph();
     let unattached = app.unattached_agents();
     let mut discs = layout_net(&graph, &unattached, app.planner_present());
     // The pane is the better witness than the event-derived runtime state: an agent's contract exists
@@ -428,6 +431,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
             .find(|n| n.id == disc.id)
         {
             let pane_alive = app
+                .ws()
                 .pane_states
                 .values()
                 .find(|p| {
@@ -786,7 +790,7 @@ mod tests {
     #[test]
     fn the_detail_line_describes_a_selected_edge_instead() {
         let mut app = replay_app("live-1");
-        let edge = app.graph.edges.first().unwrap().clone();
+        let edge = app.ws().graph.edges.first().unwrap().clone();
         app.select(Some(GraphObjectRef::edge(&edge.id)));
         let text = detail_line(&app).to_string();
 

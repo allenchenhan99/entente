@@ -22,7 +22,7 @@ pub fn pane_title(app: &App, pane: &PaneState) -> String {
     let status = info
         .task_id
         .as_deref()
-        .and_then(|t| app.graph.node(t))
+        .and_then(|t| app.ws().graph.node(t))
         .and_then(|n| serde_json::to_value(n.status).ok())
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_else(|| {
@@ -43,7 +43,7 @@ fn title_style(app: &App, pane: &PaneState) -> Style {
         .info
         .task_id
         .as_deref()
-        .and_then(|t| app.graph.node(t))
+        .and_then(|t| app.ws().graph.node(t))
         .map(|n| status_color(n.status))
         .unwrap_or(if pane.alive() {
             Color::Cyan
@@ -79,7 +79,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_widget(block, area);
     app.pane_areas.clear();
     app.pane_rects.clear();
-    if app.panes.is_empty() {
+    if app.ws().panes.is_empty() {
         let hint = match app.mode {
             crate::app::Mode::Replay => "<no panes in this fixture>",
             crate::app::Mode::Live => {
@@ -93,10 +93,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
     let focused = app
+        .ws()
         .focused_pane
         .clone()
-        .unwrap_or_else(|| app.panes[0].clone());
+        .unwrap_or_else(|| app.ws().panes[0].clone());
     let others: Vec<String> = app
+        .ws()
         .panes
         .iter()
         .filter(|p| **p != focused)
@@ -114,7 +116,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     // screen actually kept — a full-screen agent owns its own display and has none — so the honoured
     // value is the only one worth reporting, and the title is built from it.
     let wanted = app.pane_scroll_of(&focused);
-    let honoured = if let Some(pane) = app.pane_states.get_mut(&focused) {
+    let honoured = if let Some(pane) = app.ws_mut().pane_states.get_mut(&focused) {
         pane.parser.screen_mut().set_scrollback(wanted);
         let honoured = pane.parser.screen().scrollback();
         app.set_pane_scroll(&focused, honoured);
@@ -123,13 +125,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         0
     };
 
-    if let Some(pane) = app.pane_states.get(&focused) {
+    // The title and the block are worked out first, while `app` is only read; the areas they produce
+    // are recorded after, when nothing is holding a borrow of the workspace.
+    let framing = app.ws().pane_states.get(&focused).map(|pane| {
         let mut title = pane_title(app, pane);
         // Scrolled back is not the live edge, and output arriving below must not be mistaken for what
         // you are reading, so the title says so.
-        let scrolled = honoured;
-        if scrolled > 0 {
-            title.push_str(&format!("  [↑{scrolled} · PgDn for live]"));
+        if honoured > 0 {
+            title.push_str(&format!("  [↑{honoured} · PgDn for live]"));
         } else if app.terminal_input {
             title.push_str("  [typing · Esc leaves]");
         } else if active {
@@ -139,6 +142,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         if app.terminal_input {
             style = style.reversed();
         }
+        (title, style)
+    });
+
+    if let Some((title, style)) = framing {
         let block = Block::new()
             .borders(Borders::TOP)
             .border_style(Style::new().fg(Color::DarkGray))
@@ -149,6 +156,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
             .insert(focused.clone(), (pane_area.width, pane_area.height));
         // The whole slot, title row included: a click anywhere on a pane means that pane.
         app.pane_rects.insert(focused.clone(), viewport_of(big));
+        let pane = app.ws().pane_states.get(&focused).expect("still there");
         let screen = pane.parser.screen();
         let widget = PseudoTerminal::new(screen);
         frame.render_widget(widget, pane_area);
@@ -169,25 +177,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
             .collect();
         let slots = Layout::horizontal(constraints).split(strip);
         for (index, pane_id) in others.iter().take(shown).enumerate() {
-            let Some(pane) = app.pane_states.get(pane_id) else {
+            // Everything read from the pane is taken here, so recording the slot below borrows nothing.
+            let Some((title, style, lines)) = app.ws().pane_states.get(pane_id).map(|pane| {
+                let mut title = pane_title(app, pane);
+                if index == shown - 1 && hidden > 0 {
+                    title.push_str(&format!("  +{hidden} more"));
+                }
+                let lines: Vec<Line> = tail_lines(pane, THUMB_LINES as usize)
+                    .into_iter()
+                    .map(|l| Line::styled(l, Style::new().fg(Color::Gray)))
+                    .collect();
+                (title, title_style(app, pane), lines)
+            }) else {
                 continue;
             };
-            let mut title = pane_title(app, pane);
-            if index == shown - 1 && hidden > 0 {
-                title.push_str(&format!("  +{hidden} more"));
-            }
             let block = Block::new()
                 .borders(Borders::TOP)
                 .border_style(Style::new().fg(Color::DarkGray))
-                .title(Line::styled(format!(" {title} "), title_style(app, pane)));
+                .title(Line::styled(format!(" {title} "), style));
             let slot = slots[index];
             let body = block.inner(slot);
             frame.render_widget(block, slot);
             app.pane_rects.insert(pane_id.clone(), viewport_of(slot));
-            let lines: Vec<Line> = tail_lines(pane, THUMB_LINES as usize)
-                .into_iter()
-                .map(|l| Line::styled(l, Style::new().fg(Color::Gray)))
-                .collect();
             frame.render_widget(Paragraph::new(lines), body);
         }
     }
@@ -207,7 +218,7 @@ mod tests {
         }))
         .unwrap();
         app.set_panes(vec![info], None);
-        app.pane_states.remove("relay:1").unwrap()
+        app.ws_mut().pane_states.remove("relay:1").unwrap()
     }
 
     #[test]
@@ -246,12 +257,14 @@ mod snapshots {
             ],
             None,
         );
-        app.pane_states
+        app.ws_mut()
+            .pane_states
             .get_mut("relay:1")
             .unwrap()
             .parser
             .process(b"$ claude\r\n> working on AC-1\r\n");
-        app.pane_states
+        app.ws_mut()
+            .pane_states
             .get_mut("relay:2")
             .unwrap()
             .parser

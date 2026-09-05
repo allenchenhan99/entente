@@ -65,7 +65,7 @@ fn keys_tab_cycles_tree_graph_panes_inbox_and_selects_the_first_object() {
     assert_eq!(app.selected, Some(GraphObjectRef::node("t-backend-auth")));
     app.handle_key(Key::TAB);
     assert_eq!(app.region, Region::Panes);
-    assert_eq!(app.focused_pane.as_deref(), Some("relay:1"));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:1"));
     assert_eq!(
         app.selected,
         Some(GraphObjectRef::node("t-frontend-login")),
@@ -274,7 +274,7 @@ fn keys_f_focuses_the_selected_tasks_pane_and_i_routes_input_to_it() {
     app.handle_key(Key::char('j')); // frontend
     let effects = app.handle_key(Key::char('f'));
     assert_eq!(app.region, Region::Panes);
-    assert_eq!(app.focused_pane.as_deref(), Some("relay:2"));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:2"));
     assert!(effects.contains(&Effect::FocusPane("relay:2".into())));
 
     app.handle_key(Key::char('i'));
@@ -322,12 +322,12 @@ fn keys_j_k_in_the_pane_grid_move_the_focus() {
     app.handle_key(Key::TAB);
     app.handle_key(Key::TAB);
     assert_eq!(app.region, Region::Panes);
-    assert_eq!(app.focused_pane.as_deref(), Some("relay:1"));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:1"));
     app.handle_key(Key::char('j'));
-    assert_eq!(app.focused_pane.as_deref(), Some("relay:2"));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:2"));
     assert_eq!(app.selected, Some(GraphObjectRef::node("t-frontend-login")));
     app.handle_key(Key::char('k'));
-    assert_eq!(app.focused_pane.as_deref(), Some("relay:1"));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:1"));
     // Enter in the grid inspects the focused pane's task.
     let effects = app.handle_key(Key::ENTER);
     assert_eq!(
@@ -367,7 +367,7 @@ fn keys_pane_resize_is_reported_when_the_widget_size_changes() {
         }]
     );
     assert_eq!(app.sync_pane_sizes(), vec![], "no change, no frame");
-    assert_eq!(app.pane_states["relay:1"].size(), (78, 20));
+    assert_eq!(app.ws().pane_states["relay:1"].size(), (78, 20));
 }
 
 #[test]
@@ -383,11 +383,11 @@ fn keys_pane_frames_feed_the_screen_model() {
             data: "aGVsbG8gcGFuZQ==".into(),
         },
     );
-    let screen = app.pane_states["relay:1"].parser.screen().contents();
+    let screen = app.ws().pane_states["relay:1"].parser.screen().contents();
     assert!(screen.starts_with("hello pane"), "{screen:?}");
     app.apply_pane_frame("relay:1", PtyServerMessage::Exit { code: 3 });
-    assert_eq!(app.pane_states["relay:1"].exit_code, Some(3));
-    assert!(!app.pane_states["relay:1"].alive());
+    assert_eq!(app.ws().pane_states["relay:1"].exit_code, Some(3));
+    assert!(!app.ws().pane_states["relay:1"].alive());
 }
 
 #[test]

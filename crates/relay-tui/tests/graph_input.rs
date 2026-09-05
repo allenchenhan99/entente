@@ -26,13 +26,13 @@ fn app_with_canvas() -> App {
 /// A cell that lands on the node — what the user's pointer would be over. A row spans several world
 /// units, so this asks the same question the app does rather than looking for the exact centre.
 fn cell_of(app: &App, node_id: &str) -> (u16, u16) {
-    let discs = layout_net(&app.graph, &[], app.planner_present());
+    let discs = layout_net(&app.ws().graph, &[], app.planner_present());
     let viewport = app.graph_viewport;
     let wanted = Some(GraphObjectRef::node(node_id));
     for row in viewport.y..viewport.y + viewport.height {
         for col in viewport.x..viewport.x + viewport.width {
             let point = cell_to_world(&app.graph_view, viewport, col, row);
-            if hit_test(&app.graph, &discs, point) == wanted {
+            if hit_test(&app.ws().graph, &discs, point) == wanted {
                 return (col, row);
             }
         }

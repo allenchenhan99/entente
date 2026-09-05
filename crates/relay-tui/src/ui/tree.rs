@@ -84,10 +84,16 @@ fn task_detail(node: &GraphNode, task: Option<&TaskView>) -> String {
 pub type TreeRow = (Line<'static>, Option<GraphObjectRef>);
 
 /// The rows as drawn, so a click on row N and the line on row N always agree about what is there.
+/// The workspaces panel: every open project, and the agents inside each. A workspace is a daemon —
+/// its own repo, its own event log, its own panes — so several projects are several relayds, and this
+/// is the list of them.
 pub fn tree_rows(app: &App, height: usize) -> Vec<TreeRow> {
+    if app.workspaces.len() > 1 {
+        return workspace_rows(app, height);
+    }
     let mut lines: Vec<TreeRow> = Vec::new();
-    let Some(mission) = app.state.mission() else {
-        if app.graph.nodes.is_empty() {
+    let Some(mission) = app.ws().state.mission() else {
+        if app.ws().graph.nodes.is_empty() {
             lines.push((
                 Line::styled("No mission", Style::new().fg(Color::DarkGray)),
                 None,
@@ -121,6 +127,7 @@ pub fn tree_rows(app: &App, height: usize) -> Vec<TreeRow> {
     }
     lines.push((Line::from(header), None));
     let lint: Vec<&LintItem> = app
+        .ws()
         .state
         .tasks
         .values()
@@ -147,8 +154,76 @@ pub fn tree_lines(app: &App, height: usize) -> Vec<Line<'static>> {
         .collect()
 }
 
+/// One block per workspace: its name and mission line, then its agents. The active one is marked, so
+/// it is clear which project the keys and the panes belong to.
+fn workspace_rows(app: &App, height: usize) -> Vec<TreeRow> {
+    let mut rows: Vec<TreeRow> = Vec::new();
+    let per_workspace = (height / app.workspaces.len().max(1)).max(2);
+    for (index, ws) in app.workspaces.iter().enumerate() {
+        let active = index == app.active;
+        let mut header = Style::new().bold();
+        if active {
+            header = header.fg(Color::Cyan);
+        }
+        let status = ws
+            .state
+            .mission()
+            .map(|m| m.status.clone())
+            .unwrap_or_else(|| ws.connection.label());
+        rows.push((
+            Line::styled(
+                format!(
+                    "{} {}  {}  {}",
+                    if active { "▶" } else { " " },
+                    index + 1,
+                    ws.name,
+                    status
+                ),
+                header,
+            ),
+            None,
+        ));
+        let agents: Vec<&GraphNode> = ws
+            .graph
+            .nodes
+            .iter()
+            .filter(|n| n.kind == GraphNodeKind::Agent)
+            .collect();
+        if agents.is_empty() {
+            rows.push((
+                Line::styled("    <no agents>", Style::new().fg(Color::DarkGray)),
+                None,
+            ));
+            continue;
+        }
+        for node in agents.iter().take(per_workspace.saturating_sub(1)) {
+            let selected = active
+                && matches!(&app.selected, Some(r) if r.kind == RefKind::Node && r.id == node.id);
+            let mut style = Style::new().fg(status_color(node.status));
+            if selected {
+                style = style.bold().reversed();
+            }
+            rows.push((
+                Line::styled(
+                    format!(
+                        "    {} {}  {}",
+                        runtime_glyph(node.runtime),
+                        node.id,
+                        node.label
+                    ),
+                    style,
+                ),
+                // Only the active workspace's rows select: a click elsewhere switches to it first.
+                active.then(|| GraphObjectRef::node(&node.id)),
+            ));
+        }
+    }
+    rows
+}
+
 fn agent_lines(app: &App, height: usize) -> Vec<TreeRow> {
     let agents: Vec<&GraphNode> = app
+        .ws()
         .graph
         .nodes
         .iter()
@@ -261,8 +336,8 @@ mod snapshots {
             header,
             "MISSION  Add secure login to this application.  executing"
         );
-        for task in app.state.tasks.keys() {
-            let node = app.graph.node(task).expect("task has a node");
+        for task in app.ws().state.tasks.keys() {
+            let node = app.ws().graph.node(task).expect("task has a node");
             let row = rows
                 .iter()
                 .find(|r| r.contains(task))

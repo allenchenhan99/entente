@@ -141,7 +141,7 @@ fn clicking_a_pane_focuses_it() {
 
     click(&mut app, rect.x + 2, rect.y + 1);
 
-    assert_eq!(app.focused_pane.as_deref(), Some("relay:2"));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:2"));
     assert_eq!(app.region, Region::Panes);
     assert!(
         !app.terminal_input,
@@ -207,11 +207,11 @@ fn a_click_on_nothing_leaves_everything_alone() {
 fn a_pane_that_was_never_drawn_cannot_be_clicked() {
     let mut app = app_with_panes();
     app.pane_rects.clear();
-    let before = app.focused_pane.clone();
+    let before = app.ws().focused_pane.clone();
 
     click(&mut app, 100, 20);
 
-    assert_eq!(app.focused_pane, before);
+    assert_eq!(app.ws().focused_pane, before);
 }
 
 #[test]
@@ -366,9 +366,9 @@ fn nothing_connects_it_because_nothing_has_been_agreed() {
     app.set_panes(vec![loose_agent("relay:7", "scout", true)], None);
     let loose = app.unattached_agents();
 
-    let discs = relay_tui::ui::graph::layout_net(&app.graph, &loose, true);
+    let discs = relay_tui::ui::graph::layout_net(&app.ws().graph, &loose, true);
     assert!(discs.iter().any(|d| d.id == "relay:7"), "it is drawn");
-    for edge in &app.graph.edges {
+    for edge in &app.ws().graph.edges {
         assert_ne!(edge.from, "relay:7");
         assert_ne!(edge.to, "relay:7");
     }
@@ -434,7 +434,7 @@ fn a_closed_pane_leaves_the_grid_even_though_the_daemon_still_lists_it() {
     app.handle_key(Key::char('y'));
     // The runtime does this when the daemon confirms the kill.
     app.dismiss_pane("relay:1");
-    assert!(!app.panes.contains(&"relay:1".to_string()));
+    assert!(!app.ws().panes.contains(&"relay:1".to_string()));
 
     // relayd keeps a killed pane in /panes, marked dead — the next poll must not bring it back.
     app.set_panes(
@@ -450,21 +450,21 @@ fn a_closed_pane_leaves_the_grid_even_though_the_daemon_still_lists_it() {
     );
 
     assert!(
-        !app.panes.contains(&"relay:1".to_string()),
+        !app.ws().panes.contains(&"relay:1".to_string()),
         "a closed pane stays closed: {:?}",
-        app.panes
+        app.ws().panes
     );
-    assert!(app.panes.contains(&"relay:2".to_string()));
+    assert!(app.ws().panes.contains(&"relay:2".to_string()));
 }
 
 #[test]
 fn closing_the_focused_pane_moves_focus_to_a_live_one() {
     let mut app = app_with_panes();
-    assert_eq!(app.focused_pane.as_deref(), Some("relay:1"));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:1"));
 
     app.dismiss_pane("relay:1");
 
-    assert_eq!(app.focused_pane.as_deref(), Some("relay:2"));
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:2"));
     assert!(!app.terminal_input, "typing does not survive the pane");
 }
 
@@ -486,7 +486,7 @@ fn closing_a_pane_whose_process_already_exited_needs_no_kill() {
 
     assert!(effects.is_empty(), "nothing to kill: {effects:?}");
     assert!(
-        !app.panes.contains(&"relay:5".to_string()),
+        !app.ws().panes.contains(&"relay:5".to_string()),
         "but it is gone from the grid"
     );
 }
@@ -506,7 +506,7 @@ fn a_dismissal_is_forgotten_once_the_daemon_forgets_the_pane() {
     );
 
     assert!(
-        app.panes.contains(&"relay:1".to_string()),
+        app.ws().panes.contains(&"relay:1".to_string()),
         "a new pane with that id is not the one that was closed"
     );
 }
@@ -581,7 +581,7 @@ fn an_agent_you_launched_is_a_brain_without_any_planner() {
 
     assert!(!app.planner_present(), "a scout is not a planner");
     let naming = relay_tui::ui::network::name_nodes(
-        &app.graph,
+        &app.ws().graph,
         &app.unattached_agents(),
         app.planner_present(),
     );
@@ -705,7 +705,7 @@ fn closing_a_contracted_agents_pane_leaves_its_node_alone() {
     app.dismiss_pane("relay:1");
 
     assert!(
-        app.graph.node("t-backend-auth").is_some(),
+        app.ws().graph.node("t-backend-auth").is_some(),
         "the task still exists: closing a terminal is not cancelling the work"
     );
 }
@@ -821,7 +821,7 @@ fn a_pane_with_no_history_reports_no_scroll_however_hard_you_try() {
 fn a_pane_with_history_scrolls_and_says_how_far() {
     let mut app = app_with_panes();
     // Fill the pane past its own height so there is something above the viewport.
-    let pane = app.pane_states.get_mut("relay:1").unwrap();
+    let pane = app.ws_mut().pane_states.get_mut("relay:1").unwrap();
     for i in 0..80 {
         pane.parser.process(format!("line {i}\r\n").as_bytes());
     }
@@ -832,4 +832,159 @@ fn a_pane_with_history_scrolls_and_says_how_far() {
 
     assert!(app.pane_scroll("relay:1") > 0, "it really moved");
     assert!(text.contains("PgDn for live"), "{text}");
+}
+
+// --- workspaces ----------------------------------------------------------------------------------
+
+#[test]
+fn one_url_is_one_workspace_and_nothing_is_renamed() {
+    let app = App::with_urls(Mode::Replay, &["http://127.0.0.1:7420".to_string()]);
+
+    assert_eq!(app.workspaces.len(), 1);
+    assert_eq!(app.active, 0);
+}
+
+#[test]
+fn every_workspace_puts_its_agents_on_the_one_network() {
+    let mut app = App::with_urls(
+        Mode::Replay,
+        &[
+            "http://127.0.0.1:7420".into(),
+            "http://127.0.0.1:7421".into(),
+        ],
+    );
+    app.workspaces[0].graph = graph("live-1");
+    app.workspaces[1].graph = graph("live-7");
+
+    let merged = app.merged_graph();
+
+    let agents: Vec<&str> = merged
+        .nodes
+        .iter()
+        .filter(|n| n.kind == GraphNodeKind::Agent)
+        .map(|n| n.id.as_str())
+        .collect();
+    assert!(agents.iter().any(|id| id.starts_with("0/")), "{agents:?}");
+    assert!(agents.iter().any(|id| id.starts_with("1/")), "{agents:?}");
+}
+
+#[test]
+fn two_projects_can_hold_the_same_task_id_without_becoming_one_agent() {
+    let mut app = App::with_urls(Mode::Replay, &["a".into(), "b".into()]);
+    app.workspaces[0].graph = graph("live-1");
+    app.workspaces[1].graph = graph("live-1");
+
+    let merged = app.merged_graph();
+    let backends: Vec<&str> = merged
+        .nodes
+        .iter()
+        .filter(|n| n.id.ends_with("t-backend-auth"))
+        .map(|n| n.id.as_str())
+        .collect();
+
+    assert_eq!(
+        backends.len(),
+        2,
+        "the same id in two repos is two agents: {backends:?}"
+    );
+    assert_ne!(backends[0], backends[1]);
+}
+
+#[test]
+fn edges_stay_inside_their_own_workspace() {
+    let mut app = App::with_urls(Mode::Replay, &["a".into(), "b".into()]);
+    app.workspaces[0].graph = graph("live-7");
+    app.workspaces[1].graph = graph("live-7");
+
+    let merged = app.merged_graph();
+
+    for edge in &merged.edges {
+        let (from_ws, _) = edge.from.split_once('/').expect("qualified");
+        let (to_ws, _) = edge.to.split_once('/').expect("qualified");
+        assert_eq!(from_ws, to_ws, "no contract crosses projects: {}", edge.id);
+    }
+}
+
+#[test]
+fn switching_workspace_moves_the_selection_with_it() {
+    let mut app = App::with_urls(Mode::Replay, &["a".into(), "b".into()]);
+    app.workspaces[0].graph = graph("live-1");
+    app.workspaces[1].graph = graph("live-7");
+    app.select(Some(GraphObjectRef::node("t-backend-auth")));
+
+    app.set_active(1);
+
+    assert_eq!(app.active, 1);
+    assert!(
+        app.selected.is_some(),
+        "the new workspace's own first object is selected, not the old one's"
+    );
+    assert!(
+        !app.terminal_input,
+        "typing does not follow you across projects"
+    );
+}
+
+// --- selecting an agent shows its terminal --------------------------------------------------------
+
+#[test]
+fn selecting_an_agent_focuses_its_pane() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![
+            pane("relay:1", Some("t-backend-auth"), "backend", true),
+            pane("relay:2", Some("t-frontend-login"), "frontend", true),
+        ],
+        Some("relay:1".to_string()),
+    );
+
+    app.select(Some(GraphObjectRef::node("t-frontend-login")));
+
+    assert_eq!(
+        app.ws().focused_pane.as_deref(),
+        Some("relay:2"),
+        "picking an agent shows its terminal"
+    );
+}
+
+#[test]
+fn the_focused_pane_is_the_one_drawn_big_and_marked() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![
+            pane("relay:1", Some("t-backend-auth"), "backend", true),
+            pane("relay:2", Some("t-frontend-login"), "frontend", true),
+        ],
+        Some("relay:1".to_string()),
+    );
+    app.select(Some(GraphObjectRef::node("t-frontend-login")));
+
+    let rows = draw_rows(&mut app, 120, 32);
+    let big = *app.pane_rects.get("relay:2").expect("drawn");
+    let thumb = *app.pane_rects.get("relay:1").expect("drawn");
+
+    assert!(
+        big.height > thumb.height,
+        "the selected agent's pane gets the room"
+    );
+    assert!(
+        String::from_iter(rows).contains("frontend"),
+        "and is named on screen"
+    );
+}
+
+#[test]
+fn selecting_an_agent_with_no_pane_changes_no_focus() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![pane("relay:1", Some("t-backend-auth"), "backend", true)],
+        None,
+    );
+
+    app.select(Some(GraphObjectRef::node("t-frontend-login")));
+
+    assert_eq!(app.ws().focused_pane.as_deref(), Some("relay:1"));
 }

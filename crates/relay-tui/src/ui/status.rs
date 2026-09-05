@@ -22,6 +22,7 @@ fn ms(value: Option<f64>) -> String {
 pub fn pane_timings_text(app: &App) -> Option<String> {
     let pane = app.focused_pane_state()?;
     let timings = app
+        .ws()
         .metrics
         .as_ref()
         .and_then(|m| m.pane(&pane.info.pane_id).cloned())
@@ -37,8 +38,8 @@ pub fn pane_timings_text(app: &App) -> Option<String> {
 
 pub fn status_text(app: &App) -> String {
     let mut parts = vec![
-        app.connection.label(),
-        format!("seq {}", app.last_seq),
+        app.ws().connection.label(),
+        format!("seq {}", app.ws().last_seq),
         format!(
             "frame p50 {} p95 {}",
             ms(app.frames.p50_ms()),
@@ -59,8 +60,8 @@ pub fn status_text(app: &App) -> String {
     if let Some(t) = pane_timings_text(app) {
         parts.push(t);
     }
-    if !app.graph.inbox.is_empty() {
-        parts.push(format!("inbox:{}", app.graph.inbox.len()));
+    if !app.ws().graph.inbox.is_empty() {
+        parts.push(format!("inbox:{}", app.ws().graph.inbox.len()));
     }
     let hints = app.action_hints();
     if !hints.is_empty() {

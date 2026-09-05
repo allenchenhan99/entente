@@ -52,7 +52,7 @@ pub fn inbox_lines(app: &App, height: usize) -> Vec<Line<'static>> {
 }
 
 pub fn inbox_rows(app: &App, height: usize) -> Vec<InboxRow> {
-    let items = &app.graph.inbox;
+    let items = &app.ws().graph.inbox;
     if items.is_empty() {
         return vec![(
             Line::styled("<inbox empty>", Style::new().fg(Color::DarkGray)),
@@ -108,10 +108,10 @@ pub fn inbox_rows(app: &App, height: usize) -> Vec<InboxRow> {
 }
 
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
-    let title = if app.graph.inbox.is_empty() {
+    let title = if app.ws().graph.inbox.is_empty() {
         Region::Inbox.title().to_string()
     } else {
-        format!("{} ({})", Region::Inbox.title(), app.graph.inbox.len())
+        format!("{} ({})", Region::Inbox.title(), app.ws().graph.inbox.len())
     };
     let block = panel_block(&title, region_active(app, Region::Inbox), Borders::TOP);
     let inner = block.inner(area);
