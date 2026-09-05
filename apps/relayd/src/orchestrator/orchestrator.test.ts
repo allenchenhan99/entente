@@ -438,6 +438,60 @@ describe('integration', () => {
   });
 });
 
+describe('a parent waits for what it delegated', () => {
+  const child = (over = {}) => sampleContract('t-a-schema', over);
+
+  it('refuses a parent\'s evidence while its subtask is still going, and says what it is waiting on', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    r.orchestrator.respond('t-a-schema', accept);
+    r.orchestrator.reportBlocker('t-a-schema', { reason: 'which token length?', waiting_on: 'human' });
+
+    // The sub is stuck on a human; the parent must not be able to declare itself done.
+    expect(() => r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' }))
+      // The task layer says executing; being blocked is the runtime layer, so both are reported.
+      .toThrow(/t-a-schema \(executing, waiting on human\)/);
+  });
+
+  it('nothing is recorded for the refused submission, so the parent can simply wait', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    r.orchestrator.respond('t-a-schema', accept);
+    const before = r.orchestrator.taskView('t-a')!.attempt;
+
+    expect(() => r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' })).toThrow();
+
+    expect(r.orchestrator.taskView('t-a')!.attempt).toBe(before);
+    expect(r.ofType('evidence_submitted').filter((e) => e.task_id === 't-a')).toHaveLength(0);
+    expect(r.orchestrator.taskView('t-a')!.task_state).not.toBe('awaiting_verification');
+  });
+
+  it('once the subtask is over the parent may submit', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    await r.orchestrator.cancel('t-a-schema', 'not needed after all');
+
+    // Cancelled counts as over: nothing is still coming, so the parent is not held up.
+    expect(() => r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' }))
+      .not.toThrow();
+  });
+
+  it('a task with no subtasks is unaffected', async () => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+
+    expect(() => r.orchestrator.submitEvidence('t-a', { contract_version: 1, claimed: claimedAll, summary: 'done' }))
+      .not.toThrow();
+  });
+});
+
 describe('cancel and delete', () => {
   it('cancelling a mission cancels every task of it that was still running', async () => {
     const r = createTestRelay();

@@ -878,6 +878,21 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       throw conflict(`task ${taskId} is ${rec.taskState}`);
     }
     if (!rec.worktree) throw conflict(`task ${taskId} has no worktree (not spawned)`);
+    // A subtask's branch is merged into its parent's worktree when the subtask lands, so evidence
+    // collected before that ran on a tree missing the delegated work — verifying it would certify
+    // something that was never checked. The parent is told to wait, which is what its prompt already
+    // says to do.
+    const unfinished = [...tasks.values()].filter(
+      (t) => current(t).parent_task === taskId && !TERMINAL_TASK_STATES.has(t.taskState),
+    );
+    if (unfinished.length > 0) {
+      throw conflict(
+        `task ${taskId} delegated ${unfinished.map((t) => `${t.id} (${t.taskState}`
+          + `${t.blocker ? `, waiting on ${t.blocker.waiting_on}` : ''})`).join(', ')}`
+        + ' and that work has not landed in your worktree yet. Call relay_await_task for it and submit'
+        + ' once it is done; if it cannot finish, report a blocker instead of submitting without it.',
+      );
+    }
     touch(rec);
     const attempt = rec.attempt + 1;
     rec.attempt = attempt;
