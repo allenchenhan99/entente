@@ -58,6 +58,13 @@
   installation behavior and the published script are unchanged. The same
   path distinction is exercised locally by running the 13 tests with TMPDIR
   pointing through a directory symlink before checking the next CI run.
+- Publication verified: installer commit `2648a3c` and fixture correction
+  `c0080f2` were fast-forwarded to original `main`. CI run `33975638438` passed
+  all four jobs: Linux installer, macOS installer, TypeScript/tests/protocol
+  documentation, and Rust formatting/clippy/tests. The public
+  `curl -fsSL https://raw.githubusercontent.com/allenchenhan99/entente/main/install.sh
+  | sh -s -- --help` smoke passed, and the installer hash is unchanged. The
+  worktree retirement gate is satisfied; no new branch or PR needs closing.
 
 ## 2026-09-05 — animated hackathon presentation and GitHub Pages
 
