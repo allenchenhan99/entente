@@ -674,3 +674,38 @@ fn each_pane_keeps_its_own_position() {
     assert!(app.pane_scroll("relay:2") > 0);
     assert_eq!(app.pane_scroll("relay:1"), 0, "the other pane did not move");
 }
+
+#[test]
+fn closing_a_hand_launched_agents_pane_takes_it_off_the_network() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![loose_agent("relay:7", "scout", true)],
+        Some("relay:7".into()),
+    );
+    assert_eq!(app.unattached_agents().len(), 1, "it is on the network");
+
+    app.dismiss_pane("relay:7");
+
+    assert!(
+        app.unattached_agents().is_empty(),
+        "its node came from the pane; with the pane closed there is nothing left to draw"
+    );
+}
+
+#[test]
+fn closing_a_contracted_agents_pane_leaves_its_node_alone() {
+    let mut app = App::new(Mode::Replay);
+    app.set_graph(graph("live-1"));
+    app.set_panes(
+        vec![pane("relay:1", Some("t-backend-auth"), "backend", true)],
+        None,
+    );
+
+    app.dismiss_pane("relay:1");
+
+    assert!(
+        app.graph.node("t-backend-auth").is_some(),
+        "the task still exists: closing a terminal is not cancelling the work"
+    );
+}
