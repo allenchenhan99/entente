@@ -87,6 +87,12 @@ if (!paneId || !token || informational) {
       body,
       signal: timeout,
     });
+    // A 404 is not "relayd is not here" — it is a relayd too old to know this route, which is a
+    // different problem with a different fix, and blending the two into one message cost an
+    // afternoon of restarting the wrong thing.
+    if (res.status === 404) {
+      throw new Error(`relayd at ${url} has no /sessions route — it is running an older build than these tools; restart it with \`entente down && entente up\``);
+    }
     if (!res.ok) throw new Error(`relayd said ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const session = await res.json();
     process.stderr.write(`relay: this session is ${session.mission_id} — agents you delegate to appear in entente\n`);

@@ -73,6 +73,36 @@ fn shell_env() -> BTreeMap<String, String> {
     env
 }
 
+/// How to start a shell pane so that what the launcher put on PATH is still in front once the user's
+/// own startup files have run.
+///
+/// Setting PATH on the child is not enough. An interactive shell sources `~/.bashrc`, and a very
+/// ordinary line there — `export PATH="$HOME/.local/bin:$PATH"` — puts that directory back in front
+/// of everything we prepended. Anything relying on winning a PATH lookup then quietly loses to the
+/// binary it meant to wrap. So for the shells that support it we source the user's own rc first and
+/// prepend afterwards, which is the only ordering that holds. `RELAY_SHELL_RC` is written by the
+/// launcher; without it, or for a shell we do not know how to do this in, the pane is a plain shell
+/// and the wrappers simply do not apply.
+fn shell_argv(shell: &str) -> Vec<String> {
+    let Ok(rc) = std::env::var("RELAY_SHELL_RC") else {
+        return vec![shell.to_string()];
+    };
+    let name = std::path::Path::new(shell)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    match name {
+        // `--rcfile` replaces the startup file rather than adding to it, so ours sources theirs.
+        "bash" => vec![
+            shell.to_string(),
+            "--rcfile".to_string(),
+            rc,
+            "-i".to_string(),
+        ],
+        _ => vec![shell.to_string()],
+    }
+}
+
 pub enum Source {
     /// One client per workspace, in the order the urls were given: a workspace is a daemon.
     Live(Vec<Arc<Client>>),
@@ -561,9 +591,10 @@ impl<B: Backend> Runtime<B> {
                 // so `relay status` works there with no `--repo`. It only needs the commands on PATH,
                 // and they live in this workspace's node_modules; the launcher says where.
                 let env = shell_env();
+                let argv = shell_argv(&shell);
                 self.tasks.push(tokio::spawn(async move {
                     let msg = match client
-                        .create_pane_with_env("shell", &[shell], &cwd, 120, 40, env)
+                        .create_pane_with_env("shell", &argv, &cwd, 120, 40, env)
                         .await
                     {
                         Ok(pane_id) => Msg::PaneOpened(pane_id),
@@ -721,5 +752,58 @@ impl<B: Backend> Runtime<B> {
 impl<B: Backend> Drop for Runtime<B> {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod shell_tests {
+    use super::shell_argv;
+
+    /// Setting PATH on the pane's child is not enough: an interactive bash sources `~/.bashrc`, and a
+    /// line as ordinary as `export PATH="$HOME/.local/bin:$PATH"` puts the real binaries back in front
+    /// of the wrappers. The only ordering that holds is to source the user's file and prepend after it,
+    /// which is what the rc file does — so the shell has to be told to use it.
+    #[test]
+    fn bash_is_started_with_the_rc_that_runs_after_the_users_own() {
+        temp_env("RELAY_SHELL_RC", Some("/repo/.relay/shell-rc"), || {
+            assert_eq!(
+                shell_argv("/bin/bash"),
+                vec!["/bin/bash", "--rcfile", "/repo/.relay/shell-rc", "-i"]
+            );
+        });
+    }
+
+    #[test]
+    fn a_shell_we_cannot_do_this_in_is_left_exactly_as_it_was() {
+        temp_env("RELAY_SHELL_RC", Some("/repo/.relay/shell-rc"), || {
+            // Better a plain shell than one started with a flag its shell does not have.
+            assert_eq!(shell_argv("/usr/bin/fish"), vec!["/usr/bin/fish"]);
+            assert_eq!(shell_argv("/bin/zsh"), vec!["/bin/zsh"]);
+        });
+    }
+
+    #[test]
+    fn without_a_launcher_rc_file_the_pane_is_a_plain_shell() {
+        temp_env("RELAY_SHELL_RC", None, || {
+            assert_eq!(shell_argv("/bin/bash"), vec!["/bin/bash"]);
+        });
+    }
+
+    /// `std::env::set_var` is unsafe from Rust 2024 on and these run in one process, so the three
+    /// cases take turns under a lock rather than racing each other.
+    fn temp_env(key: &str, value: Option<&str>, body: impl FnOnce()) {
+        use std::sync::Mutex;
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = std::env::var(key).ok();
+        match value {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+        body();
+        match previous {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
     }
 }

@@ -520,3 +520,37 @@ describe('status and down', () => {
     expect(stderr).toHaveBeenCalledExactlyOnceWith('entente: pid 7001 did not exit within 5 seconds');
   });
 });
+
+describe('the pane shell startup file', () => {
+  it("sources the user's own rc before putting the wrappers in front of it", async () => {
+    const workspaceRoot = temporaryDirectory();
+    const relayDir = path.join(temporaryDirectory(), '.relay');
+    const tui = childProcess(7010);
+    const signalBus = new EventEmitter();
+    const signals = {
+      on: (signal: 'SIGINT' | 'SIGTERM', listener: () => void) => { signalBus.on(signal, listener); },
+      off: (signal: 'SIGINT' | 'SIGTERM', listener: () => void) => { signalBus.off(signal, listener); },
+    };
+    const spawn = vi.fn(() => tui) as unknown as SpawnFunction;
+
+    const result = runTui(
+      { workspaceRoot, tui: 'rust', binary: path.join(workspaceRoot, 'relay-tui'), url: 'http://127.0.0.1:7420', token: 't', relayDir },
+      { spawn, fs, signals },
+    );
+    tui.emit('exit', 0, null);
+    await result;
+
+    const body = fs.readFileSync(path.join(relayDir, 'shell-rc'), 'utf8');
+    // Order is the whole point. `~/.bashrc` commonly ends with its own `export PATH="…:$PATH"`, which
+    // moves the real binaries back in front of the wrappers; prepending only after it has run is the
+    // one ordering that holds, and setting PATH on the child alone does not.
+    const sourced = body.indexOf('.bashrc');
+    const prepended = body.indexOf('export PATH=');
+    expect(sourced).toBeGreaterThan(-1);
+    expect(prepended).toBeGreaterThan(sourced);
+    expect(body).toContain(path.join('apps', 'shims', 'bin'));
+
+    const env = (spawn as unknown as { mock: { calls: Array<[string, string[], { env: Record<string, string> }]> } }).mock.calls.at(-1)![2].env;
+    expect(env.RELAY_SHELL_RC).toBe(path.join(relayDir, 'shell-rc'));
+  });
+});

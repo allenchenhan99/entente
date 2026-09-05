@@ -340,6 +340,8 @@ export interface RunTuiOptions {
   url?: string;
   token?: string;
   replay?: string;
+  /** Where to write the pane shell's startup file; omitted in replay, which opens no panes. */
+  relayDir?: string;
 }
 
 function signalExitCode(signal: NodeJS.Signals | null): number {
@@ -376,12 +378,35 @@ export function runTui(
   // an agent in a terminal enough to start a brain — no command, no flag. Outside a pane, or with
   // relayd unreachable, they exec the real binary unchanged.
   const shims = path.join(options.workspaceRoot, 'apps', 'shims', 'bin');
+  // A startup file for the pane's shell that runs the user's own first and *then* puts the wrappers in
+  // front. Prepending to the child's PATH is not enough on its own: `~/.bashrc` very commonly ends with
+  // its own `export PATH="$HOME/.local/bin:$PATH"`, which silently moves the real binaries back ahead
+  // of ours. Ordering is the whole point of this file.
+  const shellRc = options.relayDir === undefined ? undefined : path.join(options.relayDir, 'shell-rc');
+  if (shellRc !== undefined) try {
+    deps.fs.mkdirSync(path.dirname(shellRc), { recursive: true });
+    deps.fs.writeFileSync(shellRc, [
+      '# Written by entente. Sources your own startup file, then puts the RelayGraph wrappers in front.',
+      '# `claude` and `codex` here register the session with relayd and then exec the real binary;',
+      '# outside a pane, or with relayd unreachable, they are transparent.',
+      'if [ -n "${BASH_VERSION-}" ] && [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi',
+      `export PATH=${JSON.stringify(shims)}:${JSON.stringify(tools)}:"$PATH"`,
+      '',
+    ].join('\n'));
+  } catch {
+    // A read-only or missing relay dir just means the pane is a plain shell; nothing else changes.
+  }
   const child = deps.spawn(command, args, {
     detached: false,
     stdio: 'inherit',
     // RELAY_TOOLS puts `relay` on a shell pane's PATH; RELAY_HOME is where the tool's own files are,
     // so `--plan examples/…` finds what ships with it rather than looking under the mission's repo.
-    env: { ...deps.env, RELAY_TOOLS: `${shims}${path.delimiter}${tools}`, RELAY_HOME: options.workspaceRoot },
+    env: {
+      ...deps.env,
+      RELAY_TOOLS: `${shims}${path.delimiter}${tools}`,
+      ...(shellRc === undefined ? {} : { RELAY_SHELL_RC: shellRc }),
+      RELAY_HOME: options.workspaceRoot,
+    },
   });
 
   return new Promise<number>((resolve, reject) => {
@@ -454,7 +479,7 @@ async function up(options: LauncherOptions, deps: LauncherDependencies): Promise
     }
   }
   const token = await readToken(options.relayDir, deps);
-  return runTui({ workspaceRoot: deps.workspaceRoot, tui: base.tui, binary: base.tuiBinary, repo: options.repo, url, token }, deps);
+  return runTui({ workspaceRoot: deps.workspaceRoot, tui: base.tui, binary: base.tuiBinary, repo: options.repo, url, token, relayDir: options.relayDir }, deps);
 }
 
 export async function status(options: LauncherOptions, deps: LauncherDependencies): Promise<number> {
