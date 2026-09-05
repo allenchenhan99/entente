@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createOrchestrator } from './orchestrator.js';
+import { createOrchestrator, sessionMissionIsDisposable } from './orchestrator.js';
 import { createJsonlStore } from '../store/jsonl-store.js';
 import type { AgentRuntime, TerminalHost, WorktreeManager, CheckRunner, RepairPolicy } from '../ports.js';
 import type { RuntimeKind } from '@relay/protocol';
@@ -86,6 +86,44 @@ describe('adopting a hand-started session', () => {
 
     // The host still sees the shell it spawned; the graph draws an agent for any pane with a runtime.
     expect(annotated).toEqual([['relay:7', { role: 'brain', runtime: 'codex' }]]);
+  });
+
+  it('ends the session when the agent exits, and takes an empty mission with it', async () => {
+    const calls: string[] = [];
+    const cleared: string[] = [];
+    const { orchestrator, store } = make({
+      calls,
+      annotations: { set: () => {}, clear: (id) => cleared.push(id) },
+    });
+    const session = await orchestrator.adoptSession({ runtime: 'claude-code', pane_id: 'relay:3', cwd: '/repo' });
+
+    const result = await orchestrator.closeSession('relay:3');
+
+    expect(result).toMatchObject({ closed: true, mission_id: session.mission_id, mission_disposed: true });
+    // The pane goes back to being the shell it always was, so the network stops drawing an agent for
+    // it. Nothing else could tell: the agent ran inside a shell that is still running.
+    expect(cleared).toEqual(['relay:3']);
+    expect(store.all().some((e) => e.type === 'agent_exited')).toBe(true);
+    // Asking one question and quitting should not leave a mission that has to be cancelled before it
+    // can be deleted.
+    expect(store.all().some((e) => e.type === 'mission_deleted')).toBe(true);
+  });
+
+  it('keeps a mission that anything was planned in', () => {
+    // A session that proposed nothing produced nothing, and its mission is litter. One task planned
+    // is real work with a real history, and closing the terminal it started in does not undo it.
+    expect(sessionMissionIsDisposable({ taskIds: [], status: 'planning' })).toBe(true);
+    expect(sessionMissionIsDisposable({ taskIds: ['t-one'], status: 'planning' })).toBe(false);
+    expect(sessionMissionIsDisposable({ taskIds: [], status: 'executing' })).toBe(false);
+    expect(sessionMissionIsDisposable({ taskIds: [], status: 'verified' })).toBe(false);
+  });
+
+  it('says so plainly when the pane never had an adopted session', async () => {
+    const calls: string[] = [];
+    const { orchestrator } = make({ calls });
+
+    // A shell the human opened and never ran an agent in, or one already closed.
+    expect(await orchestrator.closeSession('relay:99')).toEqual({ closed: false, mission_disposed: false });
   });
 
   it('gives each session its own mission rather than crowding one', async () => {

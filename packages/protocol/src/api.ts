@@ -8,6 +8,7 @@
  *   POST /missions/:id/plan      → LoadPlanBody      → { task_ids }   (planner fallback: hand-written contracts)
  *   POST /missions/:id/planner   → SpawnPlannerBody  → { pane_id }    (spawn an LLM planner agent for the mission)
  *   POST /sessions               → OpenSessionBody   → OpenSessionResult (adopt an agent the human started)
+ *   DELETE /sessions/:pane_id    → { closed }        (that agent exited; the shell it ran in has not)
  *   POST /missions/:id/clarify   → ClarifyBody       → { answered }    (human answers the planner's mission-level questions)
  *   POST /tasks/:id/clarify      → ClarifyBody       → { contract_version }
  *   POST /tasks/:id/review       → ReviewBody        → { ok: true }
@@ -97,6 +98,13 @@ export const routes = {
   planner: (missionId: string) => `/missions/${missionId}/planner`,
   /** `POST` OpenSessionBody — adopt an agent the human started themselves; see OpenSessionBody. */
   sessions: '/sessions',
+  /**
+   * `DELETE` — the adopted agent in this pane has exited.
+   *
+   * The pane cannot report this: the agent runs *inside* a shell, so bash is still there when claude
+   * quits and the pane stays alive. Only the wrapper that started it knows, so it says so.
+   */
+  session: (paneId: string) => `/sessions/${encodeURIComponent(paneId)}`,
   missionClarify: (missionId: string) => `/missions/${missionId}/clarify`,
   clarify: (taskId: string) => `/tasks/${taskId}/clarify`,
   review: (taskId: string) => `/tasks/${taskId}/review`,

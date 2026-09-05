@@ -41,13 +41,35 @@ function realBinary() {
   return undefined;
 }
 
-function run(binary, argv, env) {
+/**
+ * Run the real binary, and tell relayd when it stops.
+ *
+ * `onExit` is the only reliable notice relayd will ever get. The agent runs inside a shell the human
+ * opened, so the pane is still alive when the agent quits — nothing watching panes could tell the
+ * difference, and the session's node would sit on the network claiming to work.
+ */
+function run(binary, argv, env, onExit) {
   const child = spawn(binary, argv, { stdio: 'inherit', env: { ...process.env, ...env } });
-  child.on('exit', (code, signal) => process.exit(signal ? 128 : (code ?? 0)));
+  const finish = async (code) => {
+    if (onExit) await onExit().catch(() => {});
+    process.exit(code);
+  };
+  child.on('exit', (code, signal) => void finish(signal ? 128 : (code ?? 0)));
   child.on('error', (err) => {
     process.stderr.write(`${TOOL}: ${err.message}\n`);
-    process.exit(127);
+    void finish(127);
   });
+  // A closed pane or `entente down` kills the wrapper too. Pass the signal on and let the child's
+  // exit run the same closing path, so an interrupted session is still ended rather than left open.
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(signal, () => {
+      try {
+        child.kill(signal);
+      } catch {
+        // Already gone; its exit handler is what closes the session.
+      }
+    });
+  }
 }
 
 /** relayd's session token, from the environment or the repo it wrote it into. */
@@ -96,7 +118,13 @@ if (!paneId || !token || informational) {
     if (!res.ok) throw new Error(`relayd said ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const session = await res.json();
     process.stderr.write(`relay: this session is ${session.mission_id} — agents you delegate to appear in entente\n`);
-    run(binary, [...session.argv, ...args], { ...session.env, RELAY_MISSION: session.mission_id });
+    run(binary, [...session.argv, ...args], { ...session.env, RELAY_MISSION: session.mission_id }, async () => {
+      await fetch(`${url}/sessions/${encodeURIComponent(paneId)}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(Number(process.env.RELAY_SHIM_TIMEOUT_MS ?? 5000)),
+      });
+    });
   } catch (err) {
     // relayd down, or it refused. Say so once — silently dropping to an unwired agent would look
     // like entente ignoring you — and then start the agent anyway.

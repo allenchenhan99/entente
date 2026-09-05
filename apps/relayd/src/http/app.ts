@@ -144,6 +144,13 @@ export function createApp(opts: AppOptions): Hono {
     return c.json(await orchestrator.adoptSession(body.data));
   });
 
+  // The wrapper says the agent it started has exited. The pane cannot: the agent ran inside a shell
+  // that is still running.
+  // The pattern is written out rather than built with `routes.session`, which percent-encodes its
+  // argument — correct for a pane id like `relay:5`, and wrong for the `:pane` placeholder, which it
+  // turns into the literal path `/sessions/%3Apane`.
+  app.delete('/sessions/:pane', async (c) => c.json(await orchestrator.closeSession(c.req.param('pane') ?? '')));
+
   app.post('/missions/:id/clarify', async (c) => {
     const missionId = c.req.param('id');
     const body = await parseBody(c, ClarifyBody);

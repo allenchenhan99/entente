@@ -83,7 +83,10 @@ export interface OrchestratorDeps {
    * Where to record what relayd knows about a pane that the host does not, so a shell the human ran
    * an agent in stops being reported as a bare shell and reaches the graph as the agent it now is.
    */
-  annotations?: { set(paneId: string, annotation: { role?: string; runtime?: RuntimeKind; task_id?: string }): void };
+  annotations?: {
+    set(paneId: string, annotation: { role?: string; runtime?: RuntimeKind; task_id?: string }): void;
+    clear(paneId: string): void;
+  };
 }
 
 export interface TaskSummary {
@@ -124,6 +127,16 @@ export interface Orchestrator {
    * whole rule: a session the human opens is a brain, a session an agent opens is a sub.
    */
   adoptSession(body: OpenSessionBody): Promise<OpenSessionResult>;
+  /**
+   * The adopted agent in `paneId` has exited.
+   *
+   * Nothing else can tell. The agent runs inside a shell the human opened, so the pane is still very
+   * much alive when the agent quits — a pane-exit watcher would never fire, and without this the
+   * session's node sits on the network claiming to be working long after it stopped. A session that
+   * never became work takes its mission with it: asking one question and quitting should not leave a
+   * mission on the board that has to be cancelled before it can be deleted.
+   */
+  closeSession(paneId: string): Promise<{ closed: boolean; mission_id?: string; mission_disposed: boolean }>;
   /** Planner → human: mission-level questions; replaces any still-open set. */
   askHuman(missionId: string, questions: Question[]): { status: 'waiting'; open_questions: number };
   /** Long-poll until every open mission question is answered. */
@@ -305,6 +318,18 @@ const TERMINAL_TASK_STATES: ReadonlySet<string> = new Set(['completed', 'failed'
  * Nothing is lost by allowing it: the log keeps the whole story, and the evidence and the recordings
  * stay on disk. Live work still has to be cancelled first, deliberately.
  */
+/**
+ * Is the mission an ended session opened worth keeping?
+ *
+ * A session that proposed nothing produced nothing: keeping its mission would put a row on the board
+ * every time someone opened an agent, asked it a question and quit — and because a mission that never
+ * started counts as live, each one would then need cancelling before it could be deleted. One task
+ * planned is enough to keep it: that is real work with a real history, and closing the terminal it was
+ * started from is not a reason to forget it.
+ */
+export const sessionMissionIsDisposable = (mission: { taskIds: readonly string[]; status: string }): boolean =>
+  mission.taskIds.length === 0 && mission.status === 'planning';
+
 const DELETABLE_TASK_STATES: ReadonlySet<string> = new Set(['completed', 'canceled', 'failed']);
 const DELETABLE_MISSION_STATES: ReadonlySet<string> = new Set(['verified', 'canceled', 'failed']);
 
@@ -1278,6 +1303,24 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     };
   };
 
+  const closeSession: Orchestrator['closeSession'] = async (paneId) => {
+    const entry = [...missions.entries()].find(([, m]) => m.plannerAgent?.paneId === paneId);
+    if (!entry) return { closed: false, mission_disposed: false };
+    const [missionId, m] = entry;
+    // The pane goes back to being the shell it always was, so the network stops drawing an agent for
+    // it. The pane itself is untouched: the human opened it and it is theirs to close.
+    deps.annotations?.clear(paneId);
+    emit({ mission_id: missionId, actor: 'human', type: 'agent_exited', payload: { pane_id: paneId, exit_reason: 'the session ended' } });
+    m.plannerPaneId = undefined;
+    m.plannerAgent = undefined;
+    const disposed = sessionMissionIsDisposable(m);
+    if (disposed) {
+      await cancelMission(missionId, 'the session that opened it ended without proposing any work');
+      await deleteMission(missionId, 'nothing was ever planned in it');
+    }
+    return { closed: true, mission_id: missionId, mission_disposed: disposed };
+  };
+
   const plannerSummary = (m: MissionRecord): string => [
     m.mission.title,
     m.mission.success_definition ? `Success definition: ${m.mission.success_definition}` : '',
@@ -1482,6 +1525,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   return {
     createMission,
     adoptSession,
+    closeSession,
     findAgents,
     cancelMission,
     deleteTask,
