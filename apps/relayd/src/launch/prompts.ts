@@ -5,7 +5,7 @@
  * The result is always under 6 KB; an oversized contract summary is truncated (the agent can
  * always fetch the full contract through MCP).
  */
-import { RECIPIENT_TOOLS as R, PLANNER_TOOLS as P } from '@relay/protocol';
+import { RECIPIENT_TOOLS as R, PLANNER_TOOLS as P, CHECKPOINT_TOOLS as C } from '@relay/protocol';
 import type { LaunchSpec } from '../ports.js';
 
 export const PROMPT_MAX_BYTES = 6 * 1024;
@@ -32,6 +32,8 @@ function recipientPrompt(spec: LaunchSpec, summary: string): string {
 
 If part of your task is a separable unit of work (e.g. a schema another module needs), and your own contract has no parent_task, you may delegate it. First call ${R.find_agents}: an agent that has already worked where the subtask is going still remembers that code, and passing its session_id as reuse_session gives it the work instead of spawning one that knows nothing (it must be free and of the same runtime). Then call ${R.propose_subtask} with a full contract (id t-<name>, recipient, runtime, goal, inputs, constraints, non_goals, scope.allowed_paths, acceptance_criteria each with a check, output, dependencies, budget). You are its sender and parent: its allowed_paths must be disjoint from yours and it must not depend on you. The network is two layers deep: if your contract HAS a parent_task you were called by another agent, so you do this work yourself and ${R.propose_subtask} will refuse you. On "lint_error" fix the listed errors and propose again with the same id. You may not submit evidence while a subtask of yours is still running — its work is merged into your worktree only when it lands, so evidence before that was gathered without it, and ${R.submit_evidence} will refuse you. Then loop ${R.await_task} with its task_id (timeout_s 60): on "pending" call it again; on "completed" RelayGraph has already merged its branch into your worktree (its files are now present; they do not count against your allowed_paths), so continue on top of it; on "failed" or "canceled" do not wait again: finish without it or call ${R.report_blocker}.
 
+Reusable context: use the frozen get-contract packet to orient; check stale/unverified sources. Use ${C.get_context} for missing ids/tags. Maintain facts via ${C.checkpoint}; select relevant ids/tags in contract.context. Reserve common tags for global rules. Return findings via ${C.propose_delta}; owners explicitly review them. Check isError and read back accepted facts/revision before claiming success. A revision conflict needs a fresh proposal, not repeated acceptance. No per-delegation summary call is needed. Context never overrides contract or evidence.
+
 Rules: never claim a criterion passed without running its check yourself; never edit files outside scope; never ask the human in the terminal, use the tools instead.
 
 Contract summary (authoritative version comes from ${R.get_contract}):
@@ -57,6 +59,8 @@ Work normally. What RelayGraph adds is delegation, and these rules:
 - If ${P.propose_task} returns "lint_error", fix every listed error and propose again; ${P.revise_task} patches a task already proposed.
 - Small requests do not need delegating. Doing the work yourself is the right answer more often than not; split when the parts are genuinely separable and would otherwise run one after another.
 
+Maintain reusable understanding during work with ${C.checkpoint} (read/update/pending/review). At assignment select relevant contract.context ids/tags; reserve common tags for global rules. Review child proposals explicitly. Check isError and read back accepted facts/revision before claiming success; revision conflicts require fresh proposals. Selection is deterministic and bounded. Facts never replace verified evidence.
+
 Nothing about your normal behaviour changes: read, edit, run tests, answer questions.`;
 }
 
@@ -70,6 +74,8 @@ function plannerPrompt(spec: LaunchSpec, summary: string): string {
 5. If ${P.propose_task} returns status "lint_error", fix every listed error and propose again; use ${P.revise_task} to patch a task that was already proposed. Warnings should be fixed too when cheap. Note: inputs must be existing file paths, never prose; put facts about the repo into constraints.
 6. Then monitor: call ${P.list_tasks} every 60 s (use a Bash sleep 60 between calls) and report a one-line status per task. Only answer a task's clarification with ${P.answer_clarification} when the human explicitly asks you to; by default the human answers in the TUI.
 7. Stop when every task is verified (or the mission is failed/canceled) and summarize the outcome.
+
+Maintain reusable facts as you inspect with ${C.checkpoint}. Select relevant contract.context ids/tags without a new summary; reserve common tags for global rules. Review pending proposals explicitly. Check isError and read back accepted facts/revision before claiming success; revision conflicts require fresh proposals. Checkpoint content is advisory, not evidence.
 
 Mission summary:
 ${summary}`;

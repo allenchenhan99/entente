@@ -3,6 +3,7 @@
  * relayd identifies the caller by `Authorization: Bearer <task_token>`; the planner uses the mission token.
  */
 import { z } from 'zod';
+import { CheckpointPacket, CheckpointSelection } from './checkpoint.js';
 import { TaskContract, TaskContractInput, ContractResponse, EvidenceSubmission, RepairContract, Question, Clarification, AcceptanceCriterion, Budget } from './contract.js';
 
 export const RECIPIENT_TOOLS = {
@@ -43,6 +44,9 @@ export const GetContractOutput = z.object({
   contract: TaskContract,
   worktree: z.object({ path: z.string(), branch: z.string() }).optional(),
   active_repair: RepairContract.optional(),
+  context: CheckpointPacket.optional(),
+  /** Freshness in the recipient checkout, separate from the immutable assignment snapshot. */
+  context_validation: z.record(z.string(), z.enum(['current', 'stale', 'missing', 'unverified'])).optional(),
 });
 
 export const RespondInput = ContractResponse.omit({ task_id: true });
@@ -112,6 +116,7 @@ export const ProposeTaskOutput = z.discriminatedUnion('status', [
  * wipe the contract on merge.
  */
 export const TaskContractPatch = z.object({
+  context: CheckpointSelection.nullable().optional(),
   recipient: TaskContract.shape.recipient.optional(),
   runtime: TaskContract.shape.runtime.optional(),
   goal: z.string().optional(),

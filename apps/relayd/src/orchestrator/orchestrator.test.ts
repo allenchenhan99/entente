@@ -593,6 +593,19 @@ describe('reusing an agent', () => {
 
     expect(r.ofType('agent_exited').map((e) => e.task_id)).not.toContain('t-a');
   });
+
+  it('retains completed children when collecting full native rollout accounting', async () => {
+    const r = createTestRelay({ retainCompletedAgents: true });
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    r.orchestrator.respond('t-a-schema', accept);
+    r.orchestrator.submitEvidence('t-a-schema', { contract_version: 1, claimed: claimedAll, summary: 'done' });
+    await r.orchestrator.settled();
+    expect(r.ofType('agent_exited').map(e => e.task_id)).not.toContain('t-a-schema');
+    expect(await r.orchestrator.awaitVerdict('t-a-schema', 1, 1)).toEqual({ status: 'verified' });
+    expect(r.worktrees.calls.mergeBranch.some(c => c.branch === 'relay/t-a-schema')).toBe(true);
+  });
 });
 
 describe('a parent waits for what it delegated', () => {
@@ -851,6 +864,49 @@ describe('subtask (agent networking)', () => {
     // the reducer-derived state carries the link too: the contract is the only place it lives
     expect(r.store.state().tasks['t-a-schema']!.contract.parent_task).toBe('t-a');
     expect(r.orchestrator.getMission(mission_id)!.task_ids).toEqual(['t-a', 't-a-schema']);
+  });
+
+  it('passes the existing parent branch as child baseline while keeping the original repository root', async () => {
+    const r = createTestRelay();
+    const create = r.worktrees.create.bind(r.worktrees);
+    const calls: unknown[][] = [];
+    r.worktrees.create = async (...args) => {
+      calls.push(args);
+      const info = await create(...args);
+      return args[1].id === 't-a' ? { ...info, branch: 'relay/custom-parent' } : info;
+    };
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    await r.orchestrator.proposeSubtask('t-a', child());
+    expect(calls[0]![0]).toBe(r.dir);
+    expect(calls[0]![3]).toBeUndefined();
+    expect(calls[1]).toEqual([r.dir, expect.objectContaining({ parent_task: 't-a' }), [], 'relay/custom-parent']);
+  });
+
+  it.each([false, true])('blocks child creation explicitly when the parent worktree is missing (context: %s)', async (withContext) => {
+    const r = createTestRelay();
+    await spawnedTask(r);
+    r.orchestrator.respond('t-a', accept);
+    r.worktrees.missing.add('/tmp/fake/t-a');
+    fs.writeFileSync(path.join(r.dir, 'global-only.md'), 'must not be used');
+    try {
+      await expect(r.orchestrator.proposeSubtask('t-a', child({
+        inputs: ['global-only.md'],
+        ...(withContext ? { context: { ids: [], tags: [], max_bytes: 900 } } : {}),
+      }))).rejects.toThrow(/parent worktree.*t-a.*missing/);
+    } finally { fs.unlinkSync(path.join(r.dir, 'global-only.md')); }
+    expect(r.worktrees.calls.create).toHaveLength(1);
+    expect(r.host.calls.spawn).toHaveLength(1);
+    expect(r.orchestrator.taskView('t-a-schema')).toBeUndefined();
+  });
+
+  it('refuses to delegate before a parent has a worktree', async () => {
+    const r = createTestRelay();
+    const { mission_id } = r.orchestrator.createMission(mission);
+    await r.orchestrator.proposeTask(mission_id, sampleContract('t-a', { dependencies: ['t-not-yet'] }), 'planner');
+    await expect(r.orchestrator.proposeSubtask('t-a', child())).rejects.toThrow(/parent worktree.*t-a.*missing/);
+    expect(r.worktrees.calls.create).toHaveLength(0);
+    expect(r.orchestrator.taskView('t-a-schema')).toBeUndefined();
   });
 
   it('a verified subtask is merged into the parent worktree, the parent is told, and its files count as in-scope for the parent', async () => {

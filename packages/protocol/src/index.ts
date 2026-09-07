@@ -9,3 +9,4 @@ export * from './agents.js';
 export * from './lint/index.js';
 export * from './graph/index.js';
 export * from './pty.js';
+export * from './checkpoint.js';

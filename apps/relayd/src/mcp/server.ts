@@ -6,6 +6,7 @@
  * Stateless streamable HTTP: a fresh McpServer + transport per request (the SDK forbids reusing a
  * stateless transport across requests), mounted on the shared Hono app at `routes.mcp`.
  */
+import { z } from 'zod';
 import type { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
@@ -15,9 +16,21 @@ import {
   RespondInput, AwaitContractInput, ReportProgressInput, ReportBlockerInput, SubmitEvidenceInput, AwaitVerdictInput, AwaitReplyInput,
   ProposeSubtaskInput, AwaitTaskInput,
   ProposeTaskInput, ReviseTaskInput, AnswerClarificationInput, AskHumanInput, AwaitAnswersInput,
+  CHECKPOINT_TOOLS, CheckpointOperation, CheckpointSelection, CheckpointDelta,
 } from '@relay/protocol';
 import type { Orchestrator, TokenSubject } from '../orchestrator/orchestrator.js';
 import { RELAYD_VERSION } from '../config.js';
+
+// MCP discovery requires an object. Keep operation-specific requirements in the
+// imported strict union; do not inject update defaults into read/review arguments.
+const CheckpointToolInput = z.object({
+  operation: z.enum(['read', 'pending', 'update', 'review']),
+  expected_revision: CheckpointOperation.options[2].shape.expected_revision.optional(),
+  upsert: CheckpointOperation.options[2].shape.upsert.optional(),
+  remove: CheckpointOperation.options[2].shape.remove.removeDefault().optional(),
+  proposal_id: CheckpointOperation.options[3].shape.proposal_id.optional(),
+  decision: CheckpointOperation.options[3].shape.decision.optional(),
+}).strict();
 
 const ok = (data: unknown): CallToolResult => ({
   content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
@@ -55,6 +68,22 @@ export function buildMcpServer(orchestrator: Orchestrator, subject: TokenSubject
     if (!view) throw new Error(`task ${taskId} not found`);
     if (view.mission_id !== missionId) throw new Error(`task ${taskId} belongs to another mission`);
   };
+
+  server.registerTool(CHECKPOINT_TOOLS.checkpoint, {
+    description: 'Maintain your reusable checkpoint during work. Read/update your own facts, inspect pending child proposals, explicitly accept/reject them using expected_revision. No model summarization occurs here; facts are contextual claims, not verified evidence.',
+    inputSchema: CheckpointToolInput,
+  }, (args) => guard(() => {
+    if (!subject) return fail('missing or unknown checkpoint token');
+    return ok(orchestrator.checkpoint(subject, CheckpointOperation.parse(args)));
+  }));
+  server.registerTool(CHECKPOINT_TOOLS.get_context, {
+    description: 'Retrieve specific IDs or tags from the checkpoint assigned to your contract. Bounded deterministic lookup returns revision, missing IDs, omissions and source freshness. Use for missing context instead of rereading the repository.',
+    inputSchema: CheckpointSelection,
+  }, (args) => asRecipient(taskId => ok(orchestrator.getContext(taskId, args))));
+  server.registerTool(CHECKPOINT_TOOLS.propose_delta, {
+    description: 'Return incremental findings to your assigning agent. Proposals do not change accepted checkpoint facts until the owner reviews them. Use the latest retrieved checkpoint base revision.',
+    inputSchema: CheckpointDelta,
+  }, (args) => asRecipient(taskId => ok(orchestrator.proposeContextDelta(taskId, args.contract_version, args.base_revision, args.upsert, args.remove))));
 
   // ---- recipient tools ----
   server.registerTool(RECIPIENT_TOOLS.get_contract, { description: 'Return the current version of your task contract, your worktree and any active repair contract.' },
@@ -168,4 +197,3 @@ export function mountMcp(app: Hono, orchestrator: Orchestrator): void {
     return transport.handleRequest(c.req.raw);
   });
 }
-

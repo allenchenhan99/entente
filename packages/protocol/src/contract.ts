@@ -3,6 +3,7 @@
  * agents (via MCP) and fixtures. See PRD.md §6.
  */
 import { z } from 'zod';
+import { CheckpointSelection } from './checkpoint.js';
 
 export const RuntimeKind = z.enum(['claude-code', 'codex']);
 export type RuntimeKind = z.infer<typeof RuntimeKind>;
@@ -68,11 +69,15 @@ export const TaskContract = z.object({
   clarifications: z.array(Clarification).default([]),
   /** Set when a recipient agent proposed this task as a subtask (agent networking): the parent's task id. */
   parent_task: z.string().optional(),
+  /** Deterministic selection from the sender's reusable checkpoint, frozen per contract version. */
+  context: CheckpointSelection.optional(),
+  /** Daemon-assigned packet generation; task-id reuse must not reuse an older assignment. */
+  context_id: z.string().uuid().optional(),
 });
 export type TaskContract = z.infer<typeof TaskContract>;
 
 /** What a planner submits via `relay_propose_task`: everything except bookkeeping fields. */
-export const TaskContractInput = TaskContract.omit({ mission_id: true, version: true, sender: true, clarifications: true });
+export const TaskContractInput = TaskContract.omit({ mission_id: true, version: true, sender: true, clarifications: true, context_id: true });
 export type TaskContractInput = z.infer<typeof TaskContractInput>;
 
 export const Question = z.object({

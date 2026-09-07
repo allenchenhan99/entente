@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "const": "read"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "const": "pending"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "const": "update"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "upsert": {
+          "maxItems": 512,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8192
+              },
+              "tags": {
+                "default": [],
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "sources": {
+                "default": [],
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "sha256"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "id",
+              "text",
+              "tags",
+              "sources"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "remove": {
+          "default": [],
+          "maxItems": 512,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"
+          }
+        }
+      },
+      "required": [
+        "operation",
+        "expected_revision",
+        "upsert",
+        "remove"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "const": "review"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "reject"
+          ]
+        }
+      },
+      "required": [
+        "operation",
+        "proposal_id",
+        "expected_revision",
+        "decision"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

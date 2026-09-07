@@ -18,6 +18,12 @@ const verifyModule = { createCheckRunner: (deps: { repoRoot: string; worktrees: 
 const worktreeModule = { createWorktreeManager: () => ({ real: true, create: async () => { throw new Error('unused'); }, remove: async () => {}, diff: async () => ({ patchPath: '', changedFiles: [] }), integrate: async () => ({ branch: 'relay/integration' }) }) };
 
 describe('ports wiring', () => {
+  it('passes the supplied environment to host and runtime factories', async () => {
+    const env = { RELAY_HOST: 'relayterm', RELAY_TERMD: '/custom/termd' };
+    const ports = await resolvePorts(loadConfig(env), store(), () => {}, async spec => spec.includes('launch') ? launchModule : undefined, env);
+    expect((ports.host as unknown as { deps: { env: unknown } }).deps.env).toBe(env);
+    expect((ports.runtimes.codex as unknown as { deps: { env: unknown } }).deps.env).toBe(env);
+  });
   it('uses real factories where their modules exist and fakes elsewhere', async () => {
     const importer = async (spec: string) =>
       spec.includes('launch') ? launchModule : spec.includes('verify') ? verifyModule : spec.includes('worktree') ? worktreeModule : undefined;

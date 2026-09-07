@@ -1,35 +1,35 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { serve } from '@hono/node-server';
-import type { ServerType } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { RECIPIENT_TOOLS, PLANNER_TOOLS } from '@relay/protocol';
+import { RECIPIENT_TOOLS, PLANNER_TOOLS, CHECKPOINT_TOOLS } from '@relay/protocol';
 import { createTestRelay, sampleContract } from '../fakes/test-harness.js';
 import { createApp } from '../http/app.js';
 
-const servers: ServerType[] = [];
+const apps = new Map<string, ReturnType<typeof createApp>>();
 const clients: Client[] = [];
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((c) => c.close().catch(() => {})));
-  await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))));
+  apps.clear();
 });
 
 async function listen(opts: Parameters<typeof createTestRelay>[0] = {}) {
   const r = createTestRelay(opts);
   const app = createApp({ orchestrator: r.orchestrator, store: r.store });
-  const server = await new Promise<ServerType>((resolve) => {
-    const s = serve({ fetch: app.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(s));
-  });
-  servers.push(server);
-  const addr = server.address();
-  const port = typeof addr === 'object' && addr ? addr.port : 0;
-  const url = `http://127.0.0.1:${port}/mcp`;
+  // Exercise the real MCP HTTP transport and Hono route without binding sockets:
+  // acceptance checks run in a sandbox that denies localhost networking.
+  const origin = `http://relay-${apps.size}.test`;
+  apps.set(origin, app);
+  const url = `${origin}/mcp`;
   return { ...r, url };
 }
 
 async function connect(url: string, token?: string) {
   const client = new Client({ name: 'test', version: '0' });
-  const transport = new StreamableHTTPClientTransport(new URL(url), token ? { requestInit: { headers: { Authorization: `Bearer ${token}` } } } : {});
+  const app = apps.get(new URL(url).origin)!;
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    fetch: async (input, init) => app.fetch(new Request(input, init)),
+    ...(token ? { requestInit: { headers: { Authorization: `Bearer ${token}` } } } : {}),
+  });
   await client.connect(transport);
   clients.push(client);
   return client;
@@ -43,13 +43,78 @@ const call = async (client: Client, name: string, args: Record<string, unknown> 
 const accepted = { contract_version: 1, decision: 'accepted', interpretation: ['Backend only'], verification_plan: { 'AC-1': 'run tests', 'AC-2': 'diff' } };
 const claimedAll = { 'AC-1': { status: 'passed' }, 'AC-2': { status: 'passed' } };
 
+describe('native reusable checkpoint handoff', () => {
+  it('discovers checkpoint fields and rejects invalid operation combinations without mutation', async () => {
+    const r = await listen();
+    const { planner_token } = r.orchestrator.createMission({ repo: r.dir, title: 'Checkpoint schema' });
+    const client = await connect(r.url, planner_token);
+    const tool = (await client.listTools()).tools.find(t => t.name === CHECKPOINT_TOOLS.checkpoint)!;
+    expect(tool.inputSchema).toMatchObject({
+      type: 'object', required: ['operation'], additionalProperties: false,
+      properties: {
+        operation: { enum: ['read', 'pending', 'update', 'review'] },
+        expected_revision: { type: 'integer', minimum: 0 },
+        upsert: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, text: { type: 'string' }, sources: { type: 'array' } } } },
+        remove: { type: 'array', items: { type: 'string' } },
+        proposal_id: { type: 'string' }, decision: { enum: ['accept', 'reject'] },
+      },
+    });
+    for (const args of [
+      {}, { operation: 'unknown' }, { operation: 'read', extra: true },
+      { operation: 'read', expected_revision: 0 }, { operation: 'pending', remove: [] },
+      { operation: 'update', upsert: [] }, { operation: 'update', expected_revision: 0 },
+      { operation: 'update', expected_revision: -1, upsert: [] },
+      { operation: 'update', expected_revision: 0, upsert: [{ id: 'fact', text: 'x' }], decision: 'accept' },
+      { operation: 'review', expected_revision: 0, decision: 'accept' },
+      { operation: 'review', expected_revision: 0, proposal_id: 'p', decision: 'maybe' },
+      { operation: 'review', expected_revision: 0, proposal_id: 'p', decision: 'accept', upsert: [] },
+    ]) {
+      const result = await call(client, CHECKPOINT_TOOLS.checkpoint, args);
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+      expect(result.text).toMatch(/invalid|unrecognized|required/i);
+    }
+    expect(await call(client, CHECKPOINT_TOOLS.checkpoint, { operation: 'read' })).toMatchObject({ isError: false, data: { revision: 0, entries: [] } });
+    expect(await call(client, CHECKPOINT_TOOLS.checkpoint, { operation: 'pending' })).toMatchObject({ isError: false, data: { proposals: [] } });
+    expect(await call(client, CHECKPOINT_TOOLS.checkpoint, { operation: 'update', expected_revision: 0, upsert: [{ id: 'fact', text: 'Valid without remove' }] })).toMatchObject({ isError: false, data: { revision: 1 } });
+  });
+
+  it('maintains context during work, freezes assignment, and incorporates child findings in the next handoff', async () => {
+    const r = await listen();
+    const { planner_token } = r.orchestrator.createMission({ repo: r.dir, title: 'Checkpoint lifecycle' });
+    const planner = await connect(r.url, planner_token);
+    const initial = { id: 'routing', text: 'The route is registered in server.ts', tags: ['network'], sources: [] };
+    expect(await call(planner, 'relay_checkpoint', { operation: 'update', expected_revision: 0, upsert: [initial], remove: [] })).toMatchObject({ isError: false, data: { revision: 1 } });
+    await call(planner, PLANNER_TOOLS.propose_task, { contract: { ...sampleContract('t-main'), context: { ids: ['routing'] } } });
+    const main = await connect(r.url, r.orchestrator.tokenFor('t-main'));
+    expect(await call(main, RECIPIENT_TOOLS.get_contract)).toMatchObject({ data: { context: { revision: 1, entries: [{ id: 'routing' }] } } });
+    await call(main, RECIPIENT_TOOLS.respond_to_contract, accepted);
+    await call(main, 'relay_checkpoint', { operation: 'update', expected_revision: 0, upsert: [initial, { ...initial, id: 'auth', text: 'Tokens are mission scoped' }], remove: [] });
+    expect(await call(main, RECIPIENT_TOOLS.propose_subtask, { contract: { ...sampleContract('t-child'), context: { ids: ['routing'] } } })).toMatchObject({ isError: false, data: { status: 'proposed' } });
+    const child = await connect(r.url, r.orchestrator.tokenFor('t-child'));
+    expect(await call(child, RECIPIENT_TOOLS.get_contract)).toMatchObject({ data: { context: { revision: 1, entries: [{ id: 'routing' }] } } });
+    expect(await call(child, 'relay_get_context', { ids: ['auth'] })).toMatchObject({ data: { entries: [{ id: 'auth', text: 'Tokens are mission scoped' }] } });
+    const proposed = await call(child, 'relay_propose_context_delta', { contract_version: 1, base_revision: 1, upsert: [{ ...initial, text: 'Routes and auth must be checked together' }], remove: [] });
+    expect(proposed.isError).toBe(false);
+    const pending = await call(main, 'relay_checkpoint', { operation: 'pending' });
+    expect(pending.data).toMatchObject({ proposals: [{ author: 't-child' }] });
+    expect(await call(main, 'relay_checkpoint', { operation: 'review', proposal_id: proposed.data!.id, expected_revision: 1, decision: 'accept' })).toMatchObject({ data: { revision: 2 } });
+    expect(await call(child, RECIPIENT_TOOLS.get_contract)).toMatchObject({ data: { context: { revision: 1, entries: [{ text: initial.text }] } } });
+    await call(main, RECIPIENT_TOOLS.propose_subtask, { contract: { ...sampleContract('t-next'), context: { ids: ['routing'] } } });
+    const next = await connect(r.url, r.orchestrator.tokenFor('t-next'));
+    expect(await call(next, RECIPIENT_TOOLS.get_contract)).toMatchObject({ data: { context: { revision: 2, entries: [{ text: 'Routes and auth must be checked together' }] } } });
+    const stranger = await connect(r.url, r.orchestrator.createMission({ repo: r.dir, title: 'Other mission' }).planner_token);
+    expect(await call(stranger, 'relay_checkpoint', { operation: 'read' })).toMatchObject({ data: { revision: 0, entries: [] } });
+    expect((await call(stranger, 'relay_checkpoint', { operation: 'review', proposal_id: proposed.data!.id, expected_revision: 0, decision: 'accept' })).isError).toBe(true);
+  });
+});
+
 describe('mcp happy path', () => {
   it('planner proposes, recipient accepts, submits evidence and gets verified', async () => {
     const r = await listen();
     const { mission_id, planner_token } = r.orchestrator.createMission({ repo: '/repo', title: 'Add login' });
     const planner = await connect(r.url, planner_token);
     const tools = (await planner.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual([...Object.values(RECIPIENT_TOOLS), ...Object.values(PLANNER_TOOLS)].sort());
+    expect(tools).toEqual([...Object.values(RECIPIENT_TOOLS), ...Object.values(PLANNER_TOOLS), ...Object.values(CHECKPOINT_TOOLS)].sort());
 
     const mission = await call(planner, PLANNER_TOOLS.get_mission);
     expect(mission.isError).toBe(false);
