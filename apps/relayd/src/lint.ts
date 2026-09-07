@@ -6,6 +6,8 @@
  */
 import * as protocol from '@relay/protocol';
 import type { LintContext, LintResult, TaskContract } from '@relay/protocol';
+import fs from 'node:fs';
+import path from 'node:path';
 
 type LintFn = (contract: TaskContract, ctx: LintContext) => LintResult[];
 
@@ -53,6 +55,34 @@ function fallback(contract: TaskContract, ctx: LintContext): LintResult[] {
 
 export const usingFallbackLint = real === undefined;
 
+function containedInput(root: string, input: string): boolean {
+  if (path.isAbsolute(input) || path.win32.isAbsolute(input) || input.split(/[\\/]/).includes('..')) return false;
+  const contains = (base: string, file: string) => {
+    const rel = path.relative(base, file);
+    return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+  };
+  const file = path.resolve(root, input);
+  if (!contains(path.resolve(root), file)) return false;
+  // Check the nearest existing ancestor too: missing dependency outputs may sit under symlinks.
+  try {
+    let ancestor = file;
+    while (!fs.existsSync(ancestor)) {
+      if (fs.lstatSync(ancestor, { throwIfNoEntry: false })?.isSymbolicLink()) return false;
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) return false;
+      ancestor = parent;
+    }
+    // Nonexistent roots are used by the pure lint fixtures; lexical checks still apply.
+    if (!fs.existsSync(root)) return true;
+    return contains(fs.realpathSync(root), fs.realpathSync(ancestor));
+  } catch { return false; }
+}
+
 export function lintContract(contract: TaskContract, ctx: LintContext): LintResult[] {
-  return real ? real(contract, ctx) : fallback(contract, ctx);
+  const unsafe = new Set((contract.inputs ?? []).flatMap((input, i) => containedInput(ctx.repoRoot, input) ? [] : [`inputs/${i}`]));
+  const results = real ? real(contract, ctx) : fallback(contract, ctx);
+  return [
+    ...results.filter(r => r.rule !== 'missing_input' || !unsafe.has(r.field ?? '')),
+    ...[...unsafe].map((field): LintResult => ({ rule: 'missing_input', severity: 'error', task_id: contract.id, field, message: `input must stay within ${ctx.repoRoot}` })),
+  ];
 }

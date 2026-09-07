@@ -83,6 +83,64 @@ describe('git worktree manager', () => {
     expect(git(repo, ['branch', '--list', 'relay/t-worktree'])).toBe('');
   });
 
+  it('forks later children from committed parent state without importing newer root commits on merge', async () => {
+    const repo = createRepo();
+    fs.mkdirSync(path.join(repo, 'node_modules'), { recursive: true });
+    const manager = createWorktreeManager();
+    const parent = await manager.create(repo, task('t-parent'), []);
+    const earlier = await manager.create(repo, task('t-earlier'), [], parent.branch);
+    write(parent.path, 'src/parent.txt', 'parent-only fix\n');
+    await manager.commitAll(parent.path, 'parent fix');
+    const parentHead = git(parent.path, ['rev-parse', 'HEAD']);
+    write(parent.path, 'uncommitted.txt', 'not inherited\n');
+    write(repo, 'unrelated-root.txt', 'root-only change\n');
+    git(repo, ['add', 'unrelated-root.txt']);
+    git(repo, ['commit', '-m', 'unrelated root change']);
+
+    const child = await manager.create(repo, task('t-later'), [], parent.branch);
+    expect(child.base).toBe(parentHead);
+    expect(fs.readFileSync(path.join(child.path, 'src/parent.txt'), 'utf8')).toBe('parent-only fix\n');
+    expect(fs.existsSync(path.join(child.path, 'unrelated-root.txt'))).toBe(false);
+    expect(fs.existsSync(path.join(child.path, 'uncommitted.txt'))).toBe(false);
+    expect(child.path).toBe(path.join(repo, '.relay', 'wt', 't-later'));
+    expect(fs.readlinkSync(path.join(child.path, 'node_modules'))).toBe(path.join(repo, 'node_modules'));
+    expect(await manager.create(repo, task('t-earlier'), [], parent.branch)).toEqual(earlier);
+    expect(fs.existsSync(path.join(earlier.path, 'src/parent.txt'))).toBe(false);
+
+    write(child.path, 'src/child.txt', 'scoped child work\n');
+    await manager.commitAll(child.path, 'child work');
+    expect((await manager.diff(child.path, child.base)).changedFiles).toEqual(['src/child.txt']);
+    expect(await manager.mergeBranch(parent.path, child.branch)).toEqual({ merged: true });
+    expect(fs.readFileSync(path.join(parent.path, 'uncommitted.txt'), 'utf8')).toBe('not inherited\n');
+    fs.unlinkSync(path.join(parent.path, 'uncommitted.txt'));
+    expect((await manager.diff(parent.path, parent.base)).changedFiles).toEqual(['src/child.txt', 'src/parent.txt']);
+    expect(fs.existsSync(path.join(parent.path, 'unrelated-root.txt'))).toBe(false);
+
+    const top = await manager.create(repo, task('t-top'), []);
+    expect(top.base).toBe(git(repo, ['rev-parse', 'HEAD']));
+    expect(fs.existsSync(path.join(top.path, 'unrelated-root.txt'))).toBe(true);
+  });
+
+  it('merges dependencies on an explicit baseline and records the resulting commit', async () => {
+    const repo = createRepo();
+    createBranch(repo, 'relay/parent', { 'parent.txt': 'parent\n' });
+    createBranch(repo, 'relay/dep', { 'dep.txt': 'dependency\n' });
+    const manager = createWorktreeManager();
+    const child = await manager.create(repo, task(), ['relay/dep'], 'relay/parent');
+    expect(fs.existsSync(path.join(child.path, 'parent.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(child.path, 'dep.txt'))).toBe(true);
+    expect(child.base).toBe(git(child.path, ['rev-parse', 'HEAD']));
+    expect((await manager.diff(child.path, child.base)).changedFiles).toEqual([]);
+  });
+
+  it('rejects an unresolved explicit baseline without creating a child or falling back to HEAD', async () => {
+    const repo = createRepo();
+    const manager = createWorktreeManager();
+    await expect(manager.create(repo, task(), [], 'relay/missing-parent')).rejects.toThrow();
+    expect(fs.existsSync(path.join(repo, '.relay', 'wt', 't-worktree'))).toBe(false);
+    expect(git(repo, ['branch', '--list', 'relay/t-worktree'])).toBe('');
+  });
+
   it('links the repository node_modules into a new worktree so command checks can run', async () => {
     const repoRoot = createRepo();
     fs.mkdirSync(path.join(repoRoot, 'node_modules', 'left-pad'), { recursive: true });

@@ -20,8 +20,12 @@ export interface EventStore {
 export interface WorktreeInfo { path: string; branch: string; base: string }
 
 export interface WorktreeManager {
-  /** Creates .relay/wt/<task-id> on branch relay/<task-id>, based on repo HEAD with every dependency branch merged in order. */
-  create(repoRoot: string, task: TaskContract, dependencyBranches: string[]): Promise<WorktreeInfo>;
+  /**
+   * Creates .relay/wt/<task-id> from baselineRef (default repo HEAD), then merges dependencies in order.
+   * Resolves committed state only: uncommitted parent edits are not copied or auto-committed.
+   * Existing worktrees retain their recorded original base; storage and dependencies stay rooted at repoRoot.
+   */
+  create(repoRoot: string, task: TaskContract, dependencyBranches: string[], baselineRef?: string): Promise<WorktreeInfo>;
   remove(repoRoot: string, taskId: string): Promise<void>;
   /** Working-tree + committed changes relative to the worktree's base. */
   diff(worktreePath: string, base: string): Promise<{ patchPath: string; changedFiles: string[] }>;

@@ -477,6 +477,47 @@
               },
               "parent_task": {
                 "type": "string"
+              },
+              "context": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "default": [],
+                    "maxItems": 128,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"
+                    }
+                  },
+                  "tags": {
+                    "default": [],
+                    "maxItems": 32,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "max_bytes": {
+                    "default": 16384,
+                    "type": "integer",
+                    "minimum": 512,
+                    "maximum": 65536
+                  }
+                },
+                "required": [
+                  "ids",
+                  "tags",
+                  "max_bytes"
+                ],
+                "additionalProperties": false
+              },
+              "context_id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
               }
             },
             "required": [
@@ -775,6 +816,47 @@
                 },
                 "parent_task": {
                   "type": "string"
+                },
+                "context": {
+                  "type": "object",
+                  "properties": {
+                    "ids": {
+                      "default": [],
+                      "maxItems": 128,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"
+                      }
+                    },
+                    "tags": {
+                      "default": [],
+                      "maxItems": 32,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "max_bytes": {
+                      "default": 16384,
+                      "type": "integer",
+                      "minimum": 512,
+                      "maximum": 65536
+                    }
+                  },
+                  "required": [
+                    "ids",
+                    "tags",
+                    "max_bytes"
+                  ],
+                  "additionalProperties": false
+                },
+                "context_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                 }
               },
               "required": [

@@ -42,6 +42,8 @@ import type {
 import { lintContract } from '../lint.js';
 import { Waiters } from './waiters.js';
 import { RelayError, notFound, conflict } from './errors.js';
+import { CheckpointStore } from '../checkpoint/store.js';
+import type { CheckpointOperation, CheckpointSelection, CheckpointFact, TaskContractPatch } from '@relay/protocol';
 
 export type ProposeTaskOutput = z.infer<typeof ProposeTaskOutput>;
 export type RespondOutput = z.infer<typeof RespondOutput>;
@@ -79,6 +81,8 @@ export interface OrchestratorDeps {
    */
   contactTimeoutMs?: number;
   contactNudges?: number;
+  /** Measurement runs retain completed children so final verdict/usage records can finish. */
+  retainCompletedAgents?: boolean;
   /** Daemon restart: is a recorded worktree still on disk? Defaults to `fs.existsSync(path)`; tests inject. */
   worktreeExists?: (worktree: WorktreeInfo) => boolean;
   /**
@@ -123,6 +127,9 @@ export interface MissionSummary {
 }
 
 export interface Orchestrator {
+  checkpoint(subject: TokenSubject, operation: CheckpointOperation): unknown;
+  getContext(taskId: string, selection: CheckpointSelection): unknown;
+  proposeContextDelta(taskId: string, contractVersion: number, baseRevision: number, upsert: CheckpointFact[], remove: string[]): unknown;
   createMission(body: CreateMissionBody): { mission_id: string; planner_token: string };
   /** Spawns an LLM planner agent (with the mission's planner token) in the repository root. */
   spawnPlanner(missionId: string, runtime: RuntimeKind): Promise<{ pane_id: string }>;
@@ -168,7 +175,7 @@ export interface Orchestrator {
    * Any task may be awaited; `callerTaskId` (when known) may not await itself (400) or a task of another mission.
    */
   awaitTask(taskId: string, timeoutS: number, signal?: AbortSignal, callerTaskId?: string): Promise<AwaitTaskOutput>;
-  reviseTask(taskId: string, patch: Partial<TaskContractInput>, actor: Sender): Promise<{ contract_version: number }>;
+  reviseTask(taskId: string, patch: TaskContractPatch, actor: Sender): Promise<{ contract_version: number }>;
   clarify(taskId: string, answers: Array<{ question_id: string; answer: string }>, answeredBy: Sender): Promise<{ contract_version: number }>;
   review(taskId: string, body: ReviewBody): Promise<void>;
   cancel(taskId: string, reason?: string): Promise<void>;
@@ -349,6 +356,7 @@ export const agentConfigDir = (relayDir: string, taskId: string): string =>
   path.join(relayDir, 'agents', isPlannerTaskId(taskId) ? `planner-${taskId.slice('planner:'.length)}` : taskId);
 
 export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
+  const checkpoints = new CheckpointStore(path.join(deps.relayDir, 'checkpoints'));
   const clock = deps.clock ?? (() => new Date().toISOString());
   const log = deps.log ?? (() => {});
   const worktreeExists = deps.worktreeExists ?? ((wt: WorktreeInfo) => fs.existsSync(wt.path));
@@ -385,6 +393,74 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     return t;
   };
   const current = (rec: TaskRecord): TaskContract => rec.versions[rec.versions.length - 1];
+  const ownCheckpoint = (subject: TokenSubject): string => {
+    if (subject.kind === 'mission') { mustMission(subject.missionId); return `mission:${subject.missionId}`; }
+    const rec = mustTask(subject.taskId);
+    return `mission:${rec.missionId}:task:${rec.id}`;
+  };
+  const checkpoint: Orchestrator['checkpoint'] = (subject, operation) => {
+    const owner = ownCheckpoint(subject);
+    if (subject.kind === 'task') touch(mustTask(subject.taskId));
+    const author = subject.kind === 'mission' ? 'planner' : subject.taskId;
+    return checkpoints.measure(operation.operation, owner, author, operation, () => { switch (operation.operation) {
+      case 'read': return checkpoints.read(owner);
+      case 'pending': return { proposals: checkpoints.pending(owner) };
+      case 'update': return checkpoints.update(owner, operation.expected_revision, operation.upsert, operation.remove, author);
+      case 'review': {
+        if (operation.decision === 'accept') {
+          const proposal = checkpoints.pending(owner).find(p => p.id === operation.proposal_id);
+          const child = proposal ? tasks.get(proposal.author) : undefined;
+          if (proposal && (!child || current(child).context_id !== proposal.assignment_id || child.taskState === 'canceled' || child.taskState === 'failed')) {
+            throw conflict('proposal assignment is no longer current; reject and reconcile with a fresh assignment');
+          }
+        }
+        return checkpoints.review(owner, operation.proposal_id, operation.expected_revision, operation.decision, author);
+      }
+    } });
+  };
+  const packetKey = (contract: TaskContract): string => contract.context_id ?? `${contract.mission_id}:${contract.id}`;
+  /** Inputs and assigned facts belong to the assigning owner, not the daemon's checkout. */
+  const assigningRoot = (contract: TaskContract): string => {
+    if (contract.parent_task === undefined) return deps.repoRoot;
+    const parentWorktree = tasks.get(contract.parent_task)?.worktree;
+    if (!parentWorktree || !worktreeExists(parentWorktree)) {
+      throw conflict(`parent worktree for ${contract.parent_task} is missing; cannot assign child ${contract.id}`);
+    }
+    return parentWorktree.path;
+  };
+  const bindContext = (contract: TaskContract): void => {
+    if (!contract.context) return;
+    const owner = contract.parent_task
+      ? ownCheckpoint({ kind: 'task', taskId: contract.parent_task })
+      : ownCheckpoint({ kind: 'mission', missionId: contract.mission_id });
+    checkpoints.measure('assign', owner, contract.sender, { task_id: contract.id, contract_version: contract.version, selection: contract.context }, () => {
+      const packet = checkpoints.select(owner, contract.context!, assigningRoot(contract));
+      checkpoints.bind(packetKey(contract), contract.version, packet);
+      return packet;
+    });
+  };
+  const assignedPacket = (taskId: string) => {
+    const contract = current(mustTask(taskId));
+    const packet = checkpoints.packet(packetKey(contract), contract.version);
+    if (contract.context && !packet) throw conflict('assigned checkpoint packet is missing; refusing to reconstruct from newer context');
+    return packet;
+  };
+  const getContext: Orchestrator['getContext'] = (taskId, selection) => {
+    const rec = mustTask(taskId);
+    const packet = assignedPacket(taskId);
+    if (!packet) throw conflict('task has no assigned checkpoint');
+    touch(rec);
+    return checkpoints.measure('lookup', packet.owner, taskId, selection, () => checkpoints.select(packet.owner, selection, rec.worktree?.path ?? deps.repoRoot));
+  };
+  const proposeContextDelta: Orchestrator['proposeContextDelta'] = (taskId, contractVersion, baseRevision, upsert, remove) => {
+    const rec = mustTask(taskId);
+    if (rec.taskState === 'canceled' || rec.taskState === 'failed') throw conflict(`task ${taskId} is ${rec.taskState}`);
+    if (current(rec).version !== contractVersion) throw conflict('contract_version changed; fetch the current contract before proposing context');
+    touch(rec);
+    const packet = assignedPacket(taskId);
+    if (!packet) throw conflict('task has no assigned checkpoint');
+    return checkpoints.measure('propose', packet.owner, taskId, { contract_version: contractVersion, base_revision: baseRevision, upsert, remove }, () => checkpoints.propose(packet.owner, taskId, baseRevision, upsert, remove, current(rec).context_id));
+  };
   const TERMINAL: ReadonlySet<TaskState> = new Set(['completed', 'canceled', 'failed']);
   /** Responses and evidence must target the version the recipient actually read; one wording for both. */
   const versionMismatch = (rec: TaskRecord, given: number): string | undefined =>
@@ -443,10 +519,11 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
   // ---------- lint + spawn ----------
   const computeLint = (rec: TaskRecord): LintResult[] => {
     const siblings = [...tasks.values()].filter((t) => t.missionId === rec.missionId && t.id !== rec.id).map(current);
+    const repoRoot = assigningRoot(current(rec));
     return lintContract(current(rec), {
       siblings,
-      repoRoot: deps.repoRoot,
-      fileExists: (rel) => fs.existsSync(path.resolve(deps.repoRoot, rel)),
+      repoRoot,
+      fileExists: (rel) => fs.existsSync(path.resolve(repoRoot, rel)),
     });
   };
   const runLint = (rec: TaskRecord): LintResult[] => {
@@ -490,7 +567,15 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     try {
       const contract = current(rec);
       const dependencyBranches = contract.dependencies.map((d) => tasks.get(d)?.worktree?.branch ?? `relay/${d}`);
-      const worktree = await deps.worktrees.create(deps.repoRoot, contract, dependencyBranches);
+      let baselineRef: string | undefined;
+      if (contract.parent_task !== undefined) {
+        const parentWorktree = tasks.get(contract.parent_task)?.worktree;
+        if (!parentWorktree || !worktreeExists(parentWorktree)) {
+          throw new Error(`parent worktree for ${contract.parent_task} is missing; cannot create child ${taskId}`);
+        }
+        baselineRef = parentWorktree.branch;
+      }
+      const worktree = await deps.worktrees.create(deps.repoRoot, contract, dependencyBranches, baselineRef);
       rec.worktree = worktree;
       emitTask(rec, 'relayd', 'worktree_created', { path: worktree.path, branch: worktree.branch, base: worktree.base });
 
@@ -565,8 +650,10 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const version = existing ? current(existing).version + 1 : 1;
     const contract = TaskContract.parse({
       ...input, mission_id: missionId, version, sender, clarifications: existing ? current(existing).clarifications : [],
+      context_id: input.context ? randomUUID() : undefined,
       ...(parentTask !== undefined ? { parent_task: parentTask } : {}),
     });
+    bindContext(contract);
     let rec = existing;
     if (!rec) {
       rec = {
@@ -637,7 +724,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     // The parent keeps working in its own worktree while the child runs: their allowed_paths must be disjoint.
     // Reuse the `overlapping_scope` rule against the parent alone and promote it to an error.
     const candidate = TaskContract.parse({ ...input, mission_id: parent.missionId, version: 1, sender: agentActor(parent), parent_task: parentTaskId });
-    const overlaps = lintContract(candidate, { siblings: [parentContract], repoRoot: deps.repoRoot, fileExists: (rel) => fs.existsSync(path.resolve(deps.repoRoot, rel)) })
+    const repoRoot = assigningRoot(candidate);
+    const overlaps = lintContract(candidate, { siblings: [parentContract], repoRoot, fileExists: (rel) => fs.existsSync(path.resolve(repoRoot, rel)) })
       .filter((r) => r.rule === 'overlapping_scope')
       .map((r) => `${r.rule}: ${r.message} (a subtask's scope must be disjoint from its parent's)`);
     if (overlaps.length > 0) return { status: 'lint_error', task_id: input.id, errors: overlaps, warnings: [] };
@@ -656,6 +744,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
   const revise = async (rec: TaskRecord, next: TaskContract, actor: Sender): Promise<number> => {
     const previous = current(rec).version;
+    next.context_id = next.context ? randomUUID() : undefined;
+    bindContext(next);
     rec.versions.push(next);
     rec.handoffState = 'proposed';
     rec.openQuestions = [];
@@ -673,7 +763,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     }
     const base = current(rec);
     // Only keys explicitly present in the patch change; undefined never overwrites.
-    const provided = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    const provided: Record<string, unknown> = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    if (patch.context === null) provided.context = undefined;
     const next = TaskContract.parse({ ...base, ...provided, id: base.id, mission_id: base.mission_id, version: base.version + 1, clarifications: base.clarifications });
     return { contract_version: await revise(rec, next, actor) };
   };
@@ -751,10 +842,14 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
     const rec = mustTask(taskId);
     touch(rec);
     ackRepair(rec);
+    const context = assignedPacket(taskId);
+    const context_validation = context ? checkpoints.measure('delivery', context.owner, taskId, { context_id: current(rec).context_id, contract_version: current(rec).version }, () => checkpoints.validate(context, rec.worktree?.path ?? deps.repoRoot)) : undefined;
     return {
       contract: current(rec),
       worktree: rec.worktree ? { path: rec.worktree.path, branch: rec.worktree.branch } : undefined,
       active_repair: rec.activeRepair,
+      context,
+      context_validation,
     };
   };
 
@@ -908,7 +1003,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
         // fills the grid with finished agents. The process ends; the session does not — it is in the
         // log, and `reuse_session` reopens it with everything it learned. A top-level agent's pane
         // stays, because that is the one you were watching.
-        if (current(rec).parent_task !== undefined && rec.paneId) {
+        if (!deps.retainCompletedAgents && current(rec).parent_task !== undefined && rec.paneId) {
           try {
             await deps.host.kill(rec.paneId);
             rec.runtimeState = 'exited';
@@ -1596,6 +1691,7 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
       const rec = tasks.get(id);
       return rec ? toView(rec) : undefined;
     },
+    checkpoint, getContext, proposeContextDelta,
     proposeTask, proposeSubtask, awaitTask, reviseTask, clarify, review, cancel,
     getContract, respond, awaitContract, reportProgress, reportBlocker, reply, awaitReply, submitEvidence, awaitVerdict,
     rehydrate, resumeChecks, respawn,

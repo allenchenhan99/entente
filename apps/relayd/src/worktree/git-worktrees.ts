@@ -87,7 +87,7 @@ export class GitWorktreeManager implements WorktreeManager {
     fs.symlinkSync(source, target, 'dir');
   }
 
-  async create(repoRoot: string, task: TaskContract, dependencyBranches: string[]): Promise<WorktreeInfo> {
+  async create(repoRoot: string, task: TaskContract, dependencyBranches: string[], baselineRef = 'HEAD'): Promise<WorktreeInfo> {
     await this.ensureRelayIgnored(repoRoot);
     const worktreePath = path.join(repoRoot, '.relay', 'wt', task.id);
     const branch = `relay/${task.id}`;
@@ -101,10 +101,12 @@ export class GitWorktreeManager implements WorktreeManager {
       return { path: worktreePath, branch, base: this.readBase(repoRoot, task.id) };
     }
 
+    // Freeze the requested committed baseline before creating the branch. Resumes above keep their original base.
+    const baseline = (await this.git(['rev-parse', '--verify', '--end-of-options', `${baselineRef}^{commit}`], repoRoot)).stdout.trim();
     fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
     let worktreeAdded = false;
     try {
-      await this.git(['worktree', 'add', worktreePath, '-b', branch, 'HEAD'], repoRoot);
+      await this.git(['worktree', 'add', worktreePath, '-b', branch, baseline], repoRoot);
       worktreeAdded = true;
       for (const dependencyBranch of dependencyBranches) {
         await this.git(['merge', '--no-edit', dependencyBranch], worktreePath);

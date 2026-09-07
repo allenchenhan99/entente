@@ -122,11 +122,11 @@ export async function resolvePorts(
   const repair = (await fromModule<RepairPolicy>(repairMod, FACTORIES.repair, [deps], log)) ?? fake('repair', fakeRepair);
   const useLaunch = config.host !== 'fake';
   // The relay and relayterm hosts record casts under the run directory, so they alone need config-derived deps.
-  const hostDeps = config.host === 'relay' || config.host === 'relayterm' ? { relayDir: config.relayDir, runId: config.runId } : {};
+  const hostDeps = config.host === 'relay' || config.host === 'relayterm' ? { relayDir: config.relayDir, runId: config.runId, env } : { env };
   const host = (useLaunch ? await fromModule<TerminalHost>(launchMod, FACTORIES.host, [config.host, hostDeps], log) : undefined) ?? fake('host', fakeHost);
   const runtimes = {} as Record<RuntimeKind, AgentRuntime>;
   for (const kind of ['claude-code', 'codex'] as RuntimeKind[]) {
-    const real = useLaunch ? await fromModule<AgentRuntime>(launchMod, FACTORIES.runtime, [kind, {}], log) : undefined;
+    const real = useLaunch ? await fromModule<AgentRuntime>(launchMod, FACTORIES.runtime, [kind, { env }], log) : undefined;
     runtimes[kind] = real ?? fake(`runtime:${kind}`, () => fakeRuntime(kind));
   }
   const brainInstructions = (launchMod as { brainInstructions?: (id: string) => string } | undefined)?.brainInstructions;
@@ -136,6 +136,7 @@ export async function resolvePorts(
 }
 
 export interface RunningRelayd {
+  fakes: string[];
   server: ServerType;
   port: number;
   url: string;
@@ -178,6 +179,7 @@ export async function main(env: Record<string, string | undefined> = process.env
     store, ...ports, repoRoot: config.repoRoot, relayDir: config.relayDir, mcpUrl: `${url}${routes.mcp}`,
     log: (m) => console.error(`relayd: ${m}`),
     annotations,
+    retainCompletedAgents: env.RELAY_RETAIN_COMPLETED_AGENTS === '1',
   });
   const app = createApp({ orchestrator, store, auth, repoRoot: config.repoRoot });
   // RELAY_HOST=relay: relayd hosts the agent terminals itself (PRD §23): pane routes + WebSocket upgrade.
@@ -214,11 +216,14 @@ export async function main(env: Record<string, string | undefined> = process.env
 
   const close = async () => {
     tracker.stop();
+    // Stop accepting reconnects and close long-lived SSE clients before awaiting shutdown.
+    const serverClosed = new Promise<void>((resolve) => server.close(() => resolve()));
+    if ('closeAllConnections' in server) server.closeAllConnections();
     // termd goes with the daemon (its panes get SIGHUP as the ptys close); casts are already on disk.
     if (termd) await termd.stop();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await serverClosed;
   };
-  return { server, port, url, orchestrator, close };
+  return { server, port, url, orchestrator, close, fakes: ports.fakes };
 }
 
 const isEntry = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;

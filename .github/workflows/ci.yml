@@ -27,6 +27,12 @@ jobs:
       - run: npm ci
       - run: npx tsc -b
       - run: npx vitest run
+      - name: checkpoint study harness (no live models)
+        run: |
+          node --test experiments/checkpoint-study/*.test.mjs
+          python3 experiments/checkpoint-study/analysis/rollout-coverage.test.py
+          python3 experiments/checkpoint-study/analysis/verify-usage.test.py
+          python3 experiments/checkpoint-study/analysis/reconcile-reviews.test.py
       - name: demo app
         run: cd demo-repo && npm ci && npx vitest run && npx tsc --noEmit
       - name: protocol docs are up to date

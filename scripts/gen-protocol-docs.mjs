@@ -7,6 +7,8 @@ import * as P from '../packages/protocol/dist/index.js';
 const schemas = {
   TaskContract: P.TaskContract, TaskContractInput: P.TaskContractInput, ContractResponse: P.ContractResponse,
   EvidenceSubmission: P.EvidenceSubmission, EvidenceRecord: P.EvidenceRecord, RepairContract: P.RepairContract,
+  CheckpointFact: P.CheckpointFact, CheckpointEntry: P.CheckpointEntry, CheckpointSelection: P.CheckpointSelection,
+  CheckpointPacket: P.CheckpointPacket, CheckpointDelta: P.CheckpointDelta, CheckpointOperation: P.CheckpointOperation,
   Mission: P.Mission, Event: P.Event, State: P.State, LintResult: P.LintResult,
 };
 fs.mkdirSync('docs/schema', { recursive: true });
