@@ -1,0 +1,9 @@
+Committed locally (not pushed), commit `9b5baf0`.
+
+**Case 15 (Kyoto, 4 days, A/G/F) — summary:**
+
+Both systems scored clean on all six metrics — a first for this series. 二年坂 (VISITED) had zero leakage in both. 三年坂 (PASSED_BY, geographically adjacent to 二年坂) correctly remained schedulable in both — TripGenie explicitly reasoned through the user's stated distinction; Traivial's `reason` field cited the real dwell evidence, and independently calling `presenters._visit_evidence_kind()` confirmed `"path_dwell"`. The no-coordinate teahouse was honestly declined by both, with no fabricated address — TripGenie even offered 5 concrete follow-up clues; Traivial's `caveats` cited missing coordinates + confidence below 0.60 threshold, and `is_complete=false` correctly reflects the unresolved item.
+
+**Must-visit 東寺 survived in both outputs** — candidate count (11) exactly matched capacity (4×3=12), so this case triggered neither the capacity-truncation nor boundary-day-wipeout mechanisms seen repeatedly in cases 06-14, letting both systems handle A/G/F cleanly without algorithmic interference. TripGenie additionally dropped 嵐山竹林 with explicit reasoning and added a bonus stop (祇園) not in the candidate list.
+
+Screenshots (5 TripGenie panels + 1 Traivial render) were all read and verified via the Read tool; harness output was captured from the real `case15_traivial_harness.py` run (`PYTHONPATH=. PYTHONIOENCODING=utf-8 python ...`). Files: `docs/experiments/trip_com_tool_benchmark_2026-09.md` (§ 案例15), `docs/experiments/trip_com_tool_benchmark_2026-09/case15_traivial_harness.py`, `case15_traivial.json`, and `screenshots/case15_tripgenie_{1..5}.png` / `case15_traivial_render.png`.

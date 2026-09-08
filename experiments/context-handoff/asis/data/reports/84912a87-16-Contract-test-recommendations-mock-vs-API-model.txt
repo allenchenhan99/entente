@@ -1,0 +1,39 @@
+## Summary
+
+I've successfully extended mock/model contract-test coverage to the `recommendations` endpoint. Here's what was accomplished:
+
+### Findings
+
+**No existing test found** — `grep "mock/recommendations.json"` in tests/ returned no matches.
+
+**New test created:** `tests/test_api_contract_mock_recommendations_next.py`
+- Follows the established pattern from `test_api_contract_mock_combos_next.py`
+- Validates `web/mock/recommendations.json` against `RecommendationsResponse` model
+
+### Real Drift Discovered
+
+The contract test identified **20 validation errors** showing substantive divergence between the mock fixture and the real API model:
+
+**Envelope-level missing fields:**
+- `pace_points`, `trip_days`, `suggested_count`, `limit`, `candidate_pool`, `diversity_applied`, `fetched_at` (envelope), `freshness`
+
+**Per-item missing fields (all 4 recommendations affected):**
+- `score`, `score_parts`, `evidence.freshness`
+
+### Test Results
+
+```
+Test output: FAILED
+- 1 failed: test_api_contract_mock_recommendations_next.py
+- 20 validation errors reported with precise paths and field names
+
+P1.3 tier regression: 347 passed, 2297 deselected ✓
+```
+
+**Code locations for review:**
+- Mock: `web/mock/recommendations.json:1–123`
+- Real model: `traivial/server/api_models.py:RecommendationsResponse` (line 800)
+- Item model: `traivial/server/api_models.py:RecommendationItemResponse` (line 783)
+- Frontend consumption: `web/js/api.js:applyMockRecommendations()` (line 795)
+
+The test file is ready at `D:\vscode_python\unvisited\tests\test_api_contract_mock_recommendations_next.py`. The main agent can review the exact validation errors and decide whether to fix the mock or adjust the model as appropriate.

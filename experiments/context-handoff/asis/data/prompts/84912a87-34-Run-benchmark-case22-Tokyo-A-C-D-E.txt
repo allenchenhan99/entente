@@ -1,0 +1,74 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-21 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-21 writeups are good templates for concise-but-rigorous format. This case has a DEPARTURE constraint only (no arrival constraint stated) — per case08/09/17's confirmed bug, leaving `outbound_arrival` unset while calling `apply_live_constraints()` will wipe Day 1 too (not just correctly constrain the departure day). To test the INTENDED constraint (only departure/return-area/lowered-capacity matter) without re-triggering the arrival-side bug, set a reasonable normal arrival time (e.g. "09:00", meaning "arrived early morning, no special constraint") — note this as a deliberate workaround in your write-up, same as case16 did.
+
+## Your assigned case: Case 22
+
+**City**: Tokyo. **Days**: 5 (dates 2026-11-14 to 2026-11-18).
+**Categories**: A (already-visited exclusion), C (departure constraint), D (daily capacity lowered to 2/day), E (stay area fixed to 秋葉原/Akihabara).
+**Already visited (VISITED, exclude)**: 秋葉原電器街 (Akihabara Electric Town) — note: this is ALSO the stay area name, which is a deliberate stress-test of whether the system gets confused between "the area you're staying in" and "the specific attraction within it you've already done" — they are related but not identical (staying in Akihabara doesn't mean you've done everything there).
+**Arrival**: 09:00 on day 1 (normal, not a real constraint — see note above).
+**Departure constraint**: last day (2026-11-18), flight departs 09:00 — very early, essentially nothing schedulable that day, must be back at Akihabara hotel well before to collect luggage.
+**Stay area**: 秋葉原 (Akihabara), fixed.
+**Must-visit**: 台場 (Odaiba) — deliberately far from the stay area, to add to the geographic-proximity dataset (cases 11/14/19 already explored this; this is a 4th data point, this time also combined with a lowered capacity).
+**Other candidates (12)**: 上野公園, 淺草寺, 谷中銀座, 神樂坂, 代官山蔦屋書店, 下北澤, 三鷹之森吉卜力美術館, 東京鐵塔, 晴空塔, 澀谷, 六本木之丘, 明治神宮.
+**Daily capacity**: 2/day. **Party**: 2 adults.
+
+## Oracle (write down before testing)
+- 秋葉原電器街 (the specific attraction, VISITED) must NOT appear in either output — but the stay area being "Akihabara" should NOT cause the system to also exclude/confuse other Akihabara-area things if any were in the candidate list (there aren't any others here, so this is really just testing the exclusion itself doesn't get "smeared" onto the area concept).
+- 台場 (must-visit, far from stay area) should appear if feasible — but per the extensive established pattern, do NOT assume.
+- Last day (2026-11-18, 09:00 departure) should have 0 stops.
+- No day should exceed 2 stops (5 days × 2 = 10 max, minus last day's 0 = 8 effective slots for 4 days).
+- Stay area Akihabara throughout.
+- 13 total candidates (1 must-visit + 12 others) vs ~8 effective slots — real scarcity too, this case combines B+C+D+E even though not formally labeled B in the matrix.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 2, "住宿請安排在秋葉原", "我已經去過秋葉原電器街這個景點（有明確逛過紀錄）請不要排進行程，但住宿還是在秋葉原區域沒問題", "最後一天(2026/11/18)早上09:00班機，幾乎沒有時間安排行程", must-visit 台場, other 12 candidates, ask for day-by-day with reasons.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case22_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — build_itinerary + apply_live_constraints)
+- Template: case16's workaround pattern (normal arrival time + real departure constraint).
+- Real approximate Tokyo coordinates (reuse from case01/13/18 harnesses: Akihabara ~35.6984,139.7731, Odaiba ~35.6267,139.7752, Ueno Park ~35.7141,139.7744, Sensoji ~35.7148,139.7967, Yanaka Ginza ~35.7278,139.7663, Kagurazaka ~35.7017,139.7402, Daikanyama ~35.6486,139.7031, Shimokitazawa ~35.6613,139.6683, Ghibli Museum ~35.6960,139.5704, Tokyo Tower ~35.6586,139.7454, Skytree ~35.7101,139.8107, Shibuya ~35.6595,139.7005, Roppongi Hills ~35.6605,139.7292, Meiji Shrine ~35.6764,139.6993).
+- VISITED verdict for 秋葉原電器街 with real evidence, UNVISITED for rest.
+- base_area="東京 秋葉原" on ComboOption; FlightQuote `outbound_arrival="09:00"`, `return_departure="09:00"` on the LAST day (2026-11-18).
+- After build_itinerary, set `area_lat`/`area_lng` to real Akihabara coordinates on every ItineraryDay via replace() before calling apply_live_constraints (required, see case02/05/09/11/14/19 harnesses).
+- `max_stops_per_day=2`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case22_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case22_traivial_harness.py`, capture real output — report VISITED leakage, whether 台場 survived, last-day stop count, `len(result["days"])` vs expected 5.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case22_traivial.json`, screenshot to `screenshots/case22_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例22（東京，5天，情境A/C/D/E）` to the benchmark .md, concise bullet format matching case06-21: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. Discuss both the VISITED-vs-stay-area-name confusion test and the 4th geographic-proximity data point for 台場.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, whether 秋葉原電器街 leaked despite the area-name confusion risk, whether 台場 survived, confirmation screenshots/harness were actually created and read, commit hash.

@@ -1,0 +1,17 @@
+Pushed successfully.
+
+## Status report
+
+**Read-only gap audit** (see `docs/TEAM_LOG.md` "P0 資料可信度 gap audit"): P0 items 1–6 (quality-status semantics, provenance, throttle/cache/dedup/budget, fail-closed, no-zero-price, global_certified scoping) were **already implemented and adversarially tested** in the production combo path (`optimize/flights.py`, `optimize/stays.py`, `providers/quote_telemetry.py`, `providers/quote_observation.py`) — confirmed by reading the code and the existing counter-example test suites, not just PRD claims. P0-7 (「供給就緒度 C5」backend determination) was **not started**: the underlying signals existed but scattered, and the one module named for evidence-completeness (`m3_evidence_guard_next.py`) was self-labeled research-only and never wired into the API.
+
+**This turn's concrete P0 work:** designed and implemented C5 myself (contract/integration work, not delegated, per `AGENTS.md`'s rule that this stays with the main agent):
+- `SupplyReadiness`/`_supply_readiness()` in `traivial/optimize/combo.py` — pure aggregation of already-computed fields (quote staleness, per-option stay geolocation, per-option route evidence scope, date-supply completeness, unresolved must-visit gaps, frontier certification) into one `ready`/`partial`/`insufficient` verdict with machine-readable reasons. No new provider calls, no query-budget impact.
+- Wired through `server/state.py` and `server/api_models.py` into `/api/combos`'s response, with a conservative safe-default on error/demo paths.
+- Documented in `web/API_CONTRACT.md`.
+- 9 new adversarial/contract tests (`tests/test_supply_readiness_next.py`) — happy path plus one counter-example per blocking dimension.
+
+**Tests run:** `p1_3` tier 347 passed (was 338); `unit` tier 965 passed/19 skipped; targeted combo/server/contract suites 519 passed/13 skipped. No `full`/`browser`/`external` this round. External query count: 0.
+
+**Housekeeping:** found and committed pre-existing uncommitted pytest-tier infra (`AGENTS.md`, `CLAUDE.md`, `pytest.ini`, `tests/conftest.py`) that matched already-documented work but had never been committed — kept separate from my feature commit per the no-revert rule. One remote branch race during push, resolved via rebase (no conflicts). All 4 commits pushed to `master`.
+
+**Open risks / next steps:** `quote_observation.py`'s unified normalizer is still only used by a gated research/opt-in endpoint, not the production combo path — a possible future consolidation, not a P0 gap since the production path has its own tested semantics. `supply_readiness` is currently envelope-level only; per-option readiness could follow if the product wants finer granularity. Untracked working-tree items (`.reference/`, `scripts/`, screenshots) left untouched — not in scope this round.

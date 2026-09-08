@@ -1,0 +1,48 @@
+## PASS — Provider Failures Are Excluded, Not Fabricated
+
+**Criterion Met:** When providers fail (timeout, 429/CAPTCHA, empty results, selector drift), the optimizer does NOT receive fabricated zero-price or synthetic quotes.
+
+### Evidence of Fail-Closed Guards
+
+**1. flights.py lines 821–823 — Price validation**
+```python
+price = parse_price(row.get("price"))
+if price is None:
+    continue  # Skip rows without valid prices entirely
+```
+Legs missing a price are filtered out before reaching downstream logic.
+
+**2. flights.py lines 1091–1099 — Failed date isolation**
+When a date's query fails (e.g., 429, timeout), the exception is caught:
+```python
+except Exception as exc:
+    failures.append(SourceFailure(...))
+    continue  # Skip failed date; no quote added to bucket
+```
+Failed dates contribute to failure records but generate no fallback quote.
+
+**3. stays.py lines 520–530 — Failed area isolation**
+```python
+try:
+    area_quotes = provider.search_area(req, area)
+except Exception as exc:
+    failures.append(SourceFailure(...))
+    continue  # No synthetic data injected
+```
+Failed areas are recorded as failures; no zero-price placeholder is created.
+
+**4. combo.py lines 960–970 — Optimizer input validation**
+```python
+fresh_area_prices = [ap for ap in area_prices 
+                     if not ap.representative.is_stale(...)]
+if not best_flights or not fresh_area_prices:
+    return [], stats  # Returns empty, not fallback options
+```
+If any required component lacks fresh data, the optimizer returns `[]` rather than using stale/synthetic data.
+
+### Test Evidence
+- `test_missing_quotes_are_excluded_without_zero_price_fallback` (test_combo_m3_adversarial.py:103–123): Explicitly validates stale quotes are excluded and no synthetic options generated.
+- `test_combo.py`: 134 tests pass, including failure-path scenarios.
+- Direct verification: Solo stale/zero-price data produces 0 options (not used as fallback).
+
+**Outcome:** The system correctly fails closed—unavailable provider data results in option reduction or error escalation, never in masked fake quotes reaching the Pareto frontier.

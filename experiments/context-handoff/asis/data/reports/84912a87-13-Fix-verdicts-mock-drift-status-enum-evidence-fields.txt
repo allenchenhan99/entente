@@ -1,0 +1,67 @@
+Perfect! All tests pass. Let me now generate a detailed report of the changes:
+
+## Summary of Changes
+
+I successfully fixed `web/mock/verdicts.json` to match the actual `VerdictResponse` Pydantic model. Here are the exact changes:
+
+### Bug 1: Status Enum Fix (5 entries)
+Changed wire value from `"unvisited"` (incorrect) to `"traivial"` (correct per schemas.py:56) for:
+- **p_arashiyama** (nature category, area place)
+- **p_arabica** (food category) 
+- **p_umeda** (attraction category)
+- **p_nakazaki** (food category)
+- **p_katsuoji** (nature category)
+
+### Bug 2: Added 6 Missing Required Fields to All 17 Entries
+
+**visit_evidence_kind** computation (per presenters.py:370-398):
+- **"stay_segment"** (7 entries): p_kiyomizu, p_kinkakuji, p_fushimi, p_dotonbori, p_nishiki, p_kuromon, p_kyoto_sta — all have non-empty `matched_segment_ids`
+- **"path_dwell"** (1 entry): p_gion — has empty `matched_segment_ids` but complete dwell/distance/date evidence
+- **"none"** (9 entries): all status=traivial/unknown — status not in (visited, passed_by)
+
+**is_inferred_visit** = `visit_evidence_kind == "path_dwell"`:
+- true: p_gion only
+- false: all others
+
+**needs_confirmation** = `(visit_evidence_kind == "path_dwell") AND (not overridden_by_user)`:
+- true: p_gion only (path_dwell + user override = false)
+- false: all others
+
+**confirmation_reason**:
+- `"path_dwell_without_stay_segment"`: p_gion only
+- null: all others
+
+**effective_match_radius_meters / effective_match_radius_kind** (per presenters.py:331-355):
+
+| Place | Category | Area Place? | Evidence Kind | Radius (m) | Kind |
+|-------|----------|-------------|---------------|------------|------|
+| p_kiyomizu | attraction | No | stay_segment | 150 | category_rule |
+| p_kinkakuji | attraction | No | stay_segment | 150 | category_rule |
+| p_fushimi | attraction | No | stay_segment | 150 | category_rule |
+| p_dotonbori | attraction | No | stay_segment | 150 | category_rule |
+| p_nishiki | shopping | No | stay_segment | 150 | category_rule |
+| p_gion | attraction | No | path_dwell | 300 | path_dwell |
+| p_kuromon | shopping | No | stay_segment | 150 | category_rule |
+| p_kyoto_sta | transit | No | stay_segment | 200 | category_rule |
+| **p_arashiyama** | nature | **Yes** (contains "竹林"+"小徑") | none | **450** | **area_place** |
+| p_arabica | food | No | none | 80 | category_rule |
+| p_umeda | attraction | No | none | 150 | category_rule |
+| p_nakazaki | food | No | none | 80 | category_rule |
+| p_katsuoji | nature | No | none | 400 | category_rule |
+| p_shinsekai | attraction | No | none | 150 | category_rule |
+| p_kifune | nature | No | none | 400 | category_rule |
+| p_teamlab | attraction | No | none | 150 | category_rule |
+| p_tachinomi | food | No | none | null | null |
+
+**Key technical details:**
+- p_arashiyama: `_effective_rule_for_place()` applies area multiplier: min(450, 400×3.0) = 450 for match_radius
+- p_gion: `_path_dwell_radius()` = min(300, 150×2.0, 400) = 300
+- p_tachinomi: null radius because `has_coords = false` (no lat/lng in places.json)
+
+### Test Results
+
+✅ **Contract test:** `test_api_contract_mock_verdicts_next.py` — **1 passed**
+✅ **P1.3 regression:** 347 passed (baseline, no regressions)
+✅ **Browser tier:** 6 passed (frontend mock rendering)
+
+All 17 entries now exactly match the VerdictResponse schema with correct computed fields.

@@ -1,0 +1,11 @@
+Report delivered to the team lead. Summary of what I produced:
+
+**Full report sent** covering the alt/aggregated-data domain (ownership, insider, analyst, macro, news/sentiment), structured per the brief:
+
+1. **Signal-quality honesty** — Form 4 insider (opportunistic-filtered) is the highest, most underrated signal; 13F is moderate but badly abused as "real-time"; analyst revisions are strong *only* if point-in-time; calendars = event-avoidance utility; macro = regime gate not alpha; **news sentiment scores = the most over-hyped, lowest-trust item**.
+2. **Primaries** — EDGAR (13F, Form 4 due in 2 biz days, 13D), FRED/ALFRED *vintaged* series, Treasury curve, with native timestamps.
+3. **Vendor failure modes** — FMP/I-B-E-S-class: consensus PIT misalignment/restatement, backfill & survivorship, 13F 45-day-lag staleness sold as real-time, sentiment black-box non-reproducibility, news timestamp leakage, calendar restatement.
+4. **Verification protocol** — six tests (primary-trace ≥99% match, mandatory `available_at` with modeled 13F lag, sentiment reproducibility, coverage/backfill, event-time leakage, cross-source) with explicit pass/fail and a quarantine rule.
+5. **Acceptance checklist + 4-tier trust ranking** (T1 primaries → T4 quarantine for all vendor sentiment scores).
+
+Grounded with 4 web searches; source URLs included in-message. The message is fully self-contained for synthesis. Key file paths were not relevant to this research task — no code was produced.

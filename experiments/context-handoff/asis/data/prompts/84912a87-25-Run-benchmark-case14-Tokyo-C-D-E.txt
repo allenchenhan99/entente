@@ -1,0 +1,72 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-13 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-13 writeups are good templates for concise-but-rigorous format. IMPORTANT: this case has BOTH arrival and departure constraints — set BOTH `outbound_arrival` and `return_departure` explicitly on the FlightQuote (per case11's finding, setting both correctly avoids the null-default bug from cases08/09, but watch for the case11-style deeper issue: build_itinerary's geo-clustering runs BEFORE apply_live_constraints and may still strand the must-visit item on a day that gets wiped — check for this specifically and report honestly either way).
+
+## Your assigned case: Case 14
+
+**City**: Tokyo. **Days**: 3 (dates 2026-11-14 to 2026-11-16).
+**Categories**: C (both arrival and departure clock constraints), D (daily capacity lowered to 2/day), E (stay area fixed to 上野/Ueno).
+**Arrival constraint**: flight arrives 15:00 on day 1.
+**Departure constraint**: flight departs 11:00 on day 3.
+**Stay area**: 上野 (Ueno), fixed.
+**Must-visit**: 上野公園 (Ueno Park) — deliberately chosen to be IN the stay area itself, as a test of whether that helps it survive better than a must-visit elsewhere would (contrast with case11 where the must-visit was NOT in the stay area and got lost).
+**Other candidates (6)**: 淺草寺, 秋葉原電器街, 谷中銀座, 上野動物園, 阿美橫丁, 東京國立博物館.
+**Daily capacity**: 2/day. **Party**: 2 adults.
+
+## Oracle (write down before testing)
+- 上野公園 (must-visit, also happens to be in the stay area) should appear if at all feasible — this is a genuinely easy case for it to survive since it's geographically central to the stay area.
+- Day 1 (15:00 arrival) should have 0-1 stops given a decent chunk of the afternoon/evening is usable.
+- Day 3 (11:00 departure) should have 0 stops (too early to fit anything before an 11am flight with checkout).
+- No day should exceed 2 stops.
+- Stay area Ueno throughout.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 2, "住宿請安排在上野", "第一天下午15:00才抵達東京", "最後一天早上11:00班機", must-visit 上野公園, other 6 candidates, ask for day-by-day with reasons.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case14_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — build_itinerary + apply_live_constraints, both clocks set)
+- Template: case11's harness pattern (both arrival and departure set, FixtureRouteProvider/FixtureHoursProvider synthetic, no live queries).
+- Real approximate Tokyo coordinates (Ueno Park ~35.7141,139.7744, Sensoji ~35.7148,139.7967, Akihabara ~35.6984,139.7731, Yanaka Ginza ~35.7278,139.7663, Ueno Zoo ~35.7161,139.7714, Ameyoko ~35.7093,139.7745, Tokyo National Museum ~35.7188,139.7765).
+- All UNVISITED verdicts.
+- base_area="東京 上野" on ComboOption; FlightQuote `outbound_arrival="15:00"`, `return_departure="11:00"`.
+- After build_itinerary, set `area_lat`/`area_lng` to real Ueno coordinates (~35.7141,139.7744) on every ItineraryDay via replace() before calling apply_live_constraints (required, see case02/05/09/11 harnesses).
+- `max_stops_per_day=2`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case14_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case14_traivial_harness.py`, capture real output — report Day1/2/3 stop counts explicitly, and whether 上野公園 survived (this is the key test: does being IN the stay area protect the must-visit better than case11's must-visit that wasn't).
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case14_traivial.json`, screenshot to `screenshots/case14_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例14（東京，3天，情境C/D/E）` to the benchmark .md, concise bullet format matching case06-13: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. Specifically discuss whether 上野公園 surviving or not (compared to case11's loss) tells us anything about WHEN the architectural gap bites (e.g. only when must-visit is geographically distant from the stay area, since that's what determines which day it gets clustered onto).
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, Day1/2/3 stop counts for Traivial, whether 上野公園 survived, confirmation screenshots/harness were actually created and read, commit hash.

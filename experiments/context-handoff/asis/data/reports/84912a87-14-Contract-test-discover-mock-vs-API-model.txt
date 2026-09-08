@@ -1,0 +1,8 @@
+**Task complete.** I've created `tests/test_api_contract_mock_discover_next.py` following the pattern from `test_api_contract_mock_combos_next.py`. 
+
+The test successfully validates the discover mock fixture against the real `DiscoverResponse` Pydantic model and uncovered **11 validation errors** indicating real contract drift:
+
+- Missing top-level fields: `generated_at`, `origin`
+- Missing per-candidate fields: `unvisited_count`, and `lat`/`lng` in each candidate's `best_combo.stay` object
+
+The test output, P1.3 suite results (347 passed), and precise file:line references have been reported to the main agent for review and decision on the fix.

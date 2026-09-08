@@ -1,0 +1,75 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-18 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+NOTE: a previous attempt at this exact case failed mid-task due to an account API rate limit (now reset). Check the benchmark doc and the screenshots/JSON directories first to confirm nothing case19-related was partially created and left in a broken state — if you find partial `case19_*` files from the failed attempt, decide whether to clean up and redo, or continue from them, based on what's actually complete and valid.
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-18 writeups are good templates for concise-but-rigorous format. This case has BOTH arrival and departure constraints — set BOTH explicitly (per case11's finding, setting both correctly avoids the null-default day-wipe bug from cases08/09/17, but per case11/14's finding, the must-visit can still get lost via geo-clustering onto a day that later gets wiped — check for this specifically).
+
+## Your assigned case: Case 19
+
+**City**: Kyoto. **Days**: 3 (dates 2026-11-14 to 2026-11-16).
+**Categories**: C (both arrival 15:00 and departure 11:30 clock constraints), D (daily capacity 3/day), E (stay area fixed to 河原町/Kawaramachi).
+**Arrival constraint**: flight arrives 15:00 on day 1.
+**Departure constraint**: flight departs 11:30 on day 3.
+**Stay area**: 河原町 (Kawaramachi), fixed.
+**Must-visit**: 錦市場 (Nishiki Market) — deliberately chosen because it's geographically very close to Kawaramachi (unlike case11's must-visit which was far from the stay area and got lost), to further test the geographic-proximity hypothesis raised (and refuted for Tokyo/Ueno) in case14.
+**Other candidates (8)**: 清水寺, 伏見稻荷大社, 嵐山竹林, 金閣寺, 二條城, 祇園花見小路, 二年坂三年坂, 平安神宮.
+**Daily capacity**: 3/day. **Party**: 2 adults.
+
+## Oracle (write down before testing)
+- 錦市場 (must-visit, very close to stay area) should appear if at all feasible.
+- Day 1 (15:00 arrival) should have 0-1 stops.
+- Day 3 (11:30 departure) should have 0 stops.
+- No day should exceed 3 stops.
+- Stay area Kawaramachi throughout.
+- This case, combined with case11 (must-visit far from stay area, lost) and case14 (must-visit IN stay area, still lost), is the third data point testing whether geographic proximity protects must-visit items — do NOT assume the outcome, run it and report honestly.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 3, "住宿請安排在河原町", "第一天下午15:00才抵達京都", "最後一天早上11:30班機", must-visit 錦市場, other 8 candidates, ask for day-by-day with reasons.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case19_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — build_itinerary + apply_live_constraints, both clocks set)
+- Template: case11/14's harness pattern (both arrival and departure set, FixtureRouteProvider/FixtureHoursProvider synthetic, no live queries).
+- Real approximate Kyoto coordinates (reuse from case03/04/06/15 harnesses: Kawaramachi ~35.0037,135.7700, Nishiki Market ~35.0051,135.7649, Kiyomizu ~34.9949,135.7850, Fushimi Inari ~34.9671,135.7727, Arashiyama ~35.0094,135.6720, Kinkakuji ~35.0394,135.7292, Nijo Castle ~35.0142,135.7481, Gion ~35.0037,135.7752, Ninenzaka ~34.9963,135.7807, Heian Shrine ~35.0161,135.7822).
+- All UNVISITED verdicts.
+- base_area="京都 河原町" on ComboOption; FlightQuote `outbound_arrival="15:00"`, `return_departure="11:30"`.
+- After build_itinerary, set `area_lat`/`area_lng` to real Kawaramachi coordinates on every ItineraryDay via replace() before calling apply_live_constraints (required, see case02/05/09/11/14 harnesses).
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case19_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case19_traivial_harness.py`, capture real output — report Day1/2/3 stop counts explicitly, `len(result["days"])` vs expected 3 (per case17's day-count bug finding), and whether 錦市場 survived despite being close to the stay area.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case19_traivial.json`, screenshot to `screenshots/case19_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例19（京都，3天，情境C/D/E）` to the benchmark .md, concise bullet format matching case06-18: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. Explicitly connect to the case11/case14 geographic-proximity question.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, Day1/2/3 stop counts for Traivial, whether 錦市場 survived, how this relates to the proximity question from case11/14, confirmation screenshots/harness were actually created and read, commit hash.

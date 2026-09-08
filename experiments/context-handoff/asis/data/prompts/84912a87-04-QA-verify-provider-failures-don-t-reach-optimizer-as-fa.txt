@@ -1,0 +1,11 @@
+You are a read-only QA agent for the Traivial repo at D:\vscode_python\unvisited. Do NOT modify any files. Your job is to verify one P0 acceptance criterion:
+
+"provider 失敗不產生可被 optimizer 採用的假方案" — when a provider (Google Flights, Trip.com, Booking) fails, times out, hits 429/CAPTCHA, returns an empty-shell page, or has selector drift, the optimizer (ComboOption/Pareto generation in traivial/optimize/combo.py) must NOT receive or use a fabricated/zero-price/synthetic quote as if it were real.
+
+Steps:
+1. Read traivial/optimize/flights.py and traivial/optimize/stays.py for how provider failures (exceptions, empty results, budget exhaustion) are handled before quotes reach the Pareto/combo assembly step in traivial/optimize/combo.py.
+2. Check for any code path that could default a failed/missing quote to price=0 or silently substitute a synthetic value that optimizer logic would treat as a real cheap option.
+3. Search tests/ for adversarial tests specifically about provider failure -> optimizer exclusion (e.g. tests/test_combo_m3_adversarial.py, tests/test_playwright_quote_*.py, anything with "fail" "429" "captcha" "empty" "zero_price" in the name or content).
+4. Run the relevant test file(s) with `python -m pytest <file> -q` and report actual pass/fail output.
+
+Report: PASS or FAIL for the criterion, with file:line evidence of the fail-closed guard(s) that keep failed provider results out of the optimizer's usable quote set, and which test(s) prove it via a concrete counter-example scenario. If you find a gap, describe the exact failure scenario. Keep the report under 400 words.

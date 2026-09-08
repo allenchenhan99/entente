@@ -1,0 +1,45 @@
+## QA Verification Complete: Query Telemetry Reporting — **FAIL**
+
+I've completed the P0 acceptance criterion verification for query telemetry. Here's the summary:
+
+### Data Structure Layer ✓
+
+The telemetry tracking infrastructure is **complete and correct**:
+- **traivial/providers/quote_telemetry.py** — `TelemetryEvent` (lines 73–93) tracks all four dimensions:
+  - `query_count: int` (line 81)
+  - `retry_count: int` (line 82)
+  - `cache_hit: bool` (line 79)
+  - `budget_exhausted: bool` (line 85)
+- **TelemetryLedger** aggregates query_count and retry_count via properties (lines 101–106)
+- `to_dict()` serializes complete event records (line 112–115)
+
+### API Response Layer ✗
+
+The API **does not properly expose** all four metrics:
+
+1. **LiveProviderTelemetryResponse** (api_models.py:521–530):
+   - ✓ `query_count` — working
+   - ✗ `cache_hit_count` — declared but hardcoded to `None` (line 530)
+   - ✗ `remaining_budget` — hardcoded to `None`, not `budget_exhausted` (line 527)
+   - ✗ **`retry_count` missing entirely**
+
+2. **QuoteObservationResponse** (api_models.py:492):
+   - `telemetry` is a generic `dict[str, Any]` without schema
+   - Inconsistent: failure cases set `retry_count` (app.py:1696) but success cases omit it (app.py:1750)
+   - **Missing:** `cache_hit`, `budget_exhausted`
+
+3. **Presenter Layer** (presenters.py:249–258):
+   - `_live_provider_query_telemetry()` returns only `query_count` with all other fields as `None`
+   - Comment (line 525–526) admits: "does not return provider budget/counter breakdowns"
+
+### Test Results
+
+✓ **19/19 tests pass** (test_quote_telemetry_next.py)
+- But tests only verify **internal data tracking**, not API surface exposure
+- No tests assert that `retry_count`, `cache_hit_count`, or `budget_exhausted` reach HTTP responses
+
+### Verdict
+
+**FAIL** — The criterion requires the system to "回報" (report) query, retry, cache hit, and budget exhausted per request. While the backend correctly tracks all four, the API contract incompletely exposes them. To pass, `LiveProviderTelemetryResponse` must add `retry_count: int`, `cache_hit_count: int`, and `budget_exhausted: bool` fields, populated from TelemetryEvent data.
+
+Report sent to team.

@@ -1,0 +1,14 @@
+Report delivered to the team lead. Summary of what I found:
+
+**Key insight:** Live option chains, single-name IV, and greeks are cheap-to-free. The genuinely scarce/expensive part is **deep point-in-time historical IV surfaces** with delisted names (survivorship-clean) — that's what OptionMetrics IvyDB charges enterprise/academic rates for.
+
+**Realistic free path to close the gap now ($0):**
+- VIX family + term structure + single-name vol indices — free from CBOE/FRED/Yahoo
+- CFTC COT futures positioning — free Socrata API + `cot_reports` Python lib
+- Tradier (free sandbox) / yfinance for live chains + IV + greeks — start logging your own EOD panel *forward* to build a PIT history
+
+**When ready for a real signal (~$50–100/mo):** ORATS (best value — clean single-name IV surface, constant-maturity deltas, IV rank/skew; direct or via Nasdaq Data Link OPT2), or Polygon/Massive options add-on (~$79+).
+
+**Skip unless funded:** OptionMetrics IvyDB (via WRDS if there's a university tie), Bloomberg, CBOE full trade-by-trade.
+
+The full report with every provider grounded in a real URL + 2026 pricing, per-category priority ratings, and PIT/survivorship caveats is in the message to the lead.

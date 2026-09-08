@@ -1,0 +1,27 @@
+Project: A-D-Aperture "Data" repo at D:\AD (Windows). Server via `ssh lab` (repo lab:~/AD). Python 3.12, stdlib only. Task: build a SEC EDGAR XBRL "frames" dataset — one financial metric across ALL US filers per period — into ad.sqlite. FREE first-hand SEC data, NO api key.
+
+FACTS (verified):
+- Endpoint: `https://data.sec.gov/api/xbrl/frames/us-gaap/{TAG}/USD/{PERIOD}.json` — returns `{"taxonomy","tag",...,"data":[{"accn","cik","entityName","loc","start","end","val"},...]}`. MUST send header `User-Agent: A-D-Aperture research pangyenwang@gmail.com` and stay under 10 requests/sec (use a ~0.15s delay between calls). Some (tag,period) combos 404 → skip gracefully.
+- DURATION tags (income/cash-flow flows) use period `CY{year}Q{q}` (e.g. CY2023Q1). INSTANT tags (balance-sheet levels) use period `CY{year}Q{q}I` (note trailing I) and their data rows have `end` but no `start`.
+- DB engine + conventions: `~/AD/scripts/manage_db.py`, `~/AD/scripts/ad_db.py`; spec template `D:\AD\scripts\ad_datasets\sp500_corporate_actions.py` (surrogate id pk; source_file under data/; Dataset object). Server python is stdlib-only.
+
+DELIVERABLE 1 — `D:\AD\scripts\fetch_sec_frames.py` (stdlib: argparse, csv, json, os, time, urllib). 
+- DURATION_TAGS = ["Revenues","RevenueFromContractWithCustomerExcludingAssessedTax","CostOfRevenue","GrossProfit","OperatingIncomeLoss","NetIncomeLoss","ResearchAndDevelopmentExpense","NetCashProvidedByUsedInOperatingActivities","EarningsPerShareDiluted"]
+- INSTANT_TAGS = ["Assets","Liabilities","StockholdersEquity","LiabilitiesAndStockholdersEquity","CashAndCashEquivalentsAtCarryingValue","AssetsCurrent","LiabilitiesCurrent"]
+- Periods: years `--from-year 2015` to `--to-year 2026`, quarters 1-4 but for 2026 only Q1,Q2. Duration tags use CY{y}Q{q}; instant tags use CY{y}Q{q}I.
+- For each (tag, period): GET the frame; on 200 write one row per company; on 404/error skip. Write ONE CSV `--out data/sec` -> `sec_frames.csv` header EXACTLY: tag,period,cik,entityName,val,start,end,accn  (for instant rows leave `start` empty; `period` = the CY... label as requested). Print progress per tag and a final total (rows, distinct ciks, frames fetched, frames 404).
+- `--self-test`: monkeypatch the HTTP fetch to return a canned 2-company frame for one tag/period, assert 2 rows written with correct columns; print SELF-TEST PASS exit 0.
+
+DELIVERABLE 2 — `D:\AD\scripts\ad_datasets\sec_xbrl_frames.py`: Dataset name `sec_xbrl_frames`, title "SEC XBRL frames — cross-sectional fundamentals (all US filers)", source "SEC EDGAR XBRL frames API", version "2026-08-28", ONE table `facts` src "sec/sec_frames.csv", surrogate id pk, columns after id: tag(TEXT), period(TEXT), cik(TEXT), entityName(TEXT), val(REAL coerce="real"), start(TEXT), end(TEXT), accn(TEXT); indexes ("tag",),("period",),("cik",),("tag","period"). Docstring: each row = one us-gaap fact for one filer for one period, straight from SEC (as-filed). `accn` is the source accession; join cik to map to tickers.
+
+STEP 3 — deploy + run + build ON THE SERVER:
+  `scp D:\AD\scripts\fetch_sec_frames.py lab:~/AD/scripts/` ; `scp D:\AD\scripts\ad_datasets\sec_xbrl_frames.py lab:~/AD/scripts/ad_datasets/`
+  `ssh lab "cd ~/AD && python3 scripts/fetch_sec_frames.py --out data/sec --from-year 2015 --to-year 2026"`  (a few minutes)
+  `ssh lab "cd ~/AD && python3 scripts/manage_db.py --db ad.sqlite build sec_xbrl_frames && python3 scripts/manage_db.py --db ad.sqlite verify | tail -3"`
+
+MANDATORY acceptance — run and paste real output:
+  A) `python D:\AD\scripts\fetch_sec_frames.py --self-test` -> SELF-TEST PASS exit 0.
+  B) local import prints `sec_xbrl_frames ['facts']`.
+  C) server build shows facts rows > 500000 and verify prints `all tables consistent with catalog.`
+  D) `ssh lab "cd ~/AD && python3 scripts/manage_db.py --db ad.sqlite query \"SELECT tag, COUNT(*) n, COUNT(DISTINCT cik) ciks FROM sec_xbrl_frames__facts GROUP BY tag ORDER BY n DESC LIMIT 5\""`
+Boundaries: create only those two files locally + the scp/ssh actions; do not modify other files; never fabricate. If total rows < 100000, treat as FAILURE (period/tag bug) and investigate. After finishing, INDEPENDENTLY re-run A/B/C/D and report the real output + total rows, distinct ciks, and frames-404 count.

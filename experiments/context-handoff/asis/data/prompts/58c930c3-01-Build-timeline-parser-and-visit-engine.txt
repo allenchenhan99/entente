@@ -1,0 +1,53 @@
+你是 Unvisited 專案的 Geo 模組負責人。專案根目錄：`D:\vscode_python\unvisited`
+
+## 專案背景
+Unvisited 的核心是一道減法：使用者「想去的地點清單」⊖「Google 位置歷史證明已經去過的」= 未竟清單。
+你負責的 M2 是整個產品成立與否的關鍵：**判定一個地點使用者到底去過沒有**。
+
+## 先讀這兩個檔案（這是不可修改的契約）
+- `D:\vscode_python\unvisited\unvisited\schemas.py` — 所有跨模組型別。你的輸出必須是 `VisitVerdict`，輸入是 `TimelineData` 與 `list[Place]`。
+- `D:\vscode_python\unvisited\unvisited\geo\config.py` — 判定門檻（已寫好，你可以用，但不要改設計，若發現數值不合理請在最後報告中提出建議而非逕自修改）
+
+## 你要交付的東西
+
+### 1. `unvisited/timeline/parser.py` — Google Timeline 匯出檔解析器
+必須相容以下所有格式（請先上網查證實際格式，參考 https://github.com/mahlernim/google-timeline-visualizer 的實作，該專案處理過同樣問題）：
+- 新版 Android / iOS 直接匯出的 array 格式（頂層是 list）
+- 舊版 `{ "semanticSegments": [...] }` 格式
+- 更舊的 `{ "timelineObjects": [...] }` （placeVisit / activitySegment）格式
+- 座標表示法：字串 `"lat,lng"`、`{"latE7":..., "lngE7":...}`、`geo:lat,lng`、度數字串、`{"latitude":..,"longitude":..}`
+- 跨換日線的路徑
+- 時區：匯出檔可能是 UTC 或帶 offset，需正確轉換
+
+輸出正規化為 `TimelineData`（stays + paths）。無法解析的項目不可靜默丟棄，要寫進 `parse_warnings`。
+
+### 2. `unvisited/geo/match.py` — 造訪比對引擎
+輸入 `TimelineData` + `list[Place]`，輸出 `list[VisitVerdict]`。
+
+必須正確處理這些情境（這是本模組真正的難點）：
+- **停留 vs 路過**：停留時長與距離雙門檻，依 `PlaceCategory` 取不同規則
+- **GPS 漂移**：都市高樓區誤差可達 80 公尺；精度差於 `MAX_TRUSTED_ACCURACY_METERS` 的點不足以支撐 VISITED，要降級成 UNKNOWN
+- **資料涵蓋範圍**：使用者的 Timeline 是 2019–2026。**2019 年以前沒有資料 ≠ 沒去過**，這種情況必須回傳 UNKNOWN 而非 UNVISITED。同理要偵測「某年定位大部分時間關閉」的資料空洞（參考 `MIN_YEARLY_COVERAGE_RATIO`）
+- **多次造訪**：記錄 first_visit / last_visit / visit_count
+- 每個判定都要填 `VisitEvidence`，包含人類可讀的 `note` 說明為什麼這樣判
+
+距離計算用 haversine，注意跨換日線。效能：使用者有 7 年資料，可能數十萬筆 stay，比對 200 個地點時不可 O(n*m) 暴力跑 —— 請用空間索引（自己實作簡單 grid hash 即可，不要引入重量級依賴）。
+
+### 3. `unvisited/timeline/fixtures.py` — 合成測試資料產生器
+使用者的真實 Timeline 還沒拿到，我們必須先能開發與測試。
+寫一個能產生擬真合成 Timeline 的工具：可指定城市、年份範圍、造訪哪些座標幾次、加入 GPS 雜訊、加入資料空洞、產生多種格式的匯出檔。
+
+### 4. `tests/test_timeline.py` + `tests/test_match.py`
+用 pytest。重點測邊界情境：空檔案、單筆資料、跨換日線、跨時區、座標格式混用、資料涵蓋範圍外的地點、精度極差的點、剛好卡在門檻上的停留。
+
+### 5. `docs/CALIBRATION.md`
+寫給使用者看的校準指南：他要如何匯出自己的 Google Timeline（實際步驟，請上網查證 2026 年當前的匯出方式，Google 改過好幾次），以及如何用 20 個他熟悉的地點校準門檻。
+
+## 工作要求
+- Python 3.12，型別註解完整
+- 依賴愈少愈好，標準庫優先。需要新依賴時寫進報告，不要自己裝
+- 註解寫「為什麼」不寫「做什麼」，用繁體中文
+- 完成後跑 pytest 確認全綠，把實際輸出貼在報告裡
+
+## 回報
+完成後簡要報告：做了什麼、測試結果（貼實際輸出）、你認為門檻設定有哪些需要使用者親自校準的、你發現的風險。

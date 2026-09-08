@@ -1,0 +1,44 @@
+Perfect! All deliverables completed and tested. Here's the summary:
+
+## Acceptance Test Results
+
+**A) Self-test run:**
+```
+[symbol_changes] rows=1
+[delisted] rows=1
+[treasury] rows=1
+[economic] rows=8
+SELF-TEST PASS
+```
+
+**B) Dataset imports & structure:**
+```
+OK us_reference ['symbol_changes', 'delisted_companies'] us_macro ['treasury_rates', 'economic_indicators']
+```
+
+**C) AST syntax validation:**
+```
+AST OK
+```
+
+## Deliverable Files
+
+- **D:\AD\scripts\fetch_fmp_marketwide.py** — Market-wide FMP fetcher supporting:
+  - `symbol_changes` (symbol-change endpoint, limit=10000)
+  - `delisted` (delisted-companies endpoint, paginated 0-200, limit=100/page)
+  - `treasury` (treasury-rates endpoint, 2010-01-01 to today)
+  - `economic` (8 economic indicators, 2010-01-01 to today)
+  - CLI: `--endpoint symbol_changes delisted treasury economic --out data/fmp [--self-test]`
+  - Mocked self-test mode, stdlib only, retry/backoff on 429/5xx
+
+- **D:\AD\scripts\ad_datasets\us_reference.py** — Dataset spec (name: `us_reference`):
+  - `symbol_changes` table: date, companyName, oldSymbol, newSymbol (indexed on old/new symbols, date)
+  - `delisted_companies` table: symbol, companyName, exchange, ipoDate, delistedDate (indexed on symbol, delistedDate)
+  - For point-in-time identity layer support
+
+- **D:\AD\scripts\ad_datasets\us_macro.py** — Dataset spec (name: `us_macro`):
+  - `treasury_rates` table: date + 13 maturity columns (month1–year30 as REAL)
+  - `economic_indicators` table: name, date, value (indexed on name, date)
+  - For regime/macro gating with note to prefer FRED/ALFRED for strict PIT
+
+All files follow stdlib-only constraint, match existing repo conventions (retry patterns, CSV writing with extrasaction="ignore", Dataset/Table/Column structure), and have been committed to main with git push completed.

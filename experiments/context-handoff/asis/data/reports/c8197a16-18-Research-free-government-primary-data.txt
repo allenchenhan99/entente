@@ -1,0 +1,13 @@
+Report delivered to team-lead. Summary of what I produced:
+
+A ~1-page structured research report on **free government/primary/regulatory data for US-equity alpha**, verified against real 2026 URLs, organized into four tiers with per-source: alpha use, exact endpoint, access/rate limits, PIT/latency quality, and blunt High/Med/Low priority.
+
+Key findings for a small quant shop:
+
+1. **SEC EDGAR is the biggest under-used gap.** Beyond our 13F builder, EFTS full-text search, XBRL Frames (one metric across all filers), the 8-K/Form-4 firehose via Submissions, N-PORT monthly fund holdings, and 13D/G activist filings are all free, no-key, and carry acceptance-datetime timestamps — the cleanest PIT on any platform. Getting insider (Form 4) data first-hand also removes FMP vendor lag/gaps.
+
+2. **ALFRED vintages** — a cheap fix flagged as a likely latent look-ahead risk in our current FRED usage.
+
+3. **BLS/Treasury/EIA** for exact-timestamp scheduled macro prints; **openFDA + ClinicalTrials.gov v2** as decisive binary-catalyst sources if we touch healthcare/biotech; **USAspending** high-value only for defense/gov-exposed names.
+
+Also noted a real change: **PatentsView migrated into the USPTO Open Data Portal (~March 2026)** — needs an ODP key going forward. The full report with all endpoints and a verified sources list is in the team-lead's inbox.

@@ -1,0 +1,42 @@
+## Contract Test: Connections Mock vs API Model - Complete ✓
+
+I've successfully added contract test coverage for the `connections` endpoint. Here's what I found and created:
+
+### Test Coverage Status
+**Already covered** — no drift detected. The mock fixture `web/mock/connections.json` fully validates against the actual API response model.
+
+### What Was Added
+**File:** `tests/test_api_contract_mock_connections_next.py`
+
+I created a comprehensive Pydantic model hierarchy that matches the backend's `connections_status()` return shape:
+
+```python
+ConnectionsResponse
+├── InstagramConnectionResponse
+│   ├── state: "unavailable" | "needs_setup" | "ready" | "running" | "complete" | "failed"
+│   ├── configured: bool
+│   ├── username: str | None
+│   ├── setup: InstagramSetupResponse
+│   ├── job: InstagramJobStatus | None
+│   └── last_success: InstagramLastSuccessResponse | None
+└── TimelineConnectionResponse
+    ├── state: "unavailable" | "ready"
+    ├── coverage_start: date | None
+    ├── coverage_end: date | None
+    ├── stay_count: int
+    └── path_point_count: int
+```
+
+### Test Results
+✅ **Single test passes:**
+```
+tests/test_api_contract_mock_connections_next.py . [100%] 1 passed in 0.27s
+```
+
+✅ **Full P1.3 tier regression check passes:**
+```
+347 passed, 2298 deselected in 7.59s
+```
+
+### No Drift Found
+The mock JSON validates cleanly against all models — all required fields are present and match expected types and constraints. No backend/frontend field divergence detected.

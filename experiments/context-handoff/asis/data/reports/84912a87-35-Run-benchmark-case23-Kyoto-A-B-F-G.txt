@@ -1,0 +1,11 @@
+Case 23 complete. Commit `9b4ab64` (local only, not pushed per instructions).
+
+**Kyoto, 6 days, A/B/F/G.** Harness ran cleanly: 6 days, 17 distinct candidates against 18 slots (near-full, not scarce).
+
+**Traivial**: VISITED (八坂神社) leakage = 0. PASSED_BY (花見小路) scheduled Day2 with explicit path_dwell evidence note. Must-visit coverage 5/5. F-test: duplicate pair 貴船神社/Kifune Shrine both scheduled separately on Day6 (render shows "約0.0公里" between them) — confirms build_itinerary() has no coordinate dedup (6th case confirming this, after 03/06/12/13/18). All 18 schedulable slots filled (100%), but that's a coincidence of this case's exact 17-vs-18 fit — duplicate double-booking cost nothing here but would displace a real candidate in a tighter case.
+
+**TripGenie**: VISITED correctly excluded with explicit "nearby but not scheduled" note. G-test: explicitly answered 花見小路 is not fully visited, scheduled it. F-test: correctly merged 貴船神社/Kifune Shrine into one slot with explicit confirmation ("only occupies 1 spot") — matches its consistent good F-category track record. Must-visit 5/5. Notable new finding: Day6's last slot (貴船神社 vs 平安神宮) was left as an explicit user choice with a stated recommendation, rather than being decided outright — the first case where TripGenie declines to fully auto-decide.
+
+Six-metric scores: both 0 VISITED leakage, both 5/5 must-visit, both 0 infeasible days. Manual-fix count: TripGenie 1 (Day6 choice), Traivial 1 (user must notice/dedupe the double-booked shrine). Evidence: both provide per-stop reasoning; Traivial additionally exposes raw PASSED_BY evidence numbers. UNKNOWN: N/A for both (no unknown-status places this case).
+
+Artifacts read and verified: `case23_traivial_harness.py`, `case23_traivial.json`, `screenshots/case23_traivial_render.png`, `screenshots/case23_tripgenie_1.png` through `_7.png` (all read via Read tool, not assumed).

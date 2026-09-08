@@ -1,0 +1,72 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-17 for format/prior findings — case17 found a NEW bug where Traivial's day-count is derived from candidate÷capacity math, decoupled from actual trip span, so pay attention to that pattern): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-17 writeups are good templates for concise-but-rigorous format. This case has NO arrival/departure clock constraints — use plain `build_itinerary()` only, do NOT call `apply_live_constraints()`. IMPORTANT (from case17's finding): after running your harness, explicitly check `len(result["days"])` against the expected trip span (days = (return_date-depart_date).days+1) — if they don't match, that's itself a finding worth reporting even in a case with no clock constraints, since case17 showed this can happen from candidate-count/capacity math alone.
+
+## Your assigned case: Case 18
+
+**City**: Tokyo. **Days**: 4 (dates 2026-11-14 to 2026-11-17).
+**Categories**: A (already-visited exclusion), B (many candidates), F (bilingual duplicate), G (passed-by-only place).
+**Already visited (VISITED, exclude)**: 明治神宮 (Meiji Shrine), 原宿竹下通 (Harajuku Takeshita Street).
+**Passed-by (PASSED_BY, must remain schedulable)**: 表參道 (Omotesando) — describe as: you walked through on your way elsewhere, phone track shows movement but no stop of meaningful duration anywhere specific, not counted as visited, still want to go properly.
+**Must-visit (3)**: 澀谷, 秋葉原電器街, 台場.
+**Duplicate test**: include a bilingual duplicate pair among the other candidates, e.g. list both "六本木之丘" and "Roppongi Hills" as if separate items.
+**Other candidates (10 total, incl. the duplicate pair as 2 entries)**: 上野公園, 谷中銀座, 六本木之丘, Roppongi Hills, 神樂坂, 代官山蔦屋書店, 下北澤, 三鷹之森吉卜力美術館, 東京鐵塔, 晴空塔.
+**Daily capacity**: 3/day. **Party**: 2 adults.
+
+## Oracle (write down before testing)
+- 明治神宮 and 原宿竹下通 must NOT appear in either output.
+- 表參道 (PASSED_BY) must NOT be excluded as if visited — should remain schedulable.
+- All 3 must-visit should appear if feasible — but given the established pattern across cases 06-17 of frequent must-visit loss under any real pressure, do NOT assume, check.
+- 六本木之丘/Roppongi Hills duplicate: check whether recognized/merged by TripGenie, and confirm Traivial schedules both separately if not truncated by capacity (per case03/06/12/13's established finding).
+- No day should exceed 3 stops.
+- Total schedulable: 3 must-visit + 表參道(passed-by) + 9 other distinct candidates (10 minus 1 for counting the duplicate pair as referring to 1 real place) = potentially 13 vs 4×3=12 slots — real, moderate scarcity.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 3, "我已經去過明治神宮和原宿竹下通（有明確逛過紀錄）請不要排進行程", describe 表參道 exactly as above (走過但沒有明確停留，不算去過，還是想去), must-visit 澀谷/秋葉原電器街/台場, list 六本木之丘 and "Roppongi Hills" as if separate items, other candidates (上野公園/谷中銀座/神樂坂/代官山蔦屋書店/下北澤/三鷹之森吉卜力美術館/東京鐵塔/晴空塔), ask for day-by-day with reasons and explicitly ask about 六本木之丘/Roppongi Hills and how it handles 表參道.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case18_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — plain build_itinerary, no live constraints)
+- Template: combine case04's VISITED/PASSED_BY pattern with case03/06's duplicate-pair pattern.
+- Real approximate Tokyo coordinates (reuse from case01/13 harnesses: Meiji Shrine ~35.6764,139.6993, Harajuku Takeshita ~35.6702,139.7026, Omotesando ~35.6658,139.7126, Shibuya ~35.6595,139.7005, Akihabara ~35.6984,139.7731, Odaiba ~35.6267,139.7752, Roppongi Hills ~35.6605,139.7292, Ueno Park ~35.7141,139.7744, Yanaka Ginza ~35.7278,139.7663, Kagurazaka ~35.7017,139.7402, Daikanyama ~35.6486,139.7031, Shimokitazawa ~35.6613,139.6683, Ghibli Museum ~35.6960,139.5704, Tokyo Tower ~35.6586,139.7454, Skytree ~35.7101,139.8107).
+- VISITED verdicts for 明治神宮/原宿竹下通; PASSED_BY for 表參道 (matched_segment_ids=[], sparse dwell evidence); UNVISITED for rest.
+- Duplicate: 六本木之丘 and Roppongi Hills as separate Place objects with the same coordinates, different ids.
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case18_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case18_traivial_harness.py`, capture real output — report VISITED leakage, whether 表參道 got scheduled, whether the Roppongi duplicate got double-scheduled, must-visit coverage, AND explicitly check `len(result["days"])` against the expected 4 (per case17's finding).
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case18_traivial.json`, screenshot to `screenshots/case18_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例18（東京，4天，情境A/B/F/G）` to the benchmark .md, concise bullet format matching case06-17: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, key finding (A/F/G handling), must-visit coverage count, day-count check result, confirmation screenshots/harness were actually created and read, commit hash.

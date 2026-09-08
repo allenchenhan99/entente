@@ -1,0 +1,15 @@
+Report delivered to the team lead. Summary of what I produced:
+
+A self-contained, evidence-grounded report on **market prices & corporate actions** covering all five requested sections:
+
+1. **What quants need** — raw OHLCV as ground-truth base, split-only vs total-return adjusted series (with which uses each feeds: execution/fills vs return/factor computation), dollar-volume for liquidity filters, historical exchange calendar, delisted prices + delisting returns, index levels, and the point-in-time factor requirement that defeats CRSP-style re-anchoring look-ahead.
+
+2. **Primary/first-hand sources** — SIP/consolidated tape (CTA/UTP), exchange official closing price (NOCP/NYSE auction), issuer 8-K / DTCC / SEC EDGAR for corporate actions, S&P DJI for index — mapped to the firm's first-hand-vs-processed principle.
+
+3. **Vendor contamination modes** — concrete: yfinance's `auto_adjust` default flip dropping `Adj Close`, Yahoo survivorship/ticker-reuse/re-anchoring drift; FMP's own accuracy disclaimer + region-varying adjustment methodology; plus Polygon/Tiingo/Norgate/EOD failure modes.
+
+4. **Verification protocol** — 11 exact checks with pass/fail thresholds: OHLC invariants, positivity, duplicate `(symbol,date)`+`(permaID,date)` keys, calendar gap/phantom detection, extreme-return split-flagging, adj-close reconstruction (`raw × independently-rebuilt cumFactor`), split/dividend reconciliation vs EDGAR, Yahoo-vs-FMP cross-recon with tolerance bands and whitelisted legitimate divergences, PIT-membership coverage for survivorship, volume/price consistency, and reproducibility.
+
+5. **Acceptance checklist** — 10 ship-gates tied to our `sp500_pit` flagship and the exceptions ledger.
+
+All vendor-issue and methodology claims are backed by source URLs (included in the message). The report is the full final message; nothing was written to disk.

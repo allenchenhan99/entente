@@ -1,0 +1,15 @@
+Committed locally (not pushed), commit `efc4d55`.
+
+**Case 22 summary (Tokyo, 5 days, A/C/D/E):**
+
+Both systems correctly kept the VISITED-vs-stay-area-name collision clean: 秋葉原電器街 (specific attraction) was excluded while 秋葉原 (stay area) stayed fixed throughout, on both sides — no leakage. TripGenie did this via explicit LLM reasoning ("你已明確去過...住宿留在秋葉原不衝突"); Traivial did it structurally (VISITED filtered out of the candidate list before scheduling ever runs, so the confusion mode is architecturally impossible there).
+
+台場 (must-visit, ~8km from stay area) survived on both sides — the 4th data point after cases 11/14/19 where a far must-visit was retained this time. TripGenie gave a semantic reason; Traivial's survival was just an artifact of input-list ordering (`candidates[:capacity]` truncation), not a real priority mechanism, consistent with case21's finding.
+
+Last day (2026-11-18, 09:00 departure): 0 stops on both sides, as expected. No day exceeded 2 stops. Coverage landed at 8/13 (61.5%) non-VISITED candidates on both sides — same number, different mechanism (TripGenie: semantic tradeoffs with named reasons + 3 alternative plans; Traivial: mechanical capacity truncation).
+
+**New finding**: Traivial's capacity-truncation caveat named 3 dropped candidates (澀谷/六本木之丘/明治神宮), but 2 more candidates (晴空塔/淺草寺) were silently dropped by the departure-day clock-wipe bug (same bug family as case08/09/17) with no named caveat — just a generic "no usable service window" message. This is a transparency gap distinct from the already-known clock-wipe bug itself.
+
+Six-metric scores: both 0 VISITED leakage, both 1/1 must-visit, both 8/13 (61.5%) overall coverage, both 0 illegal-itinerary violations, both 0 manual fixes needed; evidence quality favors TripGenie slightly (fully named exclusions) vs Traivial (partial — capacity caveat named, clock-wipe caveat not).
+
+All 6 TripGenie screenshots and 1 Traivial render screenshot were read and verified; harness ran clean with real `build_itinerary()`/`apply_live_constraints()`, 0 external queries (fixture-only), `len(result["days"])==5` as expected.

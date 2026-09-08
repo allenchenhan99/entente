@@ -1,0 +1,13 @@
+Committed locally as f15cc3e, not pushed.
+
+## Report: Case 11 (Seoul, 3 days, C/E)
+
+Ran the harness (`case11_traivial_harness.py`, real `build_itinerary()`+`apply_live_constraints()`, both `outbound_arrival="22:00"` and `return_departure="09:00"` explicitly set) and the real TripGenie query (6 screenshots, read and verified).
+
+**Traivial Day1/2/3 stops: 0 / 3 / 0.** Day2 = 益善洞韓屋街, 仁寺洞, 梨泰院. Both boundary days correctly emptied — confirms the fix works when both clocks ARE set (contrast with case08/09 where a `None` default falsely triggered the same wipe). **However, 東大門 (must-visit) never appears anywhere.** Root cause traced: `build_itinerary()` geo-clusters candidates *before* `apply_live_constraints()` runs, and Dongdaemun happened to be clustered onto Day3 by coordinates alone — then Day3's (correct) departure-day wipe took it down too. This is a new, fourth trigger-path for the known "must-visit has no cross-phase protection" gap (prior three: cases 06/07 capacity truncation, 08 departure-null wipe, 09 arrival-null wipe) — this time with fully correct/complete input data, so it's not a repeat of the 08/09 bug, it's a deeper architecture issue (two-phase pipeline, phases don't share knowledge of which days survive).
+
+**TripGenie**: Day1=0, Day2=3 (仁寺洞→益善洞韓屋村→東大門+DDP), Day3=0. Must-visit covered 1/1, explicit reasoning for both empty boundary days (directly answered the prompt's question about boundary-day handling logic), reasons for excluding each of the 4 unused candidates, alternate "market food" variant offered, DDP official hours cited.
+
+Six metrics: TripGenie wins on must-visit coverage (1/1 vs 0/1) and evidence granularity (named per-candidate reasons vs Traivial's generic day-level caveats); both tie on 0 illegal/oversized days and correct boundary-day emptying itself.
+
+Screenshots (`screenshots/case11_tripgenie_1-6.png`, `case11_traivial_render.png`) and harness output were all read/verified directly, not assumed. Commit: `f15cc3e` (local only, not pushed).

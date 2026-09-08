@@ -1,0 +1,168 @@
+{
+  "generated_at": "2026-09-05T08:23:29.800Z",
+  "sessions": [
+    {
+      "project": "D----",
+      "session": "58c930c3-4222-4038-90d4-ac971c0aa305",
+      "parent_lines": 8587,
+      "compaction_at_lines": [
+        4244,
+        4245
+      ],
+      "parent_agent_tool_calls": 7,
+      "child_transcripts": 7,
+      "joined_by_tool_use_id": 0,
+      "joined_by_description": 7,
+      "unmatched": 0,
+      "parent_calls_without_child": 0,
+      "rows_with_empty_brief": 0,
+      "rows_with_zero_turns": 0,
+      "rows_with_empty_final_message": 0
+    },
+    {
+      "project": "D--AD",
+      "session": "01d3e38c-3420-4ec1-92ff-e5ab7749294b",
+      "parent_lines": 11655,
+      "compaction_at_lines": [
+        4238,
+        4239,
+        10063,
+        10064
+      ],
+      "parent_agent_tool_calls": 1,
+      "child_transcripts": 1,
+      "joined_by_tool_use_id": 1,
+      "joined_by_description": 0,
+      "unmatched": 0,
+      "parent_calls_without_child": 0,
+      "rows_with_empty_brief": 0,
+      "rows_with_zero_turns": 0,
+      "rows_with_empty_final_message": 0
+    },
+    {
+      "project": "D--AD",
+      "session": "c8197a16-601f-41c7-9175-06b909e4210c",
+      "parent_lines": 4952,
+      "compaction_at_lines": [
+        2978,
+        2979,
+        4453,
+        4454
+      ],
+      "parent_agent_tool_calls": 19,
+      "child_transcripts": 19,
+      "joined_by_tool_use_id": 0,
+      "joined_by_description": 19,
+      "unmatched": 0,
+      "parent_calls_without_child": 0,
+      "rows_with_empty_brief": 0,
+      "rows_with_zero_turns": 0,
+      "rows_with_empty_final_message": 0
+    },
+    {
+      "project": "D--vscode-python-entente",
+      "session": "7d62990d-66b8-4f98-87ce-d65d9c77bfa6",
+      "parent_lines": 63,
+      "compaction_at_lines": [],
+      "parent_agent_tool_calls": 1,
+      "child_transcripts": 1,
+      "joined_by_tool_use_id": 1,
+      "joined_by_description": 0,
+      "unmatched": 0,
+      "parent_calls_without_child": 0,
+      "rows_with_empty_brief": 0,
+      "rows_with_zero_turns": 0,
+      "rows_with_empty_final_message": 0
+    },
+    {
+      "project": "D--vscode-python-unvisited",
+      "session": "84912a87-292d-4007-8e84-e099d45205a2",
+      "parent_lines": 3587,
+      "compaction_at_lines": [
+        3183,
+        3184
+      ],
+      "parent_agent_tool_calls": 36,
+      "child_transcripts": 36,
+      "joined_by_tool_use_id": 21,
+      "joined_by_description": 15,
+      "unmatched": 0,
+      "parent_calls_without_child": 0,
+      "rows_with_empty_brief": 0,
+      "rows_with_zero_turns": 0,
+      "rows_with_empty_final_message": 0
+    }
+  ],
+  "totals": {
+    "sessions": 5,
+    "delegations": 64,
+    "parent_agent_tool_calls": 64,
+    "unmatched": 0,
+    "parent_calls_without_child": 0
+  },
+  "re_delegated": {
+    "84912a87 · Run benchmark case19 (Kyoto C/D/E)": 2
+  },
+  "by_group": {
+    "other": {
+      "n": 33,
+      "brief_tokens": 26148,
+      "child_output": 700540,
+      "child_uncached": 10800,
+      "child_cache_write": 9218083,
+      "child_cache_read": 206280087,
+      "turns": 2217,
+      "tool_calls": 1119,
+      "tool_errors": 76,
+      "duration_s": 21384,
+      "brief_tokens_per_delegation": 792,
+      "child_non_cache_read_per_delegation": 300892,
+      "brief_share": 0.0026
+    },
+    "qa": {
+      "n": 4,
+      "brief_tokens": 1549,
+      "child_output": 14030,
+      "child_uncached": 1520,
+      "child_cache_write": 1070698,
+      "child_cache_read": 13517438,
+      "turns": 184,
+      "tool_calls": 96,
+      "tool_errors": 11,
+      "duration_s": 398,
+      "brief_tokens_per_delegation": 387,
+      "child_non_cache_read_per_delegation": 271562,
+      "brief_share": 0.0014
+    },
+    "contract-test": {
+      "n": 7,
+      "brief_tokens": 3416,
+      "child_output": 14174,
+      "child_uncached": 2564,
+      "child_cache_write": 856131,
+      "child_cache_read": 16538461,
+      "turns": 306,
+      "tool_calls": 129,
+      "tool_errors": 14,
+      "duration_s": 583,
+      "brief_tokens_per_delegation": 488,
+      "child_non_cache_read_per_delegation": 124696,
+      "brief_share": 0.0039
+    },
+    "benchmark": {
+      "n": 20,
+      "brief_tokens": 32168,
+      "child_output": 106919,
+      "child_uncached": 3894,
+      "child_cache_write": 3880818,
+      "child_cache_read": 179405059,
+      "turns": 1948,
+      "tool_calls": 1200,
+      "tool_errors": 34,
+      "duration_s": 8426,
+      "brief_tokens_per_delegation": 1608,
+      "child_non_cache_read_per_delegation": 199582,
+      "brief_share": 0.008
+    }
+  }
+}

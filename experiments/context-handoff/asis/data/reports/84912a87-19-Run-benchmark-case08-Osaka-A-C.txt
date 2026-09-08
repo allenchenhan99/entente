@@ -1,0 +1,11 @@
+Committed locally (not pushed), commit `8c2f100`.
+
+**Case 08 (Osaka, 4 days, categories A/C) — done.**
+
+Both harness output (`case08_traivial.json`, validated against `ItineraryResponse`) and 4 TripGenie screenshots + 1 Traivial render screenshot were created and read/verified by me.
+
+**Key finding**: Arrival-day constraint (the actual test target) was handled correctly by both — TripGenie put only 道頓堀 on day 1, Traivial zeroed day 1 entirely, both within oracle's "0 or 1 stop" bound. But an unrequested side effect on the *return* side diverged sharply: because I deliberately left `return_departure` unset (per instructions, no departure constraint this case), Traivial's `apply_live_constraints()` still defaults the last day to "departure day," and with no departure clock/airport it wipes that whole day. USJ (the must-visit) had been geo-clustered onto exactly that day pre-constraint, so it vanished from Traivial's output entirely — 0/1 must-visit coverage — with the caveat only saying "departure-day flight evidence missing," never naming USJ as the casualty. TripGenie gave USJ its own full day 2 and explained the day 1 pacing choice explicitly.
+
+**Six metrics**: TripGenie — visited leakage 0, must-visit coverage 1/1, infeasible days 0, manual fixes 0, evidence rich (per-stop + explicit exclusion reasons for 新世界/中之島公園), UNKNOWN handling honest (flagged stale hours data). Traivial — visited leakage 0, must-visit coverage 0/1 (must-visit lost), 1 real feasibility defect (USJ was schedulable but wiped by an unrelated default), ≥1 manual fix needed, evidence partial (caveats explain the wipe but never name the lost must-visit), UNKNOWN handling over-conservative (treated "return time unknown" as "skip the whole day" rather than only the airport-transfer leg).
+
+Relevant files: `docs/experiments/trip_com_tool_benchmark_2026-09/case08_traivial_harness.py`, `case08_traivial.json`, write-up appended to `docs/experiments/trip_com_tool_benchmark_2026-09.md` (`### 案例08`), screenshots under `docs/experiments/trip_com_tool_benchmark_2026-09/screenshots/case08_*.png`.

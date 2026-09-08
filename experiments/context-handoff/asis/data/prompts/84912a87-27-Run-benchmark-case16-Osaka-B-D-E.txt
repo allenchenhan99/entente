@@ -1,0 +1,70 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-15 for format/prior findings): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06-15 writeups are good templates for concise-but-rigorous format. IMPORTANT: this case has a DEPARTURE constraint that requires returning to the stay area first (a "return to hotel before airport" pattern like case09) — set `return_departure` explicitly, leave `outbound_arrival` unset ONLY IF there's genuinely no arrival constraint stated (there isn't in this case's spec below) BUT per case09's finding, leaving `outbound_arrival` unset while calling apply_live_constraints will wipe Day 1 due to the `is_arrival_day = (arrival_at is None and index==0)` bug. To test the INTENDED constraint (only departure/return-area matters) without re-triggering the known arrival-side bug, set a REASONABLE default arrival time on day 1 (e.g. "10:00", meaning "arrived earlier, no special constraint") so day 1 has normal capacity — note this choice explicitly in your write-up as a deliberate workaround for the known bug, not a new finding.
+
+## Your assigned case: Case 16
+
+**City**: Osaka. **Days**: 5 (dates 2026-11-14 to 2026-11-18).
+**Categories**: B (many candidates vs days — 17 candidates for 5 days), D (daily capacity 3/day), E (stay area fixed to 梅田/Umeda, must return there before airport on last day).
+**Arrival**: 10:00 on day 1 (normal, not a real constraint — see note above).
+**Departure constraint**: last day (2026-11-18), must be back at the Umeda hotel by 11:00 to collect luggage before heading to the airport — nothing scheduled after 11:00 that day.
+**Stay area**: 梅田 (Umeda), fixed.
+**Must-visit (4)**: 大阪城, 道頓堀, 環球影城, 通天閣.
+**Other candidates (13, deliberately more than remaining slots — real B-pressure)**: 黑門市場, 心齋橋, 梅田藍天大廈, 四天王寺, 新世界, 中之島公園, 阿倍野HARUKAS展望台, 大阪府立狹山池博物館, 天保山大摩天輪, 大阪造幣局, 中央公會堂, 御堂筋, 難波八阪神社.
+**Daily capacity**: 3/day. **Party**: 2 adults.
+
+## Oracle (write down before testing)
+- All 4 must-visit should appear if feasible, but given the established pattern (cases 06-14 repeatedly lose must-visit items under capacity/boundary pressure), do NOT assume they will — check.
+- 5 days × 3 = 15 slots; total candidates = 4 must-visit + 13 others = 17, so real scarcity (17 vs 15) — at least 2 should be honestly dropped.
+- Last day should have 0 stops after 11:00 (ideally 0 stops at all, or 1 very light one near Umeda finishing well before 11:00).
+- Stay area Umeda throughout.
+- No day should exceed 3 stops.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for launcher ref, avoid full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese: dates, party size, daily cap 3, "住宿請安排在梅田", must-visit 大阪城/道頓堀/環球影城/通天閣, other 13 candidates, "最後一天(2026/11/18)11:00前必須回梅田住宿區取行李再前往機場，11點後不要排任何行程", ask for day-by-day with reasons, and explicitly ask how it decides what to drop given the list won't all fit.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case16_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness — build_itinerary + apply_live_constraints)
+- Template: case09's harness pattern (return-to-stay-area departure constraint, FixtureRouteProvider/FixtureHoursProvider synthetic, no live queries). Set `outbound_arrival="10:00"` (deliberate workaround, note it in write-up) and `return_departure="11:00"`.
+- Real approximate Osaka coordinates (reuse from case07/08/09 harnesses: Osaka Castle ~34.6873,135.5262, Dotonbori ~34.6687,135.5013, USJ ~34.6654,135.4323, Tsutenkaku ~34.6524,135.5063, Umeda ~34.7024,135.4959, etc — use your own knowledge for the rest).
+- base_area="大阪 梅田" on ComboOption. After build_itinerary, set `area_lat`/`area_lng` to real Umeda coordinates on every ItineraryDay via replace() before calling apply_live_constraints (required, see case02/05/09/11/14 harnesses).
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case16_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case16_traivial_harness.py`, capture real output — report which of the 4 must-visit survived, which candidates got dropped and whether disclosed, and last-day stop count/timing.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case16_traivial.json`, screenshot to `screenshots/case16_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例16（大阪，5天，情境B/D/E）` to the benchmark .md, concise bullet format matching case06-15: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. Be honest about must-visit coverage and disclosure quality of what got dropped either way.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, must-visit coverage count for each, whether drops were disclosed with reasons, confirmation screenshots/harness were actually created and read, commit hash.

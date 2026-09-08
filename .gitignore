@@ -25,3 +25,6 @@ demo-repo/node_modules/
 
 # rust
 target/
+
+# context-handoff benchmark run output
+experiments/context-handoff/results/

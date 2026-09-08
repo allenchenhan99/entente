@@ -1,0 +1,15 @@
+Report delivered to the team lead. Summary of what I produced:
+
+**Fundamentals & filings data report** covering all five requested sections, grounded in web sources:
+
+1. **Data needs & look-ahead trap** — line items (IS/BS/CF, shares outstanding), factor/consensus uses, and the three dates that must never be conflated (period-of-report vs filed-as-of vs acceptance-datetime), plus the as-first-reported-vs-restated trap.
+
+2. **Primary sources (SEC EDGAR)** — full-text filings with header timestamps (`ACCEPTANCE-DATETIME`, `CONFORMED PERIOD OF REPORT`, `FILED AS OF DATE`); FSDS bulk quarterly `SUB`/`NUM`/`TAG`/`PRE` tables with `filed`/`accepted` next to each fact; and the `companyfacts`/`companyconcept`/`frames` REST APIs with a concrete PIT-reconstruction rule (earliest acceptance = as-first-reported).
+
+3. **Vendor contamination modes** — silent restatement/survivorship (flagged as highest-impact for the Strat), PIT misalignment, identity-mapping errors, unit/scale/sign flips, TTM assembly mistakes, missing/duplicated periods, normalization opacity.
+
+4. **Verification protocol** — stratified sample reconciled to EDGAR XBRL, with explicit pass/fail criteria on six checks (line-item reconciliation, PIT availability, restatement contamination, balance-sheet identity, cross-period continuity, unit/sign sanity) and a three-tier verdict (CERTIFIED-PIT / SCREENING-ONLY / REJECT).
+
+5. **Acceptance checklist** — led by the mandatory per-fact PIT availability timestamp, plus as-first-reported preservation, versioned restatements, stable identity keys, and provenance to source filing.
+
+The full report is in the team lead's inbox and is self-contained for synthesis.

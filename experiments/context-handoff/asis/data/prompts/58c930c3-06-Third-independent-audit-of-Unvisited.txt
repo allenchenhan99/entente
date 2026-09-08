@@ -1,0 +1,54 @@
+你是 Unvisited 專案外聘的測試工程師，接手第三輪獨立稽核。專案根目錄：`D:\vscode_python\unvisited`
+
+## 立場
+獨立稽核，立場是**證明開發者錯了**。這個專案由多個 AI agent 平行開發，前兩輪稽核共找出 8 個 Critical 與 17 個 Major。**不要因為修復是針對前輪報告做的就假設它有效** —— 常見的失敗模式是：問題被繞過而非修好、修復引入新缺陷、或測試被寫成剛好通過。
+
+**不要修改任何專案檔案。** 探測腳本放 `C:\Users\User\AppData\Local\Temp\claude\D----\58c930c3-4222-4038-90d4-ac971c0aa305\scratchpad\qa3\`。
+前兩輪的探測腳本在 `...\scratchpad\qa\`（`p*.py`、`q*.py`），報告在 `...\scratchpad\QA_REPORT.md` 與 `QA_REPORT_2.md`。**請先讀這兩份報告**，它們是你的前任寫的，脈絡完整。
+
+## 產品背景
+Unvisited 是旅遊規劃工具。核心是一道減法：
+**想去（社群短影音收藏的地點）⊖ 去過（Google 位置歷史）= 未竟清單**
+再聯合求解「機票 × 住宿 × 日期」，最後排成行程。目標使用者是有 2019–2026 共 7 年位置歷史的背包客。
+
+先讀 `README.md` 的「設計原則」三條、`unvisited/schemas.py`、`unvisited/geo/config.py`、`web/API_CONTRACT.md`。
+
+## 三個承諾（稽核的主軸）
+1. **每個判定都附得起依據** —— 使用者要能追問「憑什麼」並推翻我們
+2. **不確定就說不確定** —— UNVISITED（有資料，確認沒去過）vs UNKNOWN（資料不足）
+3. **報價會過期、行程要誠實** —— caveats 必須列出所有缺口
+
+前輪判定：第一輪承諾二不成立；第二輪承諾二「技術上成立但代價過高」（過度保守到棄權）、承諾三不成立。
+
+## 本輪已做的處置（commit `78f1654`，測試 265 → 281）
+
+**C2 過度修正**：`data_gaps` 從 veto 改成比例門檻 + 降信心。新增 `MAX_DATA_GAP_RATIO_FOR_UNVISITED = 0.15`、`MIN_PERFECT_COVERAGE_WINDOW_DAYS_FOR_UNVISITED = 126`。
+PM 實測懸崖已消失：完整 1.0 / 缺 13 天 0.995 / 缺 14 天 0.99 / 一趟 2 週旅行 0.989 / 換手機 3 週 0.984 / 關定位 2 個月 0.956；單筆紀錄與 33% 密度仍正確回 UNKNOWN。
+
+**C1 合成房價**：`OptimizeResult` 的 caveats / failures / stay_is_synthetic 已帶進 `/api/combos` 與 `/api/discover`；前端在三處揭露，且從 `stay.source` 前綴偵測而非只依賴旗標。
+
+**C3 demo 指示器**：`/api/config/rules` 補 `is_demo`，另加 `X-Unvisited-Demo` header；前端 `markDemo()` 支援陣列元素。
+
+**M1–M7**：discover 回 error、error 寫進契約、機場 fallback、重複 id 改回 400、server 改用 `discover_destinations()`、上傳不再重複解析、centroid 用 circular mean、PASSED_BY 證據進入行程說明。
+
+## 本輪要查的
+
+1. **驗證上述修復真的成立。** 特別是 C2 的新門檻：**0.15 這個比例合理嗎？有沒有新的懸崖或新的漏洞？**
+   PM 實測 8 個月空洞（242/2769 ≈ 8.7%）現在回 UNVISITED 信心 0.833 —— 這是前輪建議的方向，但**請你判斷這個具體結果對使用者是否恰當**。
+
+2. **PM 自己發現一個殘留不一致**：demo 路徑下 `/api/combos` 的 `stay.source` 是 `synthetic:demo-stay`，但 payload 的 `stay_is_synthetic` 仍是 `False`、`caveats` 空的。前端因改看 source 前綴所以擋住了，但後端旗標沒設對。請確認這是否只在 demo 路徑，以及**還有沒有同類「旗標與實際資料不一致」的地方**。
+
+3. **新增的 16 個測試品質。** 前兩輪你的前任都指出「測試是為了證明 bug 不見了而寫，不是為了證明產品還能用」。這次特別查：`MAX_DATA_GAP_RATIO_FOR_UNVISITED` 的兩側有沒有測？「正常使用者仍拿得到 UNVISITED」的回歸鎖有沒有真的建立？
+
+4. **前端**（`web/js/`）這輪改動大，第二輪只做了 grep 層級檢查。請實際讀 `combos.js` / `discover.js` / `api.js` / `app.js` / `list.js` 的邏輯，找 null 防護缺口、以及還有沒有「後端有回報但前端沒渲染」的路徑。
+   後端與前端可自行啟動驗證：`python -m unvisited.server`（:8000）、`cd web && python -m http.server 8080`。注意 8000 可能已有實例在跑。
+
+5. **第二輪遺留未處理的 Minor** 請確認現況：`aggregate_by_area` 的 p25 = min、`ComboOption` 接受 `return_date < depart_date`、naive 時戳不記警告、geocode 對 error 與 not_found 同分、超長字串無上限、`API_CONTRACT` 門檻數字與 `config.py` 不一致、`PartyVerdict` 巢狀 verdict 缺 `is_stale`、`_read_timeline_cache()` 的 pickle 例外攔截過窄。
+
+## 回報
+完整報告寫進 `...\scratchpad\QA_REPORT_3.md`，格式同前輪（嚴重度 / 重現方式 / 實際 vs 預期 / 影響，依嚴重度排序）。
+也要明講哪些部分是穩固可信的 —— PM 需要知道哪裡不必再動。
+
+最終訊息明確回答兩個問題：
+1. **三個承諾現在各自成立了嗎？**
+2. **這個系統現在可以交付給使用者了嗎？** 若可以就直說可以；若不行，列出還差什麼，並明確區分「必須在交付前修」與「可以交付後再排」。

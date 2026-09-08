@@ -1,0 +1,37 @@
+Project: A-D-Aperture "Data" repo at D:\AD (Windows), Python 3.12. Spec-clear task: write FIVE dataset-spec files for our multi-dataset SQLite engine. Each loads capture-all CSVs already produced by our FMP fetcher (the CSVs contain MANY columns; your spec lists a curated SUBSET — that is fine, extra CSV columns are ignored, but every column you name MUST be one of the listed available fields).
+
+FIRST read for exact conventions (copy them precisely):
+- D:\AD\scripts\ad_datasets\sp500_fundamentals.py  (template: module docstring; `from ad_db import Column, Dataset, Table, View`; every table starts with Column("id","INTEGER", from_csv=False, pk=True) as the SOLE pk; other columns Column(name, sql_type, coerce=...); indexes tuple; source_file under data/; DATASET object with name/title/description/source/version/tables).
+- D:\AD\scripts\ad_db.py  (Column signature; coerce in {"text","int","real","bool"}).
+
+Conventions for ALL tables below: surrogate id pk as above; give each table indexes on ("symbol",) and ("date",) when a date column exists (for price_target/profile which have no date, index just ("symbol",)); type rule: symbol/period/reportedCurrency/cik/companyCik/reportingCik/all *Date/date/dates/text-ish fields/grades/names/types/currency/isin/cusip/exchange/sector/industry/country/action/url -> TEXT (coerce default); fiscalYear and all *Count / numAnalysts* -> INTEGER coerce="int"; every monetary/ratio/margin/price/shares/float/percent value -> REAL coerce="real". source="FMP (Financial Modeling Prep) stable API", version="2026-08-26" for all five.
+
+Create these EXACT files (create ONLY these five; modify nothing else):
+
+1) D:\AD\scripts\ad_datasets\sp500_valuation.py — Dataset name `sp500_valuation`, 3 tables:
+   - `key_metrics` src "fmp/fmp_key_metrics.csv" cols(after id): symbol,date,fiscalYear,period,marketCap,enterpriseValue,evToSales,evToEBITDA,netDebtToEBITDA,returnOnEquity,returnOnInvestedCapital,returnOnAssets,earningsYield,freeCashFlowYield,currentRatio,incomeQuality,workingCapital,investedCapital
+   - `ratios` src "fmp/fmp_ratios.csv" cols: symbol,date,fiscalYear,period,grossProfitMargin,operatingProfitMargin,netProfitMargin,ebitdaMargin,currentRatio,quickRatio,debtToEquityRatio,debtToAssetsRatio,interestCoverageRatio,priceToEarningsRatio,priceToBookRatio,priceToSalesRatio,priceToFreeCashFlowRatio,dividendYield,dividendPayoutRatio,assetTurnover,inventoryTurnover
+   - `enterprise_values` src "fmp/fmp_enterprise.csv" cols: symbol,date,stockPrice,numberOfShares,marketCapitalization,minusCashAndCashEquivalents,addTotalDebt,enterpriseValue
+
+2) D:\AD\scripts\ad_datasets\sp500_analyst.py — Dataset name `sp500_analyst`, 3 tables:
+   - `estimates` src "fmp/fmp_analyst_estimates.csv" cols: symbol,date,revenueAvg,revenueLow,revenueHigh,ebitdaAvg,netIncomeAvg,epsAvg,epsHigh,epsLow,numAnalystsRevenue,numAnalystsEps
+   - `grades` src "fmp/fmp_grades.csv" cols: symbol,date,gradingCompany,previousGrade,newGrade,action
+   - `price_target_summary` src "fmp/fmp_price_target.csv" cols: symbol,lastMonthCount,lastMonthAvgPriceTarget,lastQuarterCount,lastQuarterAvgPriceTarget,lastYearCount,lastYearAvgPriceTarget,allTimeCount,allTimeAvgPriceTarget  (NO date column -> index only ("symbol",))
+
+3) D:\AD\scripts\ad_datasets\sp500_ownership.py — Dataset name `sp500_ownership`, 2 tables:
+   - `insider_trades` src "fmp/fmp_insider.csv" cols: symbol,filingDate,transactionDate,reportingCik,companyCik,transactionType,securitiesOwned,reportingName,typeOfOwner,acquisitionOrDisposition,directOrIndirect,formType,securitiesTransacted,price,securityName  (index ("symbol",) and ("transactionDate",))
+   - `beneficial_ownership` src "fmp/fmp_beneficial.csv" cols: symbol,cik,filingDate,acceptedDate  (index ("symbol",) and ("filingDate",))
+   In the docstring note insider Form-4 data: filingDate/transactionDate are the point-in-time timestamps; usable only after filingDate.
+
+4) D:\AD\scripts\ad_datasets\sp500_profile.py — Dataset name `sp500_profile`, 2 tables:
+   - `company_profile` src "fmp/fmp_profile.csv" cols: symbol,companyName,cik,isin,cusip,exchange,sector,industry,country,currency,ipoDate,beta,marketCap,fullTimeEmployees,isEtf,isAdr,isFund,isActivelyTrading  (index only ("symbol",); beta/marketCap real; fullTimeEmployees int; is* -> INTEGER coerce="bool")
+   - `shares_float` src "fmp/fmp_shares_float.csv" cols: symbol,date,freeFloat,floatShares  (index ("symbol",),("date",))
+   Docstring: this is CURRENT profile metadata, not point-in-time.
+
+5) D:\AD\scripts\ad_datasets\sp500_fundamentals_q.py — Dataset name `sp500_fundamentals_q`, 3 tables mirroring sp500_fundamentals.py but QUARTERLY. Use the SAME column lists as the three tables in sp500_fundamentals.py, only change: table names `income_statement_q`,`balance_sheet_q`,`cash_flow_q`; source_file "fmp/fmp_income_q.csv","fmp/fmp_balance_q.csv","fmp/fmp_cashflow_q.csv". Docstring: quarterly statements; acceptedDate/filingDate are the PIT availability timestamps.
+
+MANDATORY acceptance — actually RUN and paste output:
+  A) python -c "import sys; sys.path.insert(0,r'D:/AD/scripts'); import importlib; names=['sp500_valuation','sp500_analyst','sp500_ownership','sp500_profile','sp500_fundamentals_q']; mods=[importlib.import_module('ad_datasets.'+n) for n in names]; print([(m.DATASET.name,len(m.DATASET.tables)) for m in mods])"
+  B) python -c "import ast,io,glob; [ast.parse(io.open(p,encoding='utf-8').read()) for p in [r'D:/AD/scripts/ad_datasets/'+n+'.py' for n in ['sp500_valuation','sp500_analyst','sp500_ownership','sp500_profile','sp500_fundamentals_q']]]; print('AST OK')"
+Expected A output: [('sp500_valuation',3),('sp500_analyst',3),('sp500_ownership',2),('sp500_profile',2),('sp500_fundamentals_q',3)]
+Boundary: create only those five files. After codex finishes, INDEPENDENTLY re-run A and B yourself (do not trust codex self-report) and report the actual output + the five file paths.

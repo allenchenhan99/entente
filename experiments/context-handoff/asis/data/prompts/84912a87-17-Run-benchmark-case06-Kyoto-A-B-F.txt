@@ -1,0 +1,72 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. This is a real, evidence-based comparison — no fabrication, no assuming results, everything must be backed by actual screenshots and actual computed output.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ THIS FIRST for full context/methodology/prior cases): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence directory: D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots subdirectory: D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09\screenshots\
+
+Read the benchmark doc fully first, especially section 5 (case matrix), section 6 (evidence rules), section 7 (methodology corrections — IMPORTANT: Trip.Planner is confirmed broken via a CORS bug, do NOT test it, only test TripGenie), and the case01-05 writeups to see the exact format/rigor expected (each has: Chinese narrative input description, oracle prediction, TripGenie findings with screenshot citations, Traivial findings with JSON/harness citations, six-metric scoring, and a summary paragraph comparing the two — but per instruction from the user's supervisor (a prior turn in this session), keep your written case summary CONCISE — bullet points are fine, don't need the same long-prose depth as cases 01-05, but the actual TESTING must be equally rigorous (real TripGenie query + real screenshots + real Traivial harness run, not shortcuts).
+
+## Your assigned case: Case 06
+
+**City**: Kyoto. **Days**: 5 (use dates 2026-11-14 to 2026-11-18, which per Traivial's day-count formula `(return-depart).days+1` gives exactly 5 days — verify this in your harness).
+**Categories**: A (already-visited exclusion), B (many candidates vs short trip), F (bilingual/duplicate place names, no-coordinate place).
+**Already visited (VISITED, must be excluded from both systems' output)**: 金閣寺 (Kinkaku-ji) and 伏見稻荷大社 (Fushimi Inari Taisha).
+**Must-visit (4)**: 嵐山竹林 (Arashiyama Bamboo Grove), 二條城 (Nijo Castle), 清水寺 (Kiyomizu-dera), 銀閣寺 (Ginkaku-ji).
+**Other candidates**: 東寺, 平安神宮, 南禪寺, 錦市場, 貴船神社, 三十三間堂, 京都御所, 哲學之道, 祇園花見小路, 二年坂三年坂, 鴨川散步, and deliberately include a bilingual duplicate: list both "祇園" and "Gion District" as if they might be separate items (let TripGenie/your Traivial fixture test whether they get conflated), plus one no-coordinate item: "一家在錦市場附近的小眾抹茶甜點店，只記得大概位置，沒有店名".
+**Daily capacity**: 3/day.
+**Party**: 2 adults.
+
+## Oracle (write this down before testing, don't derive it from either system's output)
+- 金閣寺 and 伏見稻荷大社 must NOT appear in either system's itinerary.
+- All 4 must-visit places should appear if feasible (5 days × 3/day = 15 slots is generous).
+- 祇園/Gion District duplicate should ideally be recognized as the same place, not double-booked.
+- The no-coordinate coffee shop should not be given a fabricated address or scheduled into a fixed time slot.
+- No day should exceed 3 stops.
+
+## Steps
+
+### 1. TripGenie (real query)
+- Navigate to https://tw.trip.com/ with Playwright (viewport 1280x1400 — use browser_resize).
+- Open TripGenie chat (find the launch button, e.g. via a snapshot with `depth: 6` targeted at the relevant page region to keep tokens low — don't dump full-page snapshots, they're huge and wasteful).
+- To type into the chat textarea and submit efficiently (avoids flaky Playwright locator timeouts), use browser_evaluate with this pattern (adapt the text):
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT HERE';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+Then send via:
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Write the prompt in natural Traditional Chinese describing: dates, party size, daily cap, the two already-visited places (with a believable "I definitely went inside" description) explicitly asking them excluded, the 4 must-visit places, the other candidates including the Gion/Gion-District duplicate and the no-address coffee shop, and ask for a day-by-day itinerary with reasons per stop, and ask explicitly how it handles the duplicate and the no-address item.
+- Wait ~25s with browser_wait_for, then check `document.querySelector('#tripgenie-content').querySelector('.XRLfO')` (or the element itself if no such child) scrollHeight/clientHeight via browser_evaluate, and take enough scrolled screenshots of `#tripgenie-content` (scale css) to cover the full response — save as `screenshots/case06_tripgenie_1.png`, `_2.png`, etc. Re-check scrollHeight after your first screenshot since TripGenie may still be streaming (it often grows) — if it grew, restart your screenshot pass from scrollTop=0 to get clean full coverage.
+- Read each screenshot yourself (Read tool) to actually verify what TripGenie said before writing your findings — do not guess or assume.
+
+### 2. Traivial (real computed harness, no live queries)
+- Look at `case03_traivial_harness.py` (F/duplicate testing pattern) as your template — it directly calls `traivial.itinerary.plan.build_itinerary()` with synthetic Place/VisitVerdict fixtures, no live provider queries.
+- Build `case06_traivial_harness.py`: construct Place objects for all candidates (with real approximate Kyoto lat/lng coordinates — look them up from case03/case04's harnesses which already have coordinates for many of these same Kyoto places, reuse those values for consistency), VisitVerdict list (VISITED for 金閣寺/伏見稻荷大社 with real evidence fields, UNVISITED for the rest), a duplicate pair for 祇園/Gion District (same coordinates, different ids, to test whether the scheduler itself dedupes — per case03's finding it does NOT, confirm this holds again), and a no-coordinate Place (lat=None,lng=None) for the coffee shop (confirm it's excluded via has_coords).
+- Call `build_itinerary(places, verdicts, combo, max_stops_per_day=3, plan_mode="schedule")`, then `build_caveats(...)`.
+- Validate the result against `traivial.server.api_models.ItineraryResponse` (see case01-05 harnesses for the exact pattern: construct a dict matching ItineraryResponse's shape, call `ItineraryResponse.model_validate(result)`).
+- Write the JSON to `case06_traivial.json`.
+- Run it: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case06_traivial_harness.py` and capture the real printed oracle-check output.
+- Render the visual: start (if not already running) `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` in the background, navigate Playwright to `http://127.0.0.1:8090/render_traivial_case.html?file=case06_traivial.json`, screenshot full page to `screenshots/case06_traivial_render.png`.
+
+### 3. Write up
+Append a `### 案例06（京都，5天，情境A/B/F）` section to the end of `trip_com_tool_benchmark_2026-09.md` (use Bash `cat >> ... << 'EOF'` like the existing cases, or Edit tool) following the same structure as prior cases but CONCISE (bullet points, not long prose): 輸入, Oracle預期, TripGenie輸出 (with real findings + screenshot paths), Traivial輸出 (with real findings + json/harness paths), 六項指標, and a short 小結. Be honest — if Traivial fails something (e.g. duplicate handling, like case03 found), say so plainly; if it succeeds, say so; do not soften or oversell either direction.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit with a message summarizing the real finding (not "did the task" — the actual substantive finding). Do NOT run `git push` — the user has explicitly required approval before any push to master in this repo.
+
+### 5. Report back to me (your supervisor)
+In your final message, give me a SHORT summary (under 200 words): what happened in the case, the six-metric scores for both systems, the key finding (if any asymmetry was found), confirmation that screenshots and harness files were actually created and read (not assumed), and the commit hash. I will not re-verify your raw tool output — I'm trusting your report, so be accurate.

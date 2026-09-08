@@ -1,0 +1,17 @@
+## Summary
+
+I've created the verdicts contract test following the established pattern. The test file is now in place and reveals **real drift** between the mock fixture and the API model:
+
+**Test created:** `tests/test_api_contract_mock_verdicts_next.py`
+
+**Real drift found:**
+1. **Status enum mismatch** — Mock uses `"unvisited"` but `VisitStatus` enum expects `"traivial"` (5 verdicts affected)
+2. **Missing required fields** — All 17 verdicts in the mock are missing 2-6 required fields:
+   - `visit_evidence_kind`, `is_inferred_visit`, `needs_confirmation`, `confirmation_reason` (all 17)
+   - `effective_match_radius_meters`, `effective_match_radius_kind` (all 17)
+
+**Test results:**
+- New contract test: FAILED (drift revealed as expected)
+- P1.3 tier suite: 347 passed ✓ (no regression)
+
+Report sent to team-lead with precise file locations and error details for decision on fixing the drift.

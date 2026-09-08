@@ -1,0 +1,10 @@
+Committed locally as `2063c94` (not pushed, per instructions).
+
+**Case 12 (Seoul, 4d, F/G) — done.**
+
+- **TripGenie**: sent real query via browser, waited for streaming to finish (scrollHeight stabilized at 6925), read all 5 screenshots myself (`case12_tripgenie_1.png`–`5.png`). It explicitly answered both asked questions: 梨泰院 correctly kept schedulable ("不會因為軌跡有經過就排除"), and 南山公園/Namsan Park correctly identified as the *same POI* and merged into one stop with stated reasoning. All 3 must-visit places appeared; 西村 was dropped with an explicit reason (redundant with 仁寺洞/益善洞).
+- **Traivial**: ran real `build_itinerary()` harness (`case12_traivial_harness.py` → `case12_traivial.json`, validated against `ItineraryResponse`), rendered visually (`case12_traivial_render.png`). 梨泰院 (PASSED_BY) correctly stayed schedulable, with its evidence note surfaced in the `reason` field. But **南山公園 and Namsan Park were both scheduled as two separate back-to-back stops** — the `reason` field literally logs "距前一站約0.0公里" — confirming no coordinate/semantic dedup exists in the scheduler. Since candidates (11) were under capacity (12) this time, there was no capacity-cutoff coincidence masking it, making this a cleaner confirmation of the gap first flagged in case03/06. All 3 must-visit places covered; no day exceeded 3 stops.
+
+**Six metrics**: both tied on visited-leakage (N/A), must-visit coverage (3/3 both), daily-capacity compliance (0 violations both). Diverged on infeasible-itinerary/manual-fix count: TripGenie=0, Traivial=1 (duplicate stop needs manual merge). Evidence quality: both good, TripGenie's dedup reasoning more sophisticated. UNKNOWN handling: both honest (梨泰院 correctly not treated as visited on both sides) — this is the second case (after case04) where G is a clean tie.
+
+Files: `docs/experiments/trip_com_tool_benchmark_2026-09.md` (append), `docs/experiments/trip_com_tool_benchmark_2026-09/case12_traivial_harness.py`, `case12_traivial.json`, `screenshots/case12_tripgenie_{1..5}.png`, `screenshots/case12_traivial_render.png`.

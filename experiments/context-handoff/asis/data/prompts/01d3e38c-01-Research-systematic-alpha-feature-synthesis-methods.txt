@@ -1,0 +1,19 @@
+Research task only — do not write or edit any code or files. Use WebSearch/WebFetch.
+
+Context: We're building a PIT-correct S&P 500 monthly feature panel + explainable ranking system (already have 42 hand-specified features across momentum/value/quality/leverage/growth/payout/sentiment/insider-flow themes, built from FMP/SEC/FRED data in a SQLite warehouse). The user now wants us to research SYSTEMATIC methods for synthesizing NEW features/alphas from existing raw data, rather than continuing to hand-specify one factor at a time. This is a "go survey the field" request, not an implementation request.
+
+Research these four angles and report findings with paper/tool names and concrete mechanism descriptions (not just abstracts):
+
+1. **Genetic programming / symbolic regression for formulaic alpha mining**: the WorldQuant "101 Formulaic Alphas" tradition, gplearn-style GP, AlphaGen (RL+GP), and any 2025-2026 successors. What operator primitives do they compose (ts_rank, decay_linear, correlation, delta, scale, signedpower, cross-sectional rank, etc.)? How do they search the combinatorial space and prevent overfitting/multiple-testing (deflated Sharpe, IC decay penalties, complexity penalties)?
+
+2. **LLM-driven alpha/feature generation**: AlphaAgent, QuantaAlpha, AlphaLogics, Alpha-R1, and the LLM-based-alpha-mining survey (all found in an earlier search this session — search for 2026 follow-ups too). Specifically: how do they turn raw fields into candidate formulas, how do they validate/filter candidates (IC threshold, correlation to existing factors, economic-rationale check), and what's the human-in-the-loop vs fully-automated split.
+
+3. **Automated/deep feature synthesis for relational + tabular data** (not price-time-series specific): Featuretools "Deep Feature Synthesis" (Kanter & Veeramachaneni), and any quant-finance-specific adaptations — automatically generating aggregation features (count/sum/mean/std/trend) across relational tables (e.g., holdings tables, insider transaction tables, executive comp tables) rather than time-series price operators.
+
+4. **Cross-sectional relative / residual feature construction**: techniques for turning a raw fundamental/event field into an "abnormal" or "surprise" feature via residualization against a peer group or expectation model — e.g. earnings surprise (actual vs consensus), analyst revision surprise, XBRL-based industry-wide percentile ranking (ranking one filer's metric against ALL ~13,000 US filers reporting that XBRL tag that quarter, not just S&P 500 peers), Fama-MacBeth-style orthogonalization to isolate incremental signal after controlling for known factors.
+
+For each angle, note: (a) the core mechanism in 2-4 sentences, (b) what raw inputs it needs, (c) known pitfalls (overfitting, look-ahead risk, multiple-testing/data-snooping bias — cite the deflated Sharpe ratio / Harvey-Liu-Zhu "...and the Cross-Section of Expected Returns" multiple-testing literature if it comes up), (d) how mature/available the tooling is (open-source library name if one exists, e.g. gplearn, featuretools, AlphaGen).
+
+End with a short (5-8 bullet) synthesis: given a warehouse of point-in-time fundamentals, ownership/13F, insider trades, congressional trading, executive compensation, revenue segmentation (product/geographic mix), and SEC XBRL cross-sectional frames (~13,000 US filers per tag per quarter) — which of the four angles above is the highest-leverage next step, and why. Keep the final synthesis concrete and opinionated, not a survey restatement.
+
+Report back in well under 1000 words plus a compact source list (markdown links). This report will be read directly by the user, so make it dense and skimmable, not padded.

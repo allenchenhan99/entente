@@ -1,0 +1,13 @@
+Committed locally (not pushed), commit `91ad208`.
+
+## Case 13 report (Tokyo, 6 days, A/B/D/F)
+
+**TripGenie**: excludes both VISITED places (淺草寺, 澀谷SCRAMBLE), covers all 5 must-visit (5/5), 0 daily-cap violations, 0 manual edits needed. Best-yet handling of the two F-test items: explicitly concluded 豪德寺=Gotokuji Temple with a 3-point reasoning chain plus a reusable general rule, and gave an explicit "won't do" list for the no-name vinyl shop (won't fabricate name/address/precise time), scheduling it as a flexible exploration segment instead.
+
+**Traivial** (real `build_itinerary()`, no live-constraints call — no clock constraints in this case): also 0 VISITED leakage, 5/5 must-visit, no-coord shop correctly excluded with 2 honest caveats (missing coords; confidence below 0.60). But 豪德寺/Gotokuji Temple were both scheduled as separate stops on Day 1, 0.0km apart, no dedup or warning — 3rd independent confirmation (after case03/06, case12) that `build_itinerary()` has no coordinate-based dedup and depends entirely on upstream ingest merging.
+
+Six-metric scores: A/D/no-coord-honesty tie both systems; F (duplicate handling) and evidence-depth favor TripGenie; manual-edit count is 0 (TripGenie) vs ≥1 (Traivial, must manually merge the duplicate).
+
+Evidence created and read: `case13_traivial_harness.py` (ran successfully, oracle checks printed), `case13_traivial.json` (validated against `ItineraryResponse`), `screenshots/case13_traivial_render.png` and `case13_tripgenie_{1..5}.png` (all read via the Read tool to confirm content, including the "距前一站約0.0公里" duplicate evidence and TripGenie's full F/no-coord answer text).
+
+Write-up appended to `docs/experiments/trip_com_tool_benchmark_2026-09.md`, section 7 progress line corrected to reflect actual completed cases (01-13). Commit `91ad208`, not pushed per instructions.

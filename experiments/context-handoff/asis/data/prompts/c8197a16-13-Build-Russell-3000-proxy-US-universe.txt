@@ -1,0 +1,24 @@
+Project: A-D-Aperture "Data" repo at D:\AD (Windows). Server via `ssh lab` (repo lab:~/AD). Python 3.12, stdlib only. Task: build a "Russell-3000 proxy" US equity universe (top 3000 US-listed common stocks by market cap) on the server and load it into ad.sqlite.
+
+KEY FACTS:
+- FMP stable API base `https://financialmodelingprep.com/stable/`. Key is in Infisical; run key-using scripts via:
+  `ssh lab "cd ~/AD && ~/.local/bin/infisical run --projectId 6a1461f2-0bb6-48d4-a9b1-aca30d4aa96a --env prod --silent -- python3 <script> <args>"`
+  Script reads env var `FMP_API_KEY`. NEVER print the key.
+- Endpoint `company-screener` (available on our plan) returns a JSON list of companies with fields including symbol, companyName, marketCap, exchange (or exchangeShortName), sector, industry, country, isEtf, isFund, isActivelyTrading. It accepts query params: country, exchange, isEtf, isFund, isActivelyTrading, marketCapMoreThan, limit (use limit=10000). One call `company-screener?country=US&isEtf=false&isFund=false&isActivelyTrading=true&marketCapMoreThan=1&limit=10000` returns the US common-stock universe (~10000 max).
+- DB engine + conventions: `~/AD/scripts/manage_db.py`, `~/AD/scripts/ad_db.py`; dataset-spec template `D:\AD\scripts\ad_datasets\sp500_corporate_actions.py` (surrogate id pk; source_file relative to data/; Dataset object). Data dir on server is `~/AD/data`.
+
+DELIVERABLE 1 — `D:\AD\scripts\fetch_us_universe.py` (stdlib: argparse, csv, json, os, sys, urllib). Reads FMP_API_KEY from env. Fetches company-screener (params above), then: keep only rows with a numeric marketCap > 0; sort by marketCap DESCENDING; take the top `--top` (default 3000); write CSV to `--out data/universe` -> `us_r3000.csv` with header EXACTLY: rank,symbol,companyName,marketCap,exchange,sector,industry,country (rank = 1..N by market cap; map exchange from exchangeShortName or exchange, missing fields -> empty). Print the total fetched, the count kept, and the top-5 and bottom-5 (symbol, marketCap). `--self-test`: monkeypatch the HTTP call to return a canned 5-row list with varied marketCaps and no network, assert output is sorted desc and rank starts at 1; print SELF-TEST PASS, exit 0.
+
+DELIVERABLE 2 — `D:\AD\scripts\ad_datasets\us_universe.py`: Dataset name `us_universe`, title "US Russell-3000-proxy universe (top 3000 by market cap, FMP)", source "FMP stable company-screener", version "2026-08-27", ONE table `russell3000_proxy` src "universe/us_r3000.csv", surrogate id pk, columns after id: rank(INTEGER coerce="int"), symbol(TEXT), companyName(TEXT), marketCap(REAL coerce="real"), exchange(TEXT), sector(TEXT), industry(TEXT), country(TEXT); indexes ("symbol",),("rank",),("sector",). Docstring: this is the working universe for broad-US data collection; it is a market-cap proxy for Russell 3000 (FMP has no direct russell constituent list).
+
+STEP 3 — deploy + run + build ON THE SERVER:
+  `scp D:\AD\scripts\fetch_us_universe.py lab:~/AD/scripts/` ; `scp D:\AD\scripts\ad_datasets\us_universe.py lab:~/AD/scripts/ad_datasets/`
+  `ssh lab "cd ~/AD && ~/.local/bin/infisical run --projectId 6a1461f2-0bb6-48d4-a9b1-aca30d4aa96a --env prod --silent -- python3 scripts/fetch_us_universe.py --out data/universe --top 3000"`
+  `ssh lab "cd ~/AD && python3 scripts/manage_db.py --db ad.sqlite build us_universe && python3 scripts/manage_db.py --db ad.sqlite verify | tail -3"`
+
+MANDATORY acceptance — run and paste real output:
+  A) `python D:\AD\scripts\fetch_us_universe.py --self-test` -> SELF-TEST PASS, exit 0.
+  B) local import prints `us_universe ['russell3000_proxy']`.
+  C) server build shows russell3000_proxy rows == 3000 (or note if the US universe returned fewer than 3000) and verify prints `all tables consistent with catalog.`
+  D) `ssh lab "cd ~/AD && python3 scripts/manage_db.py --db ad.sqlite query \"SELECT rank,symbol,ROUND(marketCap/1e9,1) capB FROM us_universe__russell3000_proxy ORDER BY rank LIMIT 5\""` — the top-5 must be mega-caps (e.g., NVDA/AAPL/MSFT/GOOGL/AMZN class), confirming market-cap sort is correct.
+Boundaries: create only those two files locally + the scp/ssh actions; never print the API key. If the screener returns < 3000 usable US rows, keep all of them and report the actual count (do not fail). After finishing, INDEPENDENTLY re-run A/B/C/D and report the real output + the final row count and top-5.

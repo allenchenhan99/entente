@@ -1,0 +1,71 @@
+You are executing ONE case of a running benchmark comparing Trip.com's TripGenie AI chat assistant against our own product "Traivial" for trip-itinerary quality. Real evidence only — no fabrication.
+
+Repo root: D:\vscode_python\unvisited
+Benchmark doc (READ FULLY FIRST, especially section 7 methodology and case01-08 for format): D:\vscode_python\unvisited\docs\experiments\trip_com_tool_benchmark_2026-09.md
+Evidence dir: ...\docs\experiments\trip_com_tool_benchmark_2026-09\
+Screenshots dir: ...\screenshots\
+
+Trip.Planner is CONFIRMED BROKEN (CORS bug) — do not test it, TripGenie only. Case06/07/08 writeups are good templates for concise-but-rigorous format. Case08 found a real bug (leaving departure time unset causes Traivial to silently wipe the whole last day as a "departure day" by default) — keep that in mind, this case DOES have an explicit return-time constraint so should not hit that same edge case, but stay alert for similar surprises.
+
+## Your assigned case: Case 09
+
+**City**: Osaka. **Days**: 4 (dates 2026-11-14 to 2026-11-17).
+**Categories**: E (stay-area fixed constraint + return-to-hotel-before-airport requirement), G (passed-by-only place that should NOT be treated as visited).
+**Passed-by (PASSED_BY status, must remain schedulable, NOT excluded)**: 心齋橋 (Shinsaibashi) — describe it as: phone location track shows walking through the shopping street, but only paused ~6 minutes outside a specific core store, not a real stay/visit.
+**Must-visit**: 黑門市場 (Kuromon Market).
+**Stay-area constraint**: hotel must be in 難波 (Namba).
+**Return constraint**: last day (2026-11-17), must check out of the Namba-area hotel and be back there by 12:00 to collect luggage before heading to Kansai airport — nothing should be scheduled after 12:00 on the last day, and ideally the itinerary should account for returning to Namba specifically (not just "some time free").
+**Other candidates (9)**: 大阪城, 道頓堀, 通天閣, 環球影城, 梅田藍天大廈, 四天王寺, 新世界, 中之島公園, 阿倍野HARUKAS展望台.
+**Daily capacity**: 3/day. **Party**: 2 adults.
+
+## Oracle (write down before testing)
+- 心齋橋 must NOT be excluded as if already-visited — it should remain a real candidate for scheduling (this is the G test).
+- 黑門市場 must appear if feasible.
+- Hotel/base area should be Namba throughout.
+- Day 4 (2026-11-17) should have no stops scheduled past 12:00, and ideally none at all given the tight return-to-Namba-by-noon requirement.
+- No day should exceed 3 stops.
+
+## Steps (reuse established method)
+
+### 1. TripGenie (real query)
+- Navigate https://tw.trip.com/, browser_resize 1280x1400, open TripGenie chat (`depth: 6` targeted snapshot for the launcher ref, not full-page dumps).
+- Type+send via browser_evaluate:
+```js
+() => {
+  const ta = document.querySelector('textarea[aria-label="隨便問我關於旅遊的問題"]');
+  const text = 'YOUR PROMPT';
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(ta, text);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  return ta.value.length;
+}
+```
+```js
+() => {
+  const btns = [...document.querySelectorAll('button')];
+  const send = btns.find(b => b.textContent.includes('傳送訊息') || b.getAttribute('aria-label') === '傳送訊息');
+  if (send && !send.disabled) { send.click(); return 'clicked'; }
+  return send ? 'found but disabled' : 'not found';
+}
+```
+- Prompt in natural Traditional Chinese covering: dates, party size, daily cap 3,住宿指定難波, 黑門市場必去, describe 心齋橋 exactly as above ("軌跡顯示走過心齋橋商店街，但只在一間核心店家外停留約6分鐘，不是明確的定點停留，我還是想去心齋橋逛逛" — explicitly say don't treat this as already-visited), the other 9 candidates, "最後一天(2026/11/17)中午12:00前必須退房回到難波取行李再前往關西機場，12點後不要排任何行程", ask for day-by-day with reasons.
+- Wait ~25s, check `#tripgenie-content` scroll container scrollHeight/clientHeight via browser_evaluate (may still be streaming — recheck/restart from top if grown), screenshot scrolled to cover full response as `screenshots/case09_tripgenie_1.png` etc. Read each screenshot yourself before writing findings.
+
+### 2. Traivial (real computed harness)
+- Template: combine case04's PASSED_BY verdict pattern (`matched_segment_ids=[]`, real dwell/distance evidence, `VisitStatus.PASSED_BY`) with case02/05's `apply_live_constraints` departure-day pattern (set `return_departure="12:00"` on the FlightQuote, leave `outbound_arrival` unset since there's no arrival constraint this case — CAUTION from case08's finding: verify Traivial's `apply_live_constraints` correctly treats an unset arrival as "no constraint on day 1" not an accidental full-day wipe; if day 1 gets wiped unexpectedly, investigate why and report it honestly as another finding rather than silently working around it).
+- Real approximate Osaka coordinates (Shinsaibashi ~34.6746,135.5013, Kuromon Market ~34.6656,135.5064, etc).
+- 心齋橋: `VisitStatus.PASSED_BY`, evidence with dwell_minutes=6, matched_segment_ids=[] (movement-track only, no stay segment).
+- base_area="大阪 難波" on the ComboOption; after build_itinerary, set `area_lat`/`area_lng` to real Namba coordinates (~34.6656,135.5012) on every ItineraryDay via replace() before calling apply_live_constraints (required or every day gets wiped — see case02/05 harnesses).
+- `max_stops_per_day=3`, `plan_mode="schedule"`.
+- Validate against `ItineraryResponse`, write `case09_traivial.json`.
+- Run: `cd D:\vscode_python\unvisited && PYTHONPATH=. PYTHONIOENCODING=utf-8 python docs/experiments/trip_com_tool_benchmark_2026-09/case09_traivial_harness.py`, capture real output — report whether 心齋橋 got scheduled (not excluded), whether 黑門市場 survived, and Day 4's actual stop count/timing.
+- Render visual: ensure `python -m http.server 8090 --bind 127.0.0.1 --directory "docs/experiments/trip_com_tool_benchmark_2026-09"` running (start in background if needed), navigate to `http://127.0.0.1:8090/render_traivial_case.html?file=case09_traivial.json`, screenshot to `screenshots/case09_traivial_render.png`.
+
+### 3. Write up
+Append `### 案例09（大阪，4天，情境E/G）` to the benchmark .md, concise bullet format: 輸入, Oracle預期, TripGenie輸出, Traivial輸出, 六項指標, 小結. Be honest — if you hit an unexpected wipe like case08's bug, report it plainly as its own finding, don't hide it inside the writeup as if intended.
+
+### 4. Commit locally (DO NOT PUSH)
+`git add docs/experiments/` then commit describing the actual finding.
+
+### 5. Report back to me (supervisor)
+Under 200 words: what happened, six-metric scores both systems, the key finding (especially re: G-handling of 心齋橋 and the Namba return-by-noon constraint), confirmation screenshots/harness were actually created and read, commit hash.

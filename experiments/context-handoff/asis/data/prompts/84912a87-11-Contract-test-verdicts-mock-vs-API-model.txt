@@ -1,0 +1,13 @@
+Repo: D:\vscode_python\unvisited (Traivial). You may ONLY add a new test file under tests/ (e.g. tests/test_api_contract_mock_verdicts_next.py). Do NOT modify any file under traivial/ or web/ except reading them for reference.
+
+This is P1 item 5 from docs/PRODUCT_COMPLETION_PLAN.md ("API 契約機械化"): "把 web/mock/*.json 納入契約測試...確保 mock fixture 與真實 presenter 不會欄位分岔." This is the `verdicts` endpoint slice (mirrors an already-completed combos-endpoint slice at tests/test_api_contract_mock_combos_next.py — read that file first as a structural template, but adapt to verdicts' actual shape).
+
+Steps:
+1. Read tests/test_api_contract_mock_combos_next.py to see the established pattern for this kind of contract test in this repo.
+2. Check tests/ for whether a verdicts-mock-vs-model contract test already exists (grep "mock/verdicts.json" or "Verdict" related response models in tests/) — if fully covered already, report and stop.
+3. Read web/mock/verdicts.json to see its shape (it may be a bare list or a collection envelope — check web/js/api.js for how the frontend consumes this mock in mock-mode to understand which shape actually matters).
+4. Read traivial/server/api_models.py and grep for "Verdict" related response models, and traivial/server/presenters.py for what shape `/api/verdicts` actually returns in production (this repo has a CollectionEnvelopeResponse pattern used elsewhere — check if verdicts uses that envelope with status/freshness/source_kind fields).
+5. Write a pytest test that validates the mock JSON parses successfully against the real response model(s). If the mock shape genuinely differs from the real model (real drift), do not weaken the test to force a pass — write it to assert reality and report the drift precisely with file:line citations.
+6. Run `python -m pytest <your_new_test_file> -q` and paste actual output. Also run `.\scripts\test.ps1 -Tier p1_3 -q` (PowerShell) to confirm no regression and paste that output.
+
+Report: whether already covered, what you added, actual test output, and any real drift found (report precisely, do not fix it yourself — the main agent will review and decide).

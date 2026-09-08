@@ -1,0 +1,11 @@
+Done. I've created the contract test for the combos endpoint and discovered real mock/model drift:
+
+**Test file created:** `tests/test_api_contract_mock_combos_next.py`
+
+**Drift found:** The mock file is missing 4 required fields from the CombosResponse model:
+- `failures`
+- `stay_is_synthetic`
+- `flight_is_synthetic`
+- `is_trustworthy`
+
+The test accurately reports these exact mismatches without masking them. P1.3 regression suite confirms no breakage (347 tests pass).
